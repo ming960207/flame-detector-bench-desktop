@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import type { FieldStatusRuntime, FieldStatusSummary } from './closure/field-status-server.js';
 import { MQTTPublisher, normalizeMQTTConfig } from './mqtt-publisher.js';
+import { requireDesktopMutation } from './request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
 import type { TestProgramArchive } from './test-program/test-program-types.js';
@@ -47,10 +48,6 @@ function explicitEnvMQTTOverrides(): Record<string, unknown> {
   return result;
 }
 
-/**
- * Start observation/upload services on the already-running field backend.
- * There is exactly one HTTP/WS listener and exactly one PLC/flame device stack.
- */
 export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRuntime): Promise<UnifiedAuxiliaryRuntime> {
   const backendUrl = localBackendUrl();
   const testProgram = mountTestProgramRoutes(fieldRuntime.app, {
@@ -108,7 +105,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
   fieldRuntime.app.get('/api/mqtt/config', (_req, res) => {
     res.json({ success: true, config: publisher.getPublicConfig() });
   });
-  fieldRuntime.app.put('/api/mqtt/config', async (req, res) => {
+  fieldRuntime.app.put('/api/mqtt/config', requireDesktopMutation, async (req, res) => {
     try {
       const next = normalizeMQTTConfig(req.body, publisher.getConfig());
       publisher.updateConfig(next);
