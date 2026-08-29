@@ -1,6 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
-import { createServer, type Server } from 'http';
+import { createServer } from 'http';
 import { type AddressInfo } from 'net';
 import {
   config,
@@ -25,6 +25,7 @@ import {
   normalizeDetectionQualityConfig,
 } from './field-waveform-analysis.js';
 import { loadPLCConfigs, mergeWithDefaults } from '../plc-config-store.js';
+import { requireDesktopMutation } from '../request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from '../system-config-store.js';
 import {
   captureInspectionPosition,
@@ -94,7 +95,6 @@ function boundedNumber(value: unknown, fallback: number, min: number, max: numbe
   return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
-/** 只接收设备配置字段，避免配置接口成为任意对象写入入口。 */
 export function normalizeFlameConfig(input: unknown, current: FlameConfig): FlameConfig {
   const source = isRecord(input) ? input : {};
   const inputUnits = Array.isArray(source.units) ? source.units : [];
@@ -175,19 +175,10 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
   };
 }
 
-/**
- * The stored configuration is also used by the legacy Modbus control screen.
- * Field monitoring must always observe the S7 process registers over port 102,
- * without rewriting that operator-maintained configuration on disk.
- */
 export function selectFieldPLCProcessObserver(plcs: PLCDeviceConfigLocal[]): PLCDeviceConfigLocal {
   const configured = plcs.find((plc) => plc.enabled && plc.mode === 'S7') ?? plcs.find((plc) => plc.enabled) ?? plcs[0];
   if (!configured) throw new Error('PLC_PROCESS_STATUS_CONFIG_MISSING');
-  return {
-    ...configured,
-    mode: 'S7',
-    port: 102,
-  };
+  return { ...configured, mode: 'S7', port: 102 };
 }
 
 export function createFieldStatusRuntime(
@@ -249,27 +240,18 @@ export function createFieldStatusRuntime(
   source.on('status', (status: PLCProcessStatus) => {
     const previousStage = currentStatus?.processStage;
     const previousBatchId = waveformAnalysisState.batchId;
-    const heatInterferenceStarted = status.io?.steps?.stepM10_4 === true
-      && currentStatus?.io?.steps?.stepM10_4 !== true;
-    const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true
-      && currentStatus?.io?.steps?.stepM10_4 === true;
-    const flashStarted = status.io?.steps?.stepM11_0 === true
-      && currentStatus?.io?.steps?.stepM11_0 !== true;
-    const flashCompleted = status.io?.steps?.stepM11_0 !== true
-      && currentStatus?.io?.steps?.stepM11_0 === true;
+    const heatInterferenceStarted = status.io?.steps?.stepM10_4 === true && currentStatus?.io?.steps?.stepM10_4 !== true;
+    const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true && currentStatus?.io?.steps?.stepM10_4 === true;
+    const flashStarted = status.io?.steps?.stepM11_0 === true && currentStatus?.io?.steps?.stepM11_0 !== true;
+    const flashCompleted = status.io?.steps?.stepM11_0 !== true && currentStatus?.io?.steps?.stepM11_0 === true;
     currentStatus = status;
     const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
-      && previousStage !== 'FLASH'
-      && previousStage !== 'EMC';
+      && previousStage !== 'FLASH' && previousStage !== 'EMC';
     waveformAnalysis.observeProcess(status);
     waveformAnalysisState = waveformAnalysis.snapshot();
     const batchStarted = waveformAnalysisState.batchId !== previousBatchId;
-    if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) {
-      detectors.clearWaveformHistory?.();
-    }
-    if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) {
-      resetInspectionPositions(waveformAnalysisState.batchId);
-    }
+    if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
+    if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (heatInterferenceStarted) positionStartedAt.set('DETECTION_POSITION_1_HEAT', status.timestamp);
     if (flashStarted) positionStartedAt.set('DETECTION_POSITION_2_FLASH', status.timestamp);
     if (heatInterferenceCompleted) {
@@ -329,7 +311,14 @@ export function createFieldStatusRuntime(
 
   app.get('/api/health', (_req, res) => res.json({
     status: 'ok',
-    mode: 'field-status-readonly',
+    mode: 'field-plc-readonly',
+    capabilities: {
+      plcWrite: false,
+      detectorConfig: true,
+      detectorReadonlyAutoTest: true,
+      testObserver: true,
+      mqttUpload: true,
+    },
     plcConnected: source.isConnected(),
     detectorConnected: detectorDataStreamConnected(),
     detectorTransportConnected: detectorTransportConnected(),
@@ -346,10 +335,8 @@ export function createFieldStatusRuntime(
     const current = detectors.getConfig?.() ?? config.flame;
     res.json({ success: true, config: current });
   });
-  app.put('/api/flame/config', async (req, res) => {
-    if (!detectors.updateConfig || !detectors.getConfig) {
-      return res.status(501).json({ code: 'FLAME_CONFIG_UNSUPPORTED' });
-    }
+  app.put('/api/flame/config', requireDesktopMutation, async (req, res) => {
+    if (!detectors.updateConfig || !detectors.getConfig) return res.status(501).json({ code: 'FLAME_CONFIG_UNSUPPORTED' });
     const next = normalizeFlameConfig(req.body, detectors.getConfig());
     try {
       await detectors.disconnect();
@@ -368,7 +355,7 @@ export function createFieldStatusRuntime(
       return res.status(500).json({ code: 'FLAME_CONFIG_UPDATE_FAILED', error: error?.message || String(error) });
     }
   });
-  app.post('/api/flame/auto-test', async (req, res) => {
+  app.post('/api/flame/auto-test', requireDesktopMutation, async (req, res) => {
     if (!detectors.runAutoTest) return res.status(501).json({ code: 'FLAME_AUTO_TEST_UNSUPPORTED' });
     try {
       const report = await detectors.runAutoTest((progress) => {
@@ -422,6 +409,6 @@ export async function startFieldStatusServer(): Promise<FieldStatusRuntime> {
   config.flame = normalizeFlameConfig(savedFlameConfig, config.flame);
   const runtime = createFieldStatusRuntime();
   const port = await runtime.listen();
-  console.log(`[现场状态] 已启动只读 PLC 工序状态服务：http://127.0.0.1:${port}`);
+  console.log(`[现场状态] 已启动 PLC 只读工序监测与探测器服务：http://127.0.0.1:${port}`);
   return runtime;
 }
