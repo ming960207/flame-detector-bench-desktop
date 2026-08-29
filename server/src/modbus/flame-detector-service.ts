@@ -10,6 +10,14 @@ import { EventEmitter } from 'events';
 import { DEFAULT_FLAME_POLL_INTERVAL_MS, MAX_FLAME_POLL_INTERVAL_MS, FlameConfig, FlameUnitConfig } from '../config.js';
 import { FlameDetectorUnitState, FlameDetectorState, FlameFeature, FlameSample } from '../types.js';
 import {
+  formatSoftwareVersion,
+  selectedProductProfile,
+  softwareVersionMatches,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+  type ProductPrecheckUnitResult,
+} from '../product-profile.js';
+import {
   FlameDetectorDevice,
   getRawTcpSocket,
   isRawTcpClient,
@@ -35,7 +43,6 @@ import {
   type FlameDetectorProcessLock,
 } from './flame-detector-process-lock.js';
 
-// 尚未解析到合法波形时持续重发发送模式帧，避免设备只回 ACK 但仍不推流。
 const SEND_MODE_BROADCAST_RETRY_INTERVAL_MS = 250;
 const TCP_RECONNECT_INTERVAL_MS = 250;
 const TCP_CONNECT_TIMEOUT_MS = 750;
@@ -43,12 +50,11 @@ const DEVICE_REQUEST_TIMEOUT_MS = 700;
 const CLIENT_CLOSE_TIMEOUT_MS = 1000;
 const AUTO_TEST_RECONNECT_WAIT_MS = 1000;
 const AUTO_TEST_MAX_ATTEMPTS = 4;
-// 现场探测器在确认模式切换后可能需要数秒才进入稳定连续推流。
-// 过早重发 FF 会再次打断启动过程，形成“切换成功但始终无波形”的循环。
 const WAVEFORM_STALE_TIMEOUT_MS = 10000;
 const WAVEFORM_STATE_BROADCAST_INTERVAL_MS = 50;
 const TCP_INITIALIZE_STAGGER_MS = 250;
 const SEND_MODE_RETRY_MAX_INTERVAL_MS = 5000;
+const PRECHECK_DRAIN_DELAY_MS = 150;
 
 interface SocketBinding {
   socket: RawTcpSocket;
@@ -81,8 +87,6 @@ async function createClient(unit: FlameUnitConfig, global: FlameConfig): Promise
   if (mode === 'TCP') {
     const host = unit.tcpHost ?? global.ip;
     const port = unit.tcpPort ?? global.port;
-    // 火焰探测器端口是串口服务器的原始 RTU 字节流，不能使用
-    // modbus-serial.connectTCP()，否则请求会被自动加上 MBAP 头。
     return connectRawTcpClient(host, port, TCP_CONNECT_TIMEOUT_MS);
   }
 
@@ -174,6 +178,7 @@ export class FlameDetectorService extends EventEmitter {
   private reconnectingUnits = new Set<number>();
   private polling = false;
   private autoTesting = false;
+  private inspectionPreparing = false;
   private disposed = false;
   private closing = false;
   private lastError = '';
@@ -196,12 +201,16 @@ export class FlameDetectorService extends EventEmitter {
   private lastStateBroadcastAt = 0;
   private processLock: FlameDetectorProcessLock | null = null;
   private readonly processLockPath: string;
+  private readonly deferWaveformUntilInspection: boolean;
+  private waveformStreamingArmed = false;
   private lifecycleGeneration = 0;
 
-  constructor(config: FlameConfig, options: { lockPath?: string } = {}) {
+  constructor(config: FlameConfig, options: { lockPath?: string; deferWaveformUntilInspection?: boolean } = {}) {
     super();
     this.config = config;
     this.processLockPath = options.lockPath ?? defaultFlameDetectorProcessLockPath();
+    this.deferWaveformUntilInspection = options.deferWaveformUntilInspection === true;
+    this.waveformStreamingArmed = !this.deferWaveformUntilInspection;
     this.initUnits();
   }
 
@@ -257,6 +266,10 @@ export class FlameDetectorService extends EventEmitter {
 
   getConfig(): FlameConfig {
     return JSON.parse(JSON.stringify(this.config)) as FlameConfig;
+  }
+
+  isWaveformStreamingArmed(): boolean {
+    return this.waveformStreamingArmed;
   }
 
   clearWaveformHistory(): void {
@@ -372,7 +385,7 @@ export class FlameDetectorService extends EventEmitter {
           if (!this.attachPushListener(unit, existing.client)) throw new Error('探测器 TCP 原始监听器创建失败');
         }
         this.markTransportConnected(unit);
-        if (isTcp) void this.initializeUnit(unit, existing.client);
+        if (isTcp && this.waveformStreamingArmed) void this.initializeUnit(unit, existing.client);
         return { ok: true, key, error: '' };
       } catch (error: any) {
         existing.ok = false;
@@ -396,7 +409,7 @@ export class FlameDetectorService extends EventEmitter {
         throw new Error('探测器 TCP 原始监听器创建失败');
       }
       this.markTransportConnected(unit);
-      if (isTcp) void this.initializeUnit(unit, client);
+      if (isTcp && this.waveformStreamingArmed) void this.initializeUnit(unit, client);
       console.log(`[FlameService] 连接成功: ${key}`);
       return { ok: true, key, error: '' };
     } catch (error: any) {
@@ -485,8 +498,145 @@ export class FlameDetectorService extends EventEmitter {
       : SEND_MODE_BROADCAST_VALUE;
   }
 
+  async stopWaveformStreaming(): Promise<void> {
+    this.waveformStreamingArmed = false;
+    for (const unit of this.config.units) {
+      if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
+      this.stopBroadcastModeRequests(unit.index);
+      this.broadcastModeRetryAttempts.delete(unit.index);
+      this.broadcastModeUnits.delete(unit.index);
+      const watchdog = this.waveformWatchdogTimers.get(unit.index);
+      if (watchdog) clearTimeout(watchdog);
+      this.waveformWatchdogTimers.delete(unit.index);
+      this.lastPushAt.delete(unit.index);
+      const entry = this.pool.get(connKey(unit, this.config));
+      const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+      if (entry?.ok) {
+        try {
+          await this.getDevice(unit, entry.client).setSendMode(0);
+        } catch (error) {
+          console.warn(`[FlameService] 设备 ${unit.index} 停止波形发送未确认:`, error instanceof Error ? error.message : String(error));
+        }
+      }
+      state.sendMode = 0;
+      state.online = false;
+      state.sourceReady = false;
+      state.syncOk = false;
+      state.lastUpdate = Date.now();
+      this.units.set(unit.index, state);
+    }
+    if (this.config.units.some((unit) => unit.enabled && (unit.connMode ?? this.config.mode) === 'TCP')) {
+      await new Promise((resolve) => setTimeout(resolve, PRECHECK_DRAIN_DELAY_MS));
+    }
+    this.broadcastStateNow();
+  }
+
+  async startWaveformStreaming(): Promise<void> {
+    this.waveformStreamingArmed = true;
+    for (const unit of this.config.units) {
+      if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
+      const entry = this.pool.get(connKey(unit, this.config));
+      if (!entry?.ok) continue;
+      await this.initializeUnit(unit, entry.client);
+      await new Promise((resolve) => setTimeout(resolve, TCP_INITIALIZE_STAGGER_MS));
+    }
+  }
+
+  async runProductPrecheck(productConfig: ProductDetectionConfig, batchId: string | null = null): Promise<ProductPrecheckReport> {
+    if (this.inspectionPreparing) throw new Error('PRODUCT_PRECHECK_BUSY');
+    this.inspectionPreparing = true;
+    const startedAt = Date.now();
+    const profile = selectedProductProfile(productConfig);
+    const wasPolling = this.pollTimer !== null;
+    this.stopPolling();
+    const units: ProductPrecheckUnitResult[] = [];
+
+    try {
+      await this.stopWaveformStreaming();
+      for (const unit of this.config.units) {
+        if (!unit.enabled) continue;
+        const checkedAt = Date.now();
+        const base: ProductPrecheckUnitResult = {
+          index: unit.index,
+          address: unit.address,
+          productType: productConfig.selectedType,
+          expectedSoftwareVersion: profile.expectedSoftwareVersion,
+          actualSoftwareVersion: null,
+          expectedProbeCount: profile.expectedProbeCount,
+          actualProbeCount: null,
+          fireAlarm: null,
+          fault: null,
+          checkedAt,
+          verdict: 'PENDING',
+          reasons: [],
+        };
+        const entry = this.pool.get(connKey(unit, this.config));
+        if (!entry?.ok) {
+          units.push({ ...base, verdict: 'FAIL', reasons: ['PRECHECK_READ_FAILED'] });
+          continue;
+        }
+        const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+        try {
+          const device = this.getDevice(unit, entry.client);
+          const actualSoftwareVersion = await device.readSoftwareVersion();
+          const alarm = await device.readAlarmStatus();
+          const actualProbeCount = await device.readProbeCount();
+          const reasons: string[] = [];
+          if (!profile.expectedSoftwareVersion.trim()) reasons.push('SOFTWARE_VERSION_NOT_CONFIGURED');
+          else if (!softwareVersionMatches(profile.expectedSoftwareVersion, actualSoftwareVersion)) reasons.push('SOFTWARE_VERSION_MISMATCH');
+          if (actualProbeCount !== profile.expectedProbeCount) reasons.push('PROBE_COUNT_MISMATCH');
+          if (alarm.fault) reasons.push('DETECTOR_FAULT_AT_PRECHECK');
+
+          state.version = formatSoftwareVersion(actualSoftwareVersion);
+          state.probeCount = actualProbeCount;
+          state.fire = alarm.fireAlarm;
+          state.fault = alarm.fault;
+          state.protocol = device.getProtocolProfile().id;
+          state.lastError = reasons.length > 0 ? reasons.join('; ') : undefined;
+          state.lastUpdate = checkedAt;
+          this.units.set(unit.index, state);
+
+          units.push({
+            ...base,
+            actualSoftwareVersion: formatSoftwareVersion(actualSoftwareVersion),
+            actualProbeCount,
+            fireAlarm: alarm.fireAlarm,
+            fault: alarm.fault,
+            verdict: reasons.length > 0 ? 'FAIL' : 'PASS',
+            reasons,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.lastError = message;
+          state.lastUpdate = checkedAt;
+          this.units.set(unit.index, state);
+          units.push({ ...base, verdict: 'FAIL', reasons: ['PRECHECK_READ_FAILED'] });
+        }
+      }
+
+      const completedAt = Date.now();
+      const report: ProductPrecheckReport = {
+        batchId,
+        productType: productConfig.selectedType,
+        productLabel: profile.label,
+        expectedSoftwareVersion: profile.expectedSoftwareVersion,
+        expectedProbeCount: profile.expectedProbeCount,
+        startedAt,
+        completedAt,
+        verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
+        units,
+      };
+      this.broadcastStateNow();
+      await this.startWaveformStreaming();
+      return report;
+    } finally {
+      this.inspectionPreparing = false;
+      if (wasPolling && this.isTransportConnected()) this.startPolling();
+    }
+  }
+
   private async pollAll(): Promise<void> {
-    if (this.polling || this.autoTesting) return;
+    if (this.polling || this.autoTesting || this.inspectionPreparing) return;
     this.polling = true;
     try {
       for (const unit of this.config.units) {
@@ -504,10 +654,7 @@ export class FlameDetectorService extends EventEmitter {
   private async pollUnit(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<void> {
     if (this.initializingUnits.has(unit.index)) return;
     if ((unit.connMode ?? this.config.mode) === 'TCP') {
-      if (!this.broadcastModeUnits.has(unit.index)) void this.initializeUnit(unit, client);
-      // 现场 TCP 端口是串口服务器的原始字节流：发送 FF 切换指令后，
-      // 后续以 5A A5 推流为唯一实时数据来源。不能在同一 socket 上再发
-      // Modbus TCP/MBAP 轮询，否则会把错误协议写入波形流并触发超时。
+      if (this.waveformStreamingArmed && !this.broadcastModeUnits.has(unit.index)) void this.initializeUnit(unit, client);
       return;
     }
     if (Date.now() - (this.lastPushAt.get(unit.index) ?? 0) < 5000) return;
@@ -519,8 +666,6 @@ export class FlameDetectorService extends EventEmitter {
       state.online = true;
       state.fire = alarm.fireAlarm;
       state.fault = alarm.fault;
-      // 旧探测器协议以 A000/A001 提供报警/故障，不提供当前项目早期的线圈位。
-      // 读取到完整实时块即视为光源与同步链路已建立，未知状态不会被提升为 PASS。
       state.sourceReady = true;
       state.syncOk = true;
       state.sensitivity = params.sensitivity;
@@ -536,8 +681,6 @@ export class FlameDetectorService extends EventEmitter {
       state.lastUpdate = Date.now();
       this.units.set(unit.index, state);
     } catch (error: any) {
-      // 设备处于主动波形推送时，Modbus 参数轮询可能被固件暂时拒绝/超时。
-      // 只要最近仍收到合法推流，就以推流作为在线与同步状态来源，不能用轮询超时覆盖它。
       const lastPush = this.lastPushAt.get(unit.index) ?? 0;
       const pushGrace = Math.max(15_000, (this.config.pollIntervalMs ?? 2000) * 3);
       const pushIsRecent = lastPush > 0 && Date.now() - lastPush <= pushGrace;
@@ -570,7 +713,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private scheduleBroadcastModeRetry(unit: FlameUnitConfig, client: FlameDetectorClient): void {
-    if (this.disposed || this.closing || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return;
+    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return;
     if (this.broadcastModeRetryTimers.has(unit.index) || this.broadcastModeRequestInFlight.has(unit.index)) return;
     const attempt = (this.broadcastModeRetryAttempts.get(unit.index) ?? 0) + 1;
     this.broadcastModeRetryAttempts.set(unit.index, attempt);
@@ -586,7 +729,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private async sendBroadcastModeRequest(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<boolean> {
-    if (this.disposed || this.closing || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return false;
+    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return false;
     const inFlightClient = this.broadcastModeRequestInFlight.get(unit.index);
     if (inFlightClient === client) return false;
     if (inFlightClient && !this.isCurrentClient(unit, inFlightClient)) this.broadcastModeRequestInFlight.delete(unit.index);
@@ -597,8 +740,6 @@ export class FlameDetectorService extends EventEmitter {
     console.log(`[FlameService] 设备 ${unit.index} 发送波形模式切换请求 (模式 ${sendMode}, 尝试 ${(this.broadcastModeRetryAttempts.get(unit.index) ?? 0) + 1})`);
     try {
       const device = this.getDevice(unit, client);
-      // ACK 只证明设备收到了写入请求，不证明已经开始推送波形；在解析到
-      // 合法波形前必须保留重试状态，才能覆盖“有 ACK、无波形”的现场情况。
       await device.sendBroadcastSendMode({
         mode: sendMode,
         attempts: 1,
@@ -619,8 +760,6 @@ export class FlameDetectorService extends EventEmitter {
       const lastPush = this.lastPushAt.get(unit.index) ?? 0;
       const waveformIsRecent = lastPush > 0 && Date.now() - lastPush <= this.waveformStaleTimeoutMs();
       if (waveformIsRecent) {
-        // 现场设备可能不会返回发送模式写入的 Modbus ACK。
-        // 已经收到合法波形时，ACK 超时只能说明模式确认缺失，不能覆盖真实数据流状态。
         state.sendMode = sendMode;
         state.online = true;
         state.sourceReady = true;
@@ -638,26 +777,23 @@ export class FlameDetectorService extends EventEmitter {
       return false;
     } finally {
       if (this.broadcastModeRequestInFlight.get(unit.index) === client) this.broadcastModeRequestInFlight.delete(unit.index);
-      if (this.broadcastModeRequestingUnits.has(unit.index) && this.isCurrentClient(unit, client)) this.scheduleBroadcastModeRetry(unit, client);
+      if (this.waveformStreamingArmed && this.broadcastModeRequestingUnits.has(unit.index) && this.isCurrentClient(unit, client)) this.scheduleBroadcastModeRetry(unit, client);
       this.emit('unit_update', state);
     }
   }
 
   private scheduleWaveformWatchdog(unit: FlameUnitConfig, client: FlameDetectorClient): void {
-    // 不要在每个高频波形帧上清除并创建新定时器；只保留一个检查点，
-    // 回调按 lastPushAt 计算剩余时间，既降低事件循环压力，也不会放宽
-    // “ACK 后或最后一帧后 750ms 内判定断流”的时限。
-    if (!this.isCurrentClient(unit, client) || this.waveformWatchdogTimers.has(unit.index)) return;
+    if (!this.waveformStreamingArmed || !this.isCurrentClient(unit, client) || this.waveformWatchdogTimers.has(unit.index)) return;
     const timeout = this.waveformStaleTimeoutMs();
     const timer = setTimeout(() => {
       this.waveformWatchdogTimers.delete(unit.index);
-      if (!this.isCurrentClient(unit, client)) return;
+      if (!this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
       const lastPush = this.lastPushAt.get(unit.index) ?? 0;
       const age = lastPush > 0 ? Date.now() - lastPush : timeout;
       if (lastPush > 0 && age < timeout) {
         const nextTimer = setTimeout(() => {
           this.waveformWatchdogTimers.delete(unit.index);
-          if (!this.isCurrentClient(unit, client)) return;
+          if (!this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
           const latestPush = this.lastPushAt.get(unit.index) ?? 0;
           if (latestPush > 0 && Date.now() - latestPush < timeout) {
             this.scheduleWaveformWatchdog(unit, client);
@@ -674,19 +810,15 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private handleWaveformStale(unit: FlameUnitConfig, client: FlameDetectorClient): void {
-    if (this.disposed || this.closing || !this.isCurrentClient(unit, client)) return;
-    // 探测器断电/重接时，串口服务器的 TCP 会话可能不断开。
-    // 此时必须在当前 socket 上重新切换连续发送模式；请求会
-    // 串行执行，并在解析到新波形后停止重试。
+    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
     this.stopBroadcastModeRequests(unit.index);
     this.broadcastModeRequestingUnits.add(unit.index);
     this.setUnitOffline(unit, '实时波形流超时，正在重新切换发送模式');
     void this.initializeUnit(unit, client);
   }
 
-  /** 连接成功后发送一次受确认的模式切换握手，再监听 TCP 原始波形流。 */
   private async initializeUnit(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<void> {
-    if (!this.isCurrentClient(unit, client)) return;
+    if (!this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
     if (this.initializingUnits.get(unit.index) === client) return;
     this.initializingUnits.set(unit.index, client);
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
@@ -779,7 +911,6 @@ export class FlameDetectorService extends EventEmitter {
     this.waveformWatchdogTimers.delete(unitIndex);
   }
 
-  /** 仅处理串口服务器 TCP 会话本身异常；波形流超时不会进入这里。 */
   private handleTcpSocketUnavailable(unit: FlameUnitConfig, client: FlameDetectorClient, error: string): void {
     if (this.disposed || this.closing) return;
     console.log(`[FlameService] 设备 ${unit.index} TCP Socket 不可用: ${error}`);
@@ -956,11 +1087,6 @@ export class FlameDetectorService extends EventEmitter {
     this.emit('flame_state', this.createState());
   }
 
-  /**
-   * 波形帧可能高频到达；状态推送按 50ms 合并，每次发布该时刻的最新采样，
-   * 六台设备的完整历史，阻塞采集线程和浏览器渲染线程。断连状态使用
-   * broadcastStateNow()，因此仍会立即通知前端。
-   */
   private broadcastState(): void {
     if (this.disposed || this.closing) return;
     const elapsed = Date.now() - this.lastStateBroadcastAt;
@@ -990,12 +1116,10 @@ export class FlameDetectorService extends EventEmitter {
     return this.createState();
   }
 
-  /** 串口服务器 TCP 会话是否存在；不代表探测器已经输出波形。 */
   isTransportConnected(): boolean {
     return this.config.units.some((unit) => unit.enabled && this.pool.get(connKey(unit, this.config))?.ok === true);
   }
 
-  /** 探测器是否仍在输出最近的合法 5A A5 波形帧。 */
   isDataStreamConnected(): boolean {
     const now = Date.now();
     return this.config.units.some((unit) => {
@@ -1009,7 +1133,6 @@ export class FlameDetectorService extends EventEmitter {
     });
   }
 
-  /** 对外的“探测器连接”状态严格按真实波形数据流判定。 */
   isConnected(): boolean { return this.isDataStreamConnected(); }
   getLastError(): string { return this.lastError; }
 
@@ -1023,7 +1146,6 @@ export class FlameDetectorService extends EventEmitter {
     const transportConnected = this.isTransportConnected();
     const dataStreamConnected = this.isDataStreamConnected();
     return {
-      // 保持兼容：connected 表示探测器数据链路，不是串口服务器 TCP 会话。
       connected: dataStreamConnected,
       transportConnected,
       dataStreamConnected,
@@ -1122,7 +1244,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   async runAutoTest(onProgress?: (progress: AutoTestProgress) => void, options: { enabledStepKeys?: string[] } = {}): Promise<AutoTestReport> {
-    if (this.autoTesting) throw new Error('自动检测正在运行');
+    if (this.autoTesting || this.inspectionPreparing) throw new Error('自动检测正在运行');
     const enabled = this.config.units.filter((unit) => unit.enabled);
     if (enabled.length === 0) throw new Error('没有启用的设备');
     const start = new Date();
