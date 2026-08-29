@@ -242,7 +242,8 @@ export const config: AppConfig = {
   pollIntervalDI: parseInt(process.env.POLL_INTERVAL_DI || '200', 10),
   doRelations: { interlocks: [], associations: [], linkages: [] },
   mqttConfig: {
-    mqttEnabled: process.env.MQTT_ENABLED !== 'false',
+    // External publishing is opt-in. A persisted config can enable it later.
+    mqttEnabled: process.env.MQTT_ENABLED === 'true',
     brokerUrl: process.env.MQTT_BROKER_URL || DEFAULT_MQTT_BROKER,
     topic: process.env.MQTT_TOPIC || undefined,
     clientId: process.env.MQTT_CLIENT_ID || undefined,
