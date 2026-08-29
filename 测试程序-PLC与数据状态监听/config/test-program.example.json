@@ -1,0 +1,6 @@
+{
+  "frontendPort": 3005,
+  "backendPort": 3004,
+  "formalBackendUrl": "http://127.0.0.1:3003",
+  "formalBackendWsUrl": "ws://127.0.0.1:3003"
+}

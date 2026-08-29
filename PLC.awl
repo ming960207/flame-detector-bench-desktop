@@ -1,0 +1,1029 @@
+ORGANIZATION_BLOCK MAIN:OB1
+TITLE=程序注释
+// VERTICAL_LIMIT_MAP: upper=I0.3, lower=I0.4; baseline retains timer-based completion.
+BEGIN
+Network 1 
+// 程序段注释
+LD     I1.0
+=      M0.3
+Network 2 
+LDN    I1.0
+O      M2.0
+=      M1.0
+Network 3 
+LDN    I1.0
+=      M20.0
+Network 4 
+LD     M20.0
+=      M0.2
+Network 13 
+LD     M1.0
+R      M0.0, 1
+Network 14 
+LD     M1.0
+R      M10.0, 12
+R      M11.4, 1
+R      M13.0, 8
+R      M14.0, 8
+R      M15.0, 4
+R      M15.4, 4
+Network 15 
+LD     M1.0
+R      M12.0, 10
+Network 16 
+LD     M1.0
+R      M21.0, 8
+R      M22.0, 12
+R      M29.0, 8
+R      M30.0, 8
+R      Q0.0, 8
+R      Q1.0, 4
+Network 17 
+LD     M1.0
+MOVW   +0, VW600
+Network 18 
+LD     M1.0
+MOVW   +0, VW602
+Network 19 
+LD     M2.3
+AN     M1.5
+=      M1.6
+Network 20 
+LD     M2.3
+=      M1.5
+Network 21 
+LD     M1.6
+A      M2.4
+A      M0.3
+=      M1.7
+Network 22 
+LD     M1.6
+A      M0.3
+AN     M0.2
+AN     M0.0
+O      M1.7
+// I1.3 positive edge starts the automatic process through the normal safety gate.
+LD     I1.3
+EU
+A      M0.3
+AN     M0.2
+AN     M0.0
+OLD
+=      M1.2
+Network 23 
+LD     M1.2
+S      M0.0, 1
+Network 24 
+LD     M1.2
+R      M0.1, 1
+Network 25 
+LD     M1.2
+R      M10.0, 12
+R      M11.4, 1
+R      M13.0, 8
+R      M14.0, 8
+R      M15.0, 4
+R      M15.4, 4
+Network 26 
+LD     M1.2
+R      M2.0, 1
+Network 27 
+LD     M1.2
+R      M21.0, 8
+R      M29.0, 8
+R      M30.0, 8
+R      Q0.0, 8
+R      Q1.0, 4
+Network 28 
+LD     M1.2
+R      M22.0, 12
+Network 29 
+LD     M1.2
+S      M10.0, 1
+S      M29.2, 1
+Network 30 
+LD     M1.2
+MOVW   +1, VW600
+Network 31 
+LD     M1.2
+MOVW   +1, VW602
+Network 32 
+LD     M10.1
+O      M10.2
+O      M10.6
+R      Q0.6, 1
+S      M29.0, 1
+Network 33 
+// Vertical initialization: run upward for 2s, then overlap horizontal homing for 8s.
+LD     M10.0
+TON    T44, +20
+Network 34 
+LD     T44
+=      M12.0
+Network 35 
+LD     M10.1
+A      I0.0
+=      M12.1
+Network 36 
+LD     M10.2
+A      I0.2
+=      M12.2
+Network 37 
+LD     M10.3
+TON    T45, +100
+Network 38 
+LD     T45
+=      M12.3
+Network 39 
+LD     M10.5
+TON    T46, +100
+Network 40 
+LD     T46
+=      M12.5
+Network 41 
+LD     M10.6
+A      I0.1
+=      M12.6
+Network 42 
+LD     M10.7
+TON    T47, +100
+Network 43 
+LD     T47
+=      M12.7
+Network 44 
+LD     M14.0
+TON    T48, +80
+Network 45 
+LD     M14.1
+TON    T49, +10
+Network 46 
+LD     M14.2
+TON    T50, +10
+Network 47 
+// Dedicated 30s baseline-noise capture timer after the signal stabilization gate.
+LD     M25.2
+TON    T51, +300
+Network 48 
+LD     M14.4
+A      M15.3
+TON    T52, +10
+// Global vertical-up overlap gate: horizontal/vertical overlap is allowed after 2s.
+LD     M29.2
+TON    T62, +20
+// Heat position: stabilize for 30s, then publish a dedicated 30s noise window.
+LD     M15.0
+TON    T63, +300
+LD     T63
+A      M15.0
+=      M25.2
+// Flash position keeps its independent 10s stabilization delay.
+LD     M15.1
+TON    T38, +100
+Network 49 
+LD     M12.0
+R      M10.0, 1
+Network 50 
+LD     M12.0
+S      M14.0, 1
+S      M10.1, 1
+S      M29.0, 1
+Network 51 
+LD     T48
+R      M14.0, 1
+R      M29.2, 1
+Network 52 
+LD     T48
+R      Q0.6, 1
+Network 53 
+LD     M12.0
+S      M22.0, 1
+Network 54 
+LD     M12.0
+MOVW   +1, VW602
+Network 55 
+LD     M12.1
+R      M10.1, 1
+R      M29.0, 1
+Network 56 
+LD     M12.1
+S      M14.1, 1
+Network 57 
+LD     T49
+R      M14.1, 1
+Network 58 
+LD     T49
+AN     M11.4
+R      Q0.6, 1
+S      M10.2, 1
+S      M29.0, 1
+Network 59 
+LD     T49
+A      M11.4
+S      M11.3, 1
+S      M2.0, 1
+R      M11.4, 1
+Network 60 
+LD     M12.1
+S      M22.1, 1
+Network 61 
+LD     M12.1
+S      M22.2, 1
+Network 62 
+LD     M12.1
+S      M21.4, 1
+Network 63 
+LD     M12.1
+MOVW   +2, VW600
+Network 64 
+LD     M12.1
+MOVW   +2, VW602
+Network 65 
+LD     M12.2
+R      M10.2, 1
+R      M29.0, 1
+S      Q0.6, 1
+Network 66 
+LD     M12.2
+S      M14.2, 1
+Network 67 
+LD     T50
+R      M14.2, 1
+Network 68 
+LD     T50
+S      M10.3, 1
+S      M29.1, 1
+Network 69 
+LD     M12.2
+S      M22.3, 1
+Network 70 
+LD     M12.2
+MOVW   +2, VW602
+Network 71 
+LD     M12.3
+R      M10.3, 1
+Network 72 
+LD     M12.3
+// Enter signal stabilization with the vertical motor command released.
+R      M29.1, 1
+S      M15.0, 1
+Network 73 
+LD     M12.3
+S      M22.4, 1
+Network 74 
+LD     M12.3
+MOVW   +3, VW602
+// Start heat interference only after the full 30s baseline-noise window.
+LD     T51
+A      M15.0
+R      M15.0, 1
+S      M10.4, 1
+S      M13.0, 1
+S      M29.3, 1
+Network 75 
+LD     M13.0
+TON    T37, +10
+Network 76 
+LD     T37
+R      M13.0, 1
+R      M29.3, 1
+Network 77 
+LD     T37
+S      M13.1, 1
+Network 78 
+LD     M13.1
+TON    T40, +10
+Network 79 
+LD     T40
+R      M13.1, 1
+Network 80 
+LD     T40
+S      M13.2, 1
+S      M29.3, 1
+Network 81 
+LD     M13.2
+TON    T41, +10
+Network 82 
+LD     T41
+R      M13.2, 1
+R      M29.3, 1
+Network 83 
+LD     T41
+S      M13.3, 1
+Network 84 
+LD     M13.3
+TON    T42, +10
+Network 85 
+LD     T42
+R      M13.3, 1
+Network 86 
+LD     T42
+S      M13.4, 1
+S      M29.3, 1
+Network 87 
+LD     M13.4
+TON    T43, +10
+Network 88 
+LD     T43
+R      M13.4, 1
+R      M10.4, 1
+R      M29.3, 1
+Network 89 
+LD     T43
+R      M15.2, 2
+S      M10.5, 1
+S      M29.2, 1
+Network 90 
+LD     T43
+S      M22.5, 1
+Network 91 
+LD     T43
+MOVW   +3, VW602
+// After 2s of vertical up, start horizontal move once and keep vertical up.
+LD     M10.5
+A      T62
+AN     M15.2
+S      M15.2, 1
+S      M10.6, 1
+S      M29.0, 1
+Network 92 
+LD     M12.5
+R      M10.5, 1
+R      M29.2, 1
+Network 93 
+LD     M12.5
+S      M15.3, 1
+Network 94 
+LD     T51
+R      M14.3, 1
+Network 95 
+LD     T51
+R      Q0.6, 1
+Network 96 
+LD     M12.5
+S      M21.5, 1
+S      M22.7, 1
+Network 97 
+LD     M12.5
+MOVW   +3, VW600
+Network 98 
+LD     M12.5
+MOVW   +3, VW602
+Network 99 
+LD     M12.6
+R      M10.6, 1
+R      M29.0, 1
+S      Q0.6, 1
+Network 100 
+LD     M12.6
+S      M14.4, 1
+Network 101 
+LD     T52
+R      M14.4, 1
+R      M15.2, 2
+Network 102 
+LD     T52
+S      M10.7, 1
+S      M29.1, 1
+Network 103 
+LD     M12.6
+S      M22.7, 1
+Network 104 
+LD     M12.6
+MOVW   +3, VW602
+Network 105 
+LD     M12.7
+R      M10.7, 1
+Network 106 
+LD     M12.7
+// Enter signal stabilization with the vertical motor command released.
+R      M29.1, 1
+S      M15.1, 1
+Network 107 
+LD     M12.7
+S      M22.6, 1
+Network 108 
+LD     M12.7
+MOVW   +3, VW602
+// Wait 10s after clamp-down completion before starting flash test.
+LD     T38
+A      M15.1
+R      M15.1, 1
+S      M11.0, 1
+Network 109 
+LDN    M11.0
+R      M13.5, 3
+R      M14.5, 3
+R      M15.4, 4
+Network 110 
+LD     M11.0
+AN     M13.5
+AN     M13.6
+AN     M13.7
+AN     M14.5
+AN     M14.6
+AN     M14.7
+AN     M15.4
+AN     M15.5
+AN     M15.6
+AN     M15.7
+S      M13.5, 1
+Network 111 
+LD     M13.5
+TON    T53, +10
+Network 112 
+LD     T53
+R      M13.5, 1
+Network 113 
+LD     T53
+S      M13.6, 1
+Network 114 
+LD     M13.6
+TON    T54, +10
+Network 115 
+LD     T54
+R      M13.6, 1
+Network 116 
+LD     T54
+S      M13.7, 1
+Network 117 
+LD     M13.7
+TON    T55, +10
+Network 118 
+LD     T55
+R      M13.7, 1
+Network 119 
+LD     T55
+S      M14.5, 1
+Network 120 
+LD     M14.5
+TON    T56, +10
+Network 121 
+LD     T56
+R      M14.5, 1
+Network 122 
+LD     T56
+S      M14.6, 1
+Network 123 
+LD     M14.6
+TON    T57, +10
+Network 124 
+LD     T57
+R      M14.6, 1
+Network 125 
+LD     T57
+S      M14.7, 1
+Network 126 
+LD     M14.7
+TON    T58, +10
+Network 127 
+LD     T58
+R      M14.7, 1
+Network 128 
+LD     T58
+S      M15.4, 1
+Network 129 
+LD     M15.4
+TON    T59, +10
+Network 130 
+LD     T59
+R      M15.4, 1
+Network 131 
+LD     T59
+S      M15.5, 1
+Network 132 
+LD     M15.5
+TON    T60, +10
+Network 133 
+LD     T60
+R      M15.5, 1
+Network 134 
+LD     T60
+S      M15.6, 1
+Network 135 
+LD     M15.6
+TON    T61, +10
+Network 136 
+LD     T61
+R      M15.6, 1
+Network 137 
+LD     T61
+S      M15.7, 1
+Network 138 
+LD     M15.7
+R      M15.7, 1
+R      M11.0, 1
+S      M11.2, 1
+R      M29.0, 8
+R      M30.5, 1
+R      M30.6, 1
+R      Q1.2, 1
+R      Q1.3, 1
+S      M23.0, 1
+S      M21.6, 1
+MOVW   +4, VW600
+MOVW   +3, VW602
+Network 139 
+LD     M11.1
+S      M11.2, 1
+Network 140 
+LD     M11.1
+R      M11.1, 1
+Network 141 
+LD     M11.2
+S      M23.1, 1
+Network 142 
+LD     M11.2
+TON    T39, +100
+Network 143 
+LD     T39
+R      M11.2, 1
+Network 144 
+LD     T39
+R      M10.0, 12
+R      M13.0, 8
+R      M14.0, 8
+R      M15.0, 4
+R      M29.0, 8
+R      M30.0, 8
+R      Q0.0, 8
+R      Q1.0, 4
+S      M11.4, 1
+S      M10.0, 1
+S      M29.2, 1
+Network 145 
+LD     T39
+S      M23.2, 1
+Network 146 
+LD     T39
+S      M23.3, 1
+Network 147 
+LD     T39
+S      M21.7, 1
+Network 148 
+LD     T39
+MOVW   +1, VW600
+MOVW   +1, VW602
+Network 149 
+LD     M11.3
+S      M0.1, 1
+R      M21.0, 8
+R      M22.0, 12
+R      M29.0, 8
+R      M30.0, 8
+R      Q0.0, 8
+R      Q1.0, 4
+Network 150 
+LD     M11.3
+R      M0.0, 1
+Network 151 
+LD     M11.3
+R      M11.3, 1
+Network 152 
+LD     M0.1
+MOVW   +0, VW600
+Network 153 
+LD     M0.1
+MOVW   +0, VW602
+Network 154 
+LD     M10.0
+MOVW   +1, VW600
+MOVW   +1, VW602
+Network 155 
+LD     M14.0
+O      M10.1
+MOVW   +1, VW600
+MOVW   +1, VW602
+Network 156 
+LD     M14.1
+O      M10.2
+MOVW   +2, VW600
+MOVW   +2, VW602
+Network 157 
+LD     M14.2
+O      M10.3
+O      M15.0
+MOVW   +2, VW600
+MOVW   +2, VW602
+Network 158 
+LD     M10.4
+O      M13.0
+O      M13.1
+O      M13.2
+O      M13.3
+O      M13.4
+MOVW   +2, VW600
+MOVW   +2, VW602
+Network 159 
+LD     M10.5
+MOVW   +2, VW600
+MOVW   +3, VW602
+Network 160 
+LD     M15.2
+O      M15.3
+O      M10.6
+MOVW   +3, VW600
+MOVW   +3, VW602
+Network 161 
+LD     M14.4
+O      M10.7
+MOVW   +3, VW600
+MOVW   +3, VW602
+Network 162 
+LD     M11.0
+O      M15.1
+MOVW   +3, VW600
+MOVW   +3, VW602
+Network 163 
+LD     M11.2
+MOVW   +4, VW600
+MOVW   +3, VW602
+Network 164 
+LD     M10.0
+O      M14.0
+O      M10.1
+O      M14.1
+=      M21.0
+Network 165 
+LD     M10.2
+O      M14.2
+O      M10.3
+O      M15.0
+O      M10.4
+O      M10.5
+O      M14.3
+=      M21.1
+Network 166 
+LD     M10.6
+O      M14.4
+O      M10.7
+O      M11.0
+O      M15.1
+O      M15.2
+O      M15.3
+=      M21.2
+Network 167 
+LD     M11.2
+=      M21.3
+Network 168 
+LD     M28.0
+AN     M29.0
+=      M27.0
+Network 169 
+LD     M28.1
+AN     M29.1
+=      M27.1
+Network 170 
+LD     M28.2
+AN     M29.2
+=      M27.2
+Network 171 
+LD     M28.3
+AN     M29.3
+=      M27.3
+Network 172 
+LD     M28.4
+AN     M29.4
+=      M27.4
+Network 173 
+LD     M27.1
+O      M27.2
+AN     M29.1
+AN     M29.2
+=      M27.5
+Network 174 
+LD     M29.0
+AN     M28.0
+=      M26.0
+Network 175 
+LD     M29.1
+AN     M28.1
+=      M26.1
+Network 176 
+LD     M29.2
+AN     M28.2
+=      M26.2
+Network 177 
+LD     M29.3
+AN     M28.3
+=      M26.3
+Network 178 
+LD     M29.4
+AN     M28.4
+=      M26.4
+Network 179 
+LD     M26.0
+R      M29.1, 1
+Network 180 
+LD     M26.0
+AN     T62
+R      M29.2, 1
+Network 181 
+LD     M26.0
+R      M29.3, 1
+Network 182 
+LD     M26.0
+R      M29.4, 1
+Network 183 
+LD     M26.1
+R      M29.0, 1
+Network 184 
+LD     M26.1
+R      M29.2, 1
+Network 185 
+LD     M26.1
+R      M29.3, 1
+Network 186 
+LD     M26.1
+R      M29.4, 1
+Network 187 
+LD     M26.2
+R      M29.0, 1
+Network 188 
+LD     M26.2
+R      M29.1, 1
+Network 189 
+LD     M26.2
+R      M29.3, 1
+Network 190 
+LD     M26.2
+R      M29.4, 1
+Network 191 
+LD     M26.3
+R      M29.0, 1
+Network 192 
+LD     M26.3
+R      M29.1, 1
+Network 193 
+LD     M26.3
+R      M29.2, 1
+Network 194 
+LD     M26.3
+R      M29.4, 1
+Network 195 
+LD     M26.4
+R      M29.0, 1
+Network 196 
+LD     M26.4
+R      M29.1, 1
+Network 197 
+LD     M26.4
+R      M29.2, 1
+Network 198 
+LD     M26.4
+R      M29.3, 1
+Network 199 
+LD     M26.0
+R      Q0.1, 1
+Network 200 
+LD     M26.0
+R      Q0.4, 1
+Network 201 
+LD     M26.0
+R      Q1.1, 1
+Network 202 
+LD     M26.0
+R      Q1.2, 1
+Network 203 
+LD     M26.1
+R      Q0.1, 1
+Network 204 
+LD     M26.1
+R      Q0.5, 1
+Network 205 
+LD     M26.1
+R      Q1.1, 1
+Network 206 
+LD     M26.1
+R      Q1.2, 1
+Network 207 
+LD     M26.2
+R      Q0.1, 1
+Network 208 
+LD     M26.2
+R      Q0.5, 1
+Network 209 
+LD     M26.2
+R      Q1.2, 1
+Network 210 
+LD     M26.3
+R      Q0.4, 1
+Network 211 
+LD     M26.3
+R      Q0.5, 1
+Network 212 
+LD     M26.3
+R      Q1.1, 1
+Network 213 
+LD     M26.3
+R      Q1.2, 1
+Network 214 
+LD     M26.4
+R      Q0.1, 1
+Network 215 
+LD     M26.4
+R      Q0.4, 1
+Network 216 
+LD     M26.4
+R      Q0.5, 1
+Network 217 
+LD     M26.4
+R      Q1.1, 1
+Network 218 
+LD     M26.0
+O      M26.1
+O      M26.2
+O      M26.3
+O      M26.4
+=      M26.5
+Network 219 
+LD     M26.5
+R      M30.0, 7
+Network 220 
+LD     M26.5
+R      Q0.0, 8
+Network 221 
+LD     M26.5
+R      Q1.0, 4
+Network 222 
+LD     M30.7
+R      M30.0, 8
+Network 223 
+LD     M30.7
+R      M29.0, 8
+Network 224 
+LD     M30.7
+R      Q0.0, 8
+Network 225 
+LD     M30.7
+R      Q1.0, 4
+Network 226 
+LD     M0.3
+AN     M30.7
+=      M31.7
+Network 227 
+LD     M30.0
+// Keep the simulated-person heat source enabled from stabilization through heat interference.
+O      M15.0
+O      M10.4
+A      M31.7
+=      M31.0
+Network 228 
+LD     M30.1
+O      M29.1
+O      M29.2
+O      Q0.4
+AN     M27.5
+A      M31.7
+// Signal stabilization must leave both vertical motor relays de-energized.
+AN     M15.0
+AN     M15.1
+=      M31.1
+Network 229 
+LD     M30.2
+O      M29.2
+O      Q1.1
+AN     M29.1
+AN     M27.2
+A      M31.7
+// Signal stabilization must leave both vertical motor relays de-energized.
+AN     M15.0
+AN     M15.1
+=      M31.2
+Network 230 
+LD     M30.3
+O      M29.0
+O      Q0.5
+AN     M27.0
+AN     M10.4
+AN     M13.0
+AN     M13.1
+AN     M13.2
+AN     M13.3
+AN     M13.4
+AN     M29.3
+AN     Q0.1
+A      M31.7
+=      M31.3
+Network 231 
+LD     M30.4
+O      Q0.6
+A      M31.7
+=      M31.4
+Network 232 
+LD     M30.5
+O      M29.4
+AN     M11.0
+AN     M27.4
+A      M31.7
+=      M31.5
+Network 233 
+LD     M30.6
+AN     M11.0
+A      M31.7
+=      M31.6
+Network 234 
+LD     M29.0
+=      M28.0
+Network 235 
+LD     M29.1
+=      M28.1
+Network 236 
+LD     M29.2
+=      M28.2
+Network 237 
+LD     M29.3
+=      M28.3
+Network 238 
+LD     M29.4
+=      M28.4
+Network 239 
+LD     M31.1
+=      Q0.4
+Network 240 
+LD     M31.2
+=      Q1.1
+Network 241 
+LD     M31.3
+=      Q0.5
+Network 242 
+// Q0.6 stays low before AUTO_RUN; safety-limit handling is a one-scan pulse below.
+LD     M0.0
+A      M0.3
+AN     Q0.5
+O      M31.4
+AN     M2.2
+=      M25.1
+Network 243 
+LD     M31.0
+=      Q0.1
+Network 244 
+LD     M30.0
+O      M29.3
+A      M31.7
+=      Q1.0
+Network 245 
+LD     M31.5
+O      M13.5
+O      M13.7
+O      M14.6
+O      M15.4
+O      M15.6
+A      M31.7
+=      Q1.2
+Network 246 
+LD     M31.6
+O      M13.5
+O      M13.7
+O      M14.6
+O      M15.4
+O      M15.6
+A      M31.7
+=      Q1.3
+Network 247 
+// 电磁工序继电器，持续输出 10s。
+LD     M11.2
+A      M31.7
+=      Q0.7
+Network 248 
+LDN    M0.3
+A      M2.2
+AN     M2.4
+R      Q0.0, 8
+Network 249 
+LDN    M0.3
+A      M2.2
+AN     M2.4
+R      Q1.0, 4
+Network 250 
+// Q0.6 safety-limit stop: one scan on the rising edge; do not retain Q0.6.
+LD     M2.2
+EU
+=      M25.0
+
+Network 251
+// Publish Q0.6 from the normal stop request or the one-scan safety pulse.
+LD     M25.1
+O      M25.0
+=      Q0.6
+Network 252
+// I1.0 emergency active: reset all process commands and physical relays.
+LDN    I1.0
+R      M0.0, 1
+R      M10.0, 12
+R      M11.4, 1
+R      M12.0, 10
+R      M13.0, 8
+R      M14.0, 8
+R      M15.0, 8
+R      M21.0, 8
+R      M22.0, 12
+R      M29.0, 8
+R      M30.0, 8
+R      Q0.0, 8
+R      Q1.0, 4
+Network 253
+// Hold the horizontal-stop relay closed for the entire I1.0 emergency interval.
+LDN    I1.0
+S      Q0.6, 1
+END
+END_ORGANIZATION_BLOCK

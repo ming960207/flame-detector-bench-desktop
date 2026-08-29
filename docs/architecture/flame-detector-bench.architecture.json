@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "火焰探测器检测台｜真实运行架构",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "field-readonly-path",
+        "label": "现场只读主链路",
+        "focus": ["plc", "detectors", "field-runtime", "renderer", "desktop-host", "local-stores"],
+        "note": "从 S7 PLC 与六台探测器读取状态，在本机完成波形分析、批次裁决和结果记录。"
+      },
+      {
+        "id": "isolated-runtime-modes",
+        "label": "离线与测试旁路",
+        "focus": ["renderer", "offline-runtime", "test-runtime", "field-runtime", "local-stores"],
+        "note": "离线闭环不初始化现场设备；测试程序只读观察正式现场状态并独立归档。"
+      },
+      {
+        "id": "blocked-legacy-boundary",
+        "label": "旧直写路径门禁",
+        "focus": ["legacy-runtime", "plc", "field-runtime"],
+        "note": "旧 Modbus/MQTT 入口保留在源码中，但现场运行由 FIELD_RUNTIME_DISABLED 硬门禁隔离。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "plc",
+      "type": "external",
+      "label": "S7-200 SMART PLC",
+      "sublabel": "VW600 + VW602",
+      "tag": "S7/ISO-on-TCP :102",
+      "pos": [60, 270],
+      "size": [190, 84]
+    },
+    {
+      "id": "detectors",
+      "type": "external",
+      "label": "六台火焰探测器",
+      "sublabel": "TCP / RTU · 三/四波长协议",
+      "tag": "31001–36001",
+      "pos": [60, 420],
+      "size": [190, 84]
+    },
+    {
+      "id": "field-runtime",
+      "type": "backend",
+      "label": "现场只读状态服务",
+      "sublabel": "field-status-server · HTTP + WebSocket",
+      "tag": "CLOSURE_MODE=field",
+      "pos": [340, 330],
+      "size": [250, 104]
+    },
+    {
+      "id": "renderer",
+      "type": "frontend",
+      "label": "React/Vite 渲染器",
+      "sublabel": "index.tsx · Field / Offline / Test",
+      "tag": "file:// dist/index.html",
+      "pos": [680, 330],
+      "size": [230, 104]
+    },
+    {
+      "id": "desktop-host",
+      "type": "backend",
+      "label": "桌面宿主",
+      "sublabel": "Electron / .NET WebView2",
+      "tag": "单 EXE 或 WebView2",
+      "pos": [680, 90],
+      "size": [230, 92]
+    },
+    {
+      "id": "local-stores",
+      "type": "database",
+      "label": "本机持久化",
+      "sublabel": "配置 · 现场结果 · 离线审计 · 测试归档",
+      "tag": "APP_DATA_DIR / logs / data",
+      "pos": [340, 540],
+      "size": [250, 104]
+    },
+    {
+      "id": "offline-runtime",
+      "type": "backend",
+      "label": "离线闭环服务",
+      "sublabel": "offline-server · 共享 UI",
+      "tag": "默认隔离现场设备",
+      "pos": [680, 540],
+      "size": [250, 104]
+    },
+    {
+      "id": "test-runtime",
+      "type": "backend",
+      "label": "测试观察器后端",
+      "sublabel": "test-program-server · :3004 → UI :3005",
+      "tag": "只读观察 / 阶段归档",
+      "pos": [1030, 540],
+      "size": [250, 104]
+    },
+    {
+      "id": "legacy-runtime",
+      "type": "backend",
+      "label": "旧直写 I/O 服务",
+      "sublabel": "server/src/index.ts · Modbus / MQTT legacy",
+      "tag": "FIELD_RUNTIME_DISABLED",
+      "pos": [1030, 90],
+      "size": [250, 92]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Windows 上位机本机 / 127.0.0.1",
+      "wraps": ["field-runtime", "renderer", "desktop-host", "local-stores", "offline-runtime", "test-runtime", "legacy-runtime"],
+      "pad": 34
+    }
+  ],
+  "connections": [
+    {
+      "id": "plc-to-field",
+      "from": "plc",
+      "to": "field-runtime",
+      "label": "S7/ISO-on-TCP :102 · 只读工序码/状态位",
+      "variant": "emphasis",
+      "labelAt": [295, 240]
+    },
+    {
+      "id": "detectors-to-field",
+      "from": "detectors",
+      "to": "field-runtime",
+      "label": "TCP/RTU · 原始采样与波形",
+      "variant": "emphasis",
+      "labelAt": [180, 518]
+    },
+    {
+      "id": "field-to-renderer",
+      "from": "field-runtime",
+      "to": "renderer",
+      "label": "HTTP + WebSocket · /api/field/summary",
+      "variant": "emphasis",
+      "labelAt": [635, 500]
+    },
+    {
+      "id": "desktop-loads-renderer",
+      "from": "desktop-host",
+      "to": "renderer",
+      "label": "加载 dist/index.html · 注入后端端点",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [795, 196]
+    },
+    {
+      "id": "offline-to-stores",
+      "from": "offline-runtime",
+      "to": "local-stores",
+      "label": "追加式 JSONL · SHA-256 链",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [635, 658]
+    },
+    {
+      "id": "test-to-field",
+      "from": "test-runtime",
+      "to": "field-runtime",
+      "label": "只读 HTTP/WS · /api/field/summary",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "right",
+      "via": [[1155, 470], [620, 470], [620, 382]],
+      "labelAt": [710, 470]
+    },
+    {
+      "id": "field-to-stores",
+      "from": "field-runtime",
+      "to": "local-stores",
+      "label": "配置读取 · 现场结果日志",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [560, 500]
+    },
+    {
+      "id": "legacy-to-plc",
+      "from": "legacy-runtime",
+      "to": "plc",
+      "label": "Modbus 直接 I/O · 现场已阻断",
+      "variant": "security",
+      "fromSide": "left",
+      "toSide": "top",
+      "via": [[960, 136], [960, 40], [155, 40]],
+      "labelAt": [560, 40]
+    },
+    {
+      "id": "test-to-stores",
+      "from": "test-runtime",
+      "to": "local-stores",
+      "label": "阶段计划 · JSON/Markdown 归档",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[1155, 700], [300, 700], [300, 520], [465, 520]],
+      "labelAt": [730, 700]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "现场主链路",
+      "items": [
+        "PLCProcessMonitor 通过 S7 读取 VW600、VW602 与工序状态位",
+        "FlameDetectorService 读取六台设备并输出原始/归一化波形",
+        "服务端聚合 field_summary，经 HTTP/WS 提供给 React 界面"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "裁决与证据",
+      "items": [
+        "FieldWaveformAnalysis、FieldDetectorVerdict、FieldFinalVerdict 在本机完成批次门禁",
+        "现场完成结果写入 logs；离线闭环写入带 SHA-256 前序链的 JSONL",
+        "测试观察器独立跟踪阶段、波形和探测器观测并归档报告"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "安全边界",
+      "items": [
+        "当前桌面正式入口启动 CLOSURE_MODE=field，只读观察 PLC 与探测器",
+        "offline 模式不初始化 PLC、探测器、MQTT 或外部报告连接",
+        "旧 server/src/index.ts 的直接 DO/MQTT/上传路径受 FIELD_RUNTIME_DISABLED 硬门禁约束"
+      ]
+    }
+  ]
+}

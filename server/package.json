@@ -1,0 +1,37 @@
+{
+  "name": "flame-detector-offline-closure-server",
+  "version": "1.0.0",
+  "description": "火焰探测器检测台离线四阶段闭环服务",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "dev:field": "tsx watch src/field-main.ts",
+    "dev:test-program": "tsx watch src/test-program-main.ts",
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "start": "node dist/main.js",
+    "start:field": "node dist/field-main.js",
+    "start:test-program": "node dist/test-program-main.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "form-data": "^4.0.5",
+    "modbus-serial": "^8.0.17",
+    "mqtt": "^5.15.1",
+    "multer": "^2.0.2",
+    "nodes7": "^0.3.18",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

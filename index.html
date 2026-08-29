@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>理工光科智慧生产 - 火焰探测器检测台</title>
+  <link rel="icon" type="image/png" href="./favicon.png" />
+  <!-- Tailwind CSS 通过 PostCSS 处理，不再使用 CDN -->
+  <style>
+    /* 使用系统字体回退，确保离线可用 */
+    body {
+      font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f8fafc;
+      color: #334155;
+      overflow: hidden;
+    }
+
+    .dark body {
+      background-color: #020617;
+      color: #e2e8f0;
+    }
+
+    .font-tech {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      letter-spacing: 0.05em;
+    }
+
+    /* Custom Scrollbar for the dark theme */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    .neon-border {
+      box-shadow: 0 0 5px rgba(6, 182, 212, 0.5), inset 0 0 5px rgba(6, 182, 212, 0.2);
+    }
+
+    .neon-text {
+      text-shadow: 0 0 5px rgba(6, 182, 212, 0.8);
+    }
+
+    .active-step-glow {
+      box-shadow: 0 0 15px rgba(34, 197, 94, 0.6);
+      border-color: #22c55e;
+    }
+  </style>
+  <link rel="stylesheet" href="./index.css">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="./index.tsx"></script>
+</body>
+
+</html>

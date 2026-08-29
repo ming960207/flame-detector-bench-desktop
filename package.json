@@ -1,0 +1,77 @@
+{
+  "name": "flame-detector-bench-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:web": "vite build --mode desktop",
+    "build:web:test": "vite build --mode test",
+    "build:server": "npm run build --prefix server",
+    "desktop": "electron .",
+    "desktop:dev": "npm run build:web && npm run build:server && dotnet run --project desktop/webview/FlameDetectorBench.WebView.csproj",
+    "build:webview": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build-webview.ps1",
+    "build:latest": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\update-latest-release.ps1",
+    "build:single-exe": "npm run build:latest",
+    "preview": "vite preview",
+    "test:renderer-startup": "node scripts/renderer-startup-smoke.mjs",
+    "verify:field-readiness": "node scripts/field-readiness.mjs",
+    "verify:field-readiness:strict": "node scripts/field-readiness.mjs --strict",
+    "test:field": "npm test --prefix server",
+    "test:field:ui": "npm run build:web && node scripts/field-ui-test-runner.mjs"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "lucide-react": "^0.555.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.23",
+    "electron": "^33.4.11",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  },
+  "main": "desktop/main.cjs",
+  "build": {
+    "appId": "cn.lgsk.flame-detector-bench",
+    "productName": "火焰探测器检测台",
+    "compression": "maximum",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "desktop/main.cjs",
+      "desktop/preload.cjs",
+      "dist/**/*",
+      "server/dist/**/*",
+      "server/node_modules/**/*",
+      "server/package.json",
+      "server/.env",
+      "server/system-config.json",
+      "server/plc-configs.json"
+    ],
+    "asarUnpack": [
+      "server/**/*"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "火焰探测器检测台-安装包-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "plcs": [
+    {
+      "id": "plc-1",
+      "name": "PLC一体机",
+      "enabled": true,
+      "mode": "S7",
+      "ip": "192.168.2.1",
+      "port": 102,
+      "slaveId": 1,
+      "baudRate": 9600,
+      "dataBits": 8,
+      "stopBits": 1,
+      "parity": "none",
+      "diCount": 18,
+      "doCount": 12,
+      "pollIntervalMs": 200
+    }
+  ],
+  "lastUpdated": 1784772532491
+}

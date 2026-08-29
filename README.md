@@ -1,0 +1,114 @@
+# 火焰探测器检测台：上位机界面原型版
+
+> 本目录是火焰探测器检测台上位机：离线开发默认使用前端 \`http://127.0.0.1:3000\` 和后端 \`http://127.0.0.1:3001\`，现场只读模式默认使用后端 \`http://127.0.0.1:3003\`。当前入口位于 \`index.tsx\`，现场详情包含波形、通信配置和只读自检入口。
+
+本版本用于在**未接入现场 PLC、HMI、探测器或外部网络服务**时，验证上位机的四工艺阶段检测流程、EMC 后回初始位确认和六台探测器批次门禁。
+
+离线运行时仅监听本机 `127.0.0.1:3000`（前端）和 `127.0.0.1:3001`（后端），不会初始化 PLC、探测器、MQTT 或外部报告连接；也不会写入 `Q` / `DO` / `M` 区。
+
+## 已覆盖的上位机闭环
+
+1. 安全未就绪时，服务端拒绝 `START` 并返回 `SAFETY_NOT_READY`。
+2. 安全就绪后，服务端按最新 PLC 工艺语义推进：初始化 → 移动热源 → 爆闪干扰 → 电磁占位 → 回初始位确认 → 完成；EMC 后不能直接放行报告。
+3. 每个命令包含 `requestId` 和单调序号；重复请求只返回原始结果，不重复执行。
+4. 只有当前批次的六台探测器快照均满足地址、时效、通信状态、火警响应和 `PASS` 判定后，报告门禁才可能放行。
+5. STOP 会原子中止批次并永久阻止该批次报告；离线记录仅可本地导出，固定标记为 `OFFLINE_SIMULATION`，不会上传。
+6. 服务端以本机追加式 JSONL 保存命令、离线适配器输入、状态快照和六台探测器结果；审计写入失败时对应状态变更会回滚，导出的记录只包含当前合格批次的完整审计链。
+
+## 本机运行
+
+前置条件：Node.js 20+。
+
+首次运行安装依赖：
+
+```powershell
+npm install
+npm install --prefix server
+```
+
+启动后端（终端一）：
+
+```powershell
+npm run dev --prefix server
+```
+
+启动前端（终端二）：
+
+```powershell
+npm run dev
+```
+
+访问 [http://127.0.0.1:3000](http://127.0.0.1:3000)。也可双击 `start-all.bat` 完成依赖检查并启动两个本机服务。
+
+## 单 EXE 桌面安装包
+
+需要交付给现场电脑时执行：
+
+```powershell
+npm run build:single-exe
+```
+
+最终交付文件为 `release/火焰探测器检测台-single-exe-setup.exe`。安装包内置最小 Electron Chromium/Node 运行环境，目标电脑无需安装 Node.js、.NET 或浏览器。首次双击会按当前用户安装并创建桌面/开始菜单快捷方式；后续从快捷方式直接启动，不会重复解压，因此可实现秒级启动。运行时配置和现场数据保存在用户应用数据目录，升级安装不会主动删除。
+
+开发调试仍可运行 `npm run desktop:dev` 使用 WebView2 宿主；`npm run build:webview` 可生成依赖系统 WebView2 的目录版，但它不是完整单 EXE 离线交付物。
+
+默认配置见 [server/.env.example](server/.env.example)：`CLOSURE_MODE=offline`。现场模式是独立的只读监测入口：PLC 仍只读工序状态，探测器复用旧上位机的 Modbus 数据读取、三/四波长协议解码、波形显示、通信配置和七步只读自动检测；不会通过本入口写入 PLC 的 Q/M 区。旧的直写 I/O 服务仍由 `FIELD_RUNTIME_DISABLED` 硬门禁阻断。
+
+## 建议演练顺序
+
+1. 点击“请求启动”，确认出现 `SAFETY_NOT_READY`。
+2. 点击“置为就绪”，再点击“请求启动”。
+3. 三次点击“由离线适配器确认推进下一阶段”，依次到达移动热源、爆闪干扰、电磁占位。
+4. 点击“注入 6×PASS”，先推进至“回初始位”并确认报告仍被阻止，再推进至完成。
+5. 确认“报告门禁”为“已放行”，导出本地离线仿真记录。
+
+还应单独演练“原子停止”和“注入 UNKNOWN”：二者都必须使报告保持阻止。
+
+## 自动化验证
+
+```powershell
+npm run build --prefix server
+npm run build
+npm run test:field
+```
+
+现场断连/重连自动验收（完全使用本地 PLC/TCP 模拟器，不连接真实设备）：
+
+```powershell
+npm run test:field
+npm run test:field:ui
+```
+
+`test:field` 覆盖 PLC 的 INIT、HEAT、FLASH、EMC 采集窗口、连续断连重连、自动测试握手和 TCP 进程锁；`test:field:ui` 启动本地模拟状态服务和前端预览，验证断连状态与重连后波形在界面侧刷新。
+
+## PLC / HMI 静态发布门禁
+
+在不连接现场设备的情况下，以下命令读取最新 PLC/HMI 资产，输出 SHA-256 与阻断项；不会下载、写入或连接任何设备：
+
+```powershell
+npm run verify:field-readiness
+```
+
+需要将结果作为发布门禁时使用严格模式；发现任一阻断项会返回非零退出码：
+
+```powershell
+npm run verify:field-readiness:strict
+```
+
+默认读取 `D:\code\PLC\SMART200-FLAME`；其他位置可用 `FIELD_ASSET_ROOT` 指定。受控基线位于 `config/field-asset-baseline.json`，仅在审查过工程变更后更新；哈希不匹配会产生 `FIELD_ASSET_HASH_MISMATCH` 并拒绝严格模式。门禁还验证上位机必须保持默认离线、仅闭环入口、本机绑定及无直接 DO/MQTT/外部上传。`config/plc-hmi-upper-contract.json` 则固定开始/停止、I/O 安全、工序码、EMC 和质量门禁的跨层语义，并由自动化测试验证；流程报警随安全条件恢复，不依赖 HMI 复位位。
+
+当前受控现场 AWL、工序文本和最新 HMI 控件将垂直上限/下限输入定义为 I0.3/I0.4；上位机只读 PLC 监视契约和静态门禁已按该点位同步，并要求 T44–T47 超时后报警、停机和清除输出。其余发布门禁继续检查调试旁路、HMI 直写 Q/M2.2 与配置区，以及 EMC 自动触发 Q1.3。严格模式在资产哈希未更新、PLC/HMI 尚未导入编译并完成 CRC/FAT 之前仍应失败；该状态由 `config/field-deployment-status.json` 显式记录，不能以更新哈希替代现场证据。
+
+## 重要边界
+
+该闭环只证明**上位机离线逻辑**的请求、裁决、批次门禁和本地记录一致性；它不证明 PLC 输出、安全回路、机械动作、HMI 权限或探测器通信已经通过验证。
+
+## 现场只读识别、探测器工作台与结果显示
+
+将 `CLOSURE_MODE=field` 和 `VITE_RUNTIME_MODE=field` 后，软件启动时会优先加载已保存的 `server/plc-configs.json` 与 `server/system-config.json` 中的探测器连接参数；后续开机自动连接和重连，无需重复设置。PLC 工序通过 S7 只读方式读取 `VW600`、`VW602` 与状态位，因此 PLC 配置必须为 `mode: "S7"`、正确的现场 IP 与端口 `102`。
+
+现场页面实时显示 PLC 工序、六台探测器通信与自动合格判定：每台必须在线、无故障、光源就绪、同步正常且检测到火警，六台同时满足时本批显示“合格”。连接缺失或信号尚未出现会显示“待检测”，不会误判合格；故障会直接显示“不合格”。新增探测器工作台支持串口/TCP、地址、三/四波长协议选择、原始/归一化波形和七步只读自动检测；现场默认通过 TCP 连接 `192.168.16.253`，六台探测器端口依次为 `31001`、`32001`、`33001`、`34001`、`35001`、`36001`。配置会保存到 `server/system-config.json` 并在重启后恢复。上位机在该模式不写入 PLC 的 Q/M 区。
+
+现场接入前，必须完成最新 PLC 在线上传/CRC、将 AWL 导入并编译到 `项目 1.smart`、将 HMI 资产导入可编辑原工程并核对变量权限、电气 I/O 对照、硬件安全回路，以及受控 FAT/SAT。修改前的完整外部工程备份位于 `D:\code\PLC\backups\SMART200-FLAME-before-controlled-fix-20260724-070454`，已逐文件 SHA-256 比对。当前门禁状态以 `config/field-deployment-status.json` 为准。
+
+离线审计文件位于 `server/data/offline-closure-audit.v2.jsonl`，仅保存在本机且被 Git 忽略。每条记录带前序 SHA-256 与自身 SHA-256，读取、查询和导出前都会验证整条链；测试过程中可按项目的数据保留制度归档或清理，禁止作为现场合格认证的替代证据。

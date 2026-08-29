@@ -1,0 +1,317 @@
+/* Tailwind CSS v4 - 使用 @import 语法 */
+@import "tailwindcss";
+
+/* Tailwind CSS v4 配置 - 使用 @theme 和 @variant */
+@variant dark (&:where(.dark, .dark *));
+
+/* 基础样式重置和全局样式 */
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  /* New Blue/White Theme Palette */
+  --color-primary: #268AFF;
+  /* 亮蓝 */
+  --color-primary-dark: #0056B3;
+  /* 深蓝 */
+  --color-bg-light: #F0F7FF;
+  /* 极光蓝 (For section backgrounds) */
+  --color-text-main: #1F2937;
+  /* 深灰 */
+  --color-text-sub: #6B7280;
+  /* 浅灰 */
+  --color-bg-white: #FFFFFF;
+  /* 纯白 */
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background-color: var(--color-bg-light);
+  color: var(--color-text-main);
+}
+
+.dark body {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+
+/* 自定义工业风格样式 - Light Mode (New Tech Minimalist) */
+.industrial-panel {
+  background: var(--color-bg-white);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 6px -1px rgba(38, 138, 255, 0.05), 0 2px 4px -1px rgba(38, 138, 255, 0.03);
+}
+
+/* Dark Mode Overrides */
+.dark .industrial-panel {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  box-shadow: none;
+}
+
+.status-indicator {
+  position: relative;
+  display: inline-block;
+}
+
+.status-indicator::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  opacity: 0.3;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.active::before {
+  background: #22c55e;
+}
+
+.status-indicator.inactive::before {
+  background: #64748b;
+}
+
+.status-indicator.error::before {
+  background: #ef4444;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.3;
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.2);
+    opacity: 0.1;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.3;
+  }
+}
+
+/* 按钮样式增强 */
+.btn-primary {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  transition: all 0.2s ease;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  transition: all 0.2s ease;
+  color: white;
+}
+
+.btn-success:hover {
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  transition: all 0.2s ease;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* 数据显示面板 */
+.data-panel {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid #cbd5e1;
+}
+
+.dark .data-panel {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+/* 温度显示样式 */
+.temp-display {
+  font-family: 'Orbitron', monospace;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.temp-normal {
+  color: #22c55e;
+}
+
+.temp-warning {
+  color: #f59e0b;
+}
+
+.temp-danger {
+  color: #ef4444;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0.5;
+  }
+}
+
+/* 工序流程样式 */
+.process-step {
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  background: #fff;
+  color: #334155;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dark .process-step {
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.process-step.active {
+  border-color: #22c55e;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.process-step.completed {
+  border-color: #06b6d4;
+  background: rgba(6, 182, 212, 0.05);
+}
+
+.process-step.waiting {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+/* IO 状态指示器 */
+.io-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.io-indicator.on {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+}
+
+.io-indicator.off {
+  background: #cbd5e1;
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.1);
+}
+
+.dark .io-indicator.off {
+  background: #64748b;
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 报警样式 */
+.alarm-item {
+  animation: slideIn 0.3s ease-out;
+}
+
+.alarm-critical {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 4px solid #ef4444;
+}
+
+.alarm-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-left: 4px solid #f59e0b;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 响应式设计 */
+@media (max-width: 1024px) {
+  .process-flow {
+    flex-direction: column;
+  }
+
+  .io-status {
+    flex-wrap: wrap;
+  }
+}
+
+/* 滚动条样式优化 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 3px;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.9);
+}

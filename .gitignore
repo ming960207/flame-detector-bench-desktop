@@ -1,0 +1,53 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+.playwright-cli/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# SQLite databases
+*.db
+*.db-journal
+
+# Local-only closure evidence
+server/data/
+
+# Generated browser verification artifacts
+test-results/
+.verify-release/
+
+# WebView2 packaging output
+release-webview/
+desktop/webview/bin/
+desktop/webview/obj/
+
+# Electron single-exe packaging output
+release/
+release-backup-*/
+release-single/
+release-installer/
+release-installer-final/
+release-latest/
+.release-build/

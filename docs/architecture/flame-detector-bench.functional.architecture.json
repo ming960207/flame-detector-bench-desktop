@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "火焰探测器检测台｜功能闭环与使用视角",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.functional.architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "daily-inspection",
+        "label": "日常检测闭环",
+        "focus": ["operator", "ui", "process", "status", "detectors", "waveform", "verdict", "records"],
+        "note": "站在操作人员角度查看工序、探测器状态、自动检测和最终结果。"
+      },
+      {
+        "id": "quality-judgment",
+        "label": "合格判断依据",
+        "focus": ["process", "status", "detectors", "waveform", "verdict", "records"],
+        "note": "最终结果必须同时满足完整工序、六台设备状态和检测指标要求。"
+      },
+      {
+        "id": "practice-and-acceptance",
+        "label": "演练与验收辅助",
+        "focus": ["ui", "offline", "test", "status", "records"],
+        "note": "离线演练用于验证软件闭环，测试观察用于回看正式状态，两者都不替代现场安全确认。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "检测台操作人员",
+      "tag": "现场操作",
+      "pos": [20, 300],
+      "size": [150, 84]
+    },
+    {
+      "id": "process",
+      "type": "external",
+      "label": "现场检测工序",
+      "tag": "动作由现场设备执行",
+      "pos": [20, 120],
+      "size": [190, 96]
+    },
+    {
+      "id": "detectors",
+      "type": "external",
+      "label": "六台火焰探测器",
+      "tag": "六台同时观察",
+      "pos": [20, 500],
+      "size": [190, 96]
+    },
+    {
+      "id": "offline",
+      "type": "backend",
+      "label": "离线演练",
+      "sublabel": "虚拟推进四阶段闭环",
+      "tag": "不连接现场设备",
+      "pos": [230, 120],
+      "size": [190, 96]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "检测台主界面",
+      "sublabel": "工序 · 通信 · 波形 · 结果",
+      "tag": "日常使用入口",
+      "pos": [230, 300],
+      "size": [190, 96]
+    },
+    {
+      "id": "status",
+      "type": "backend",
+      "label": "工序与安全状态",
+      "sublabel": "阶段 · 安全链 · 报警 · 回位",
+      "tag": "只读监测",
+      "pos": [460, 300],
+      "size": [190, 96]
+    },
+    {
+      "id": "waveform",
+      "type": "backend",
+      "label": "自动采集检测信号",
+      "sublabel": "噪声 · 热源 · 爆闪 · 电磁",
+      "tag": "无需手工采样",
+      "pos": [690, 300],
+      "size": [190, 96]
+    },
+    {
+      "id": "verdict",
+      "type": "backend",
+      "label": "整批合格判断",
+      "sublabel": "六台设备 + 完整工序 + 指标",
+      "tag": "合格 / 不合格 / 待检测",
+      "pos": [920, 300],
+      "size": [200, 96]
+    },
+    {
+      "id": "records",
+      "type": "database",
+      "label": "结果、报告和留痕",
+      "sublabel": "本地结果 · 审计 · 历史归档",
+      "tag": "可导出",
+      "pos": [1144, 300],
+      "size": [175, 96]
+    },
+    {
+      "id": "test",
+      "type": "backend",
+      "label": "测试观察与报告",
+      "sublabel": "阶段计时 · 波形回看 · 归档",
+      "tag": "只读旁路",
+      "pos": [1144, 500],
+      "size": [175, 96]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "上位机软件功能",
+      "wraps": ["offline", "ui", "status", "waveform", "verdict", "records", "test"],
+      "pad": 34
+    }
+  ],
+  "connections": [
+    {
+      "id": "operator-to-ui",
+      "from": "operator",
+      "to": "ui",
+      "label": "查看与处理",
+      "variant": "emphasis"
+    },
+    {
+      "id": "offline-to-ui",
+      "from": "offline",
+      "to": "ui",
+      "label": "演练状态",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [325, 240]
+    },
+    {
+      "id": "ui-to-status",
+      "from": "ui",
+      "to": "status",
+      "label": "查看状态",
+      "variant": "emphasis",
+      "labelAt": [440, 410]
+    },
+    {
+      "id": "process-to-status",
+      "from": "process",
+      "to": "status",
+      "label": "阶段与安全状态",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [[115, 70], [555, 70]],
+      "labelAt": [335, 70]
+    },
+    {
+      "id": "detectors-to-waveform",
+      "from": "detectors",
+      "to": "waveform",
+      "label": "状态与波形",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [[115, 480], [660, 480], [660, 348]],
+      "labelAt": [330, 480]
+    },
+    {
+      "id": "status-to-waveform",
+      "from": "status",
+      "to": "waveform",
+      "label": "触发采集",
+      "variant": "emphasis",
+      "labelAt": [720, 410]
+    },
+    {
+      "id": "waveform-to-verdict",
+      "from": "waveform",
+      "to": "verdict",
+      "label": "检测指标",
+      "variant": "emphasis",
+      "labelAt": [900, 410]
+    },
+    {
+      "id": "verdict-to-records",
+      "from": "verdict",
+      "to": "records",
+      "label": "批次结果",
+      "variant": "emphasis",
+      "labelAt": [1135, 410]
+    },
+    {
+      "id": "test-to-records",
+      "from": "test",
+      "to": "records",
+      "label": "阶段归档",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [[1349, 548], [1349, 348]],
+      "labelAt": [1349, 450]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "操作人员真正看到的闭环",
+      "items": [
+        "主界面展示当前工序、通信状态、六台探测器和实时波形",
+        "现场启动、停止、急停和机械动作按实体设备及现场规程执行",
+        "流程完成后再查看整批结果，不以单台 PASS 代替整机判定"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "系统自动完成的工作",
+      "items": [
+        "在热源、爆闪和电磁干扰阶段自动采集并分析信号",
+        "综合六台设备状态、火警响应、波形指标和完整工序进行判定",
+        "将结果、审计信息和历史测试归档到本机，支持后续导出回看"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "使用边界",
+      "items": [
+        "离线演练只验证软件闭环，不连接 PLC、探测器或外部服务",
+        "测试观察只读跟踪正式状态，不改变正式程序和设备配置",
+        "软件显示不能替代安全门、限位、急停、FAT/SAT 或现场确认"
+      ]
+    }
+  ]
+}

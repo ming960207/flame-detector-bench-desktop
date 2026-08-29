@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "sourceReview": "verified",
+  "plcBinaryImport": "pending",
+  "hmiProjectImport": "pending",
+  "reason": "MicroWIN SMART and MCGS Pro are installed, but the reviewed sources have not been imported into the latest matching projects, compiled, or verified by CRC/FAT; no PLC/HMI device has been connected or downloaded.",
+  "requiredEvidence": [
+    "Import the reviewed AWL into the latest 项目 1.smart project and compile without errors.",
+    "Import the reviewed final HMI variable table and control assets into the editable HMI project.",
+    "Record project CRC/version and perform an authorized FAT before any field download."
+  ]
+}

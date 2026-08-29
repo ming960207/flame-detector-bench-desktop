@@ -1,0 +1,1272 @@
+.wutos-dashboard,
+.wutos-dashboard * {
+  box-sizing: border-box;
+}
+
+.wutos-dashboard {
+  --wutos-bg: #010711;
+  --wutos-panel: rgba(2, 22, 45, .82);
+  --wutos-panel-deep: rgba(2, 15, 34, .72);
+  --wutos-line: #0b78e3;
+  --wutos-line-dim: rgba(31, 107, 178, .58);
+  --wutos-cyan: #3ef2ff;
+  --wutos-blue: #2ca5ff;
+  --wutos-white: #eff9ff;
+  --wutos-muted: #78aac9;
+  --wutos-green: #79f574;
+  --wutos-red: #ff5552;
+  min-height: 100%;
+  width: 100%;
+  padding: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: var(--wutos-white);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0, 102, 255, .15), transparent 42%),
+    #01050d;
+  font-family: "Bahnschrift", "DIN Alternate", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+
+.wutos-frame {
+  position: relative;
+  width: min(100%, calc((100vh - 16px) * 1.6666667));
+  max-height: calc(100vh - 16px);
+  aspect-ratio: 5 / 3;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(35, 142, 242, .68);
+  background: #020a17;
+  container-type: inline-size;
+  box-shadow: 0 0 26px rgba(0, 89, 212, .28), inset 0 0 60px rgba(0, 100, 255, .12);
+}
+
+.wutos-backdrop,
+.wutos-backdrop::before,
+.wutos-backdrop::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wutos-backdrop {
+  z-index: -1;
+  background:
+    radial-gradient(ellipse at 51% 61%, rgba(0, 128, 255, .35), transparent 22%),
+    radial-gradient(ellipse at 50% 100%, rgba(0, 93, 255, .12), transparent 37%),
+    linear-gradient(180deg, #020714 0%, #03172b 54%, #020711 100%);
+}
+
+.wutos-backdrop::before {
+  content: "";
+  opacity: .46;
+  background-image:
+    linear-gradient(rgba(0, 148, 255, .075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 148, 255, .06) 1px, transparent 1px);
+  background-size: 4.6% 6.2%;
+  mask-image: linear-gradient(180deg, #000 0%, transparent 76%);
+}
+
+.wutos-backdrop::after {
+  content: "";
+  opacity: .48;
+  background:
+    linear-gradient(112deg, transparent 0 38%, rgba(22, 109, 216, .18) 39%, transparent 40% 100%),
+    linear-gradient(68deg, transparent 0 64%, rgba(22, 109, 216, .13) 65%, transparent 66% 100%);
+}
+
+.wutos-header {
+  position: absolute;
+  z-index: 5;
+  inset: 0 0 auto;
+  height: 9.5%;
+  display: grid;
+  grid-template-columns: 20% 53% 27%;
+  align-items: start;
+  padding: 1.15% 1.2% 0;
+}
+
+.wutos-brand {
+  position: relative;
+  align-self: start;
+  line-height: 1;
+  filter: drop-shadow(0 0 7px rgba(38, 157, 255, .74));
+}
+
+.wutos-brand__logo {
+  display: block;
+  width: clamp(64px, 10.8cqw, 174px);
+  height: auto;
+  object-fit: contain;
+  object-position: left top;
+  filter: drop-shadow(0 0 7px rgba(38, 157, 255, .7));
+}
+
+.wutos-title-plaque {
+  position: relative;
+  width: 94%;
+  height: 100%;
+  justify-self: center;
+  padding: .25em 4% 0;
+  text-align: center;
+}
+
+.wutos-title-plaque::before {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  inset: 0 4% 5%;
+  clip-path: polygon(5% 0, 95% 0, 88% 100%, 12% 100%);
+  border-bottom: 1px solid rgba(37, 135, 237, .85);
+  background: linear-gradient(90deg, transparent, rgba(8, 53, 105, .72), transparent);
+  box-shadow: 0 15px 25px -21px rgba(0, 184, 255, .95);
+}
+
+.wutos-title-plaque h1 {
+  margin: 0;
+  color: var(--wutos-white);
+  font-size: clamp(13px, 2.35cqw, 38px);
+  font-weight: 900;
+  letter-spacing: .05em;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-shadow: 0 0 11px rgba(46, 157, 255, .8);
+}
+
+.wutos-title-plaque span {
+  display: block;
+  margin-top: .25em;
+  color: rgba(112, 201, 255, .72);
+  font: 600 clamp(6px, .58cqw, 10px) / 1 "Consolas", monospace;
+  letter-spacing: .3em;
+}
+
+.wutos-header__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1.6%;
+  min-width: 0;
+  padding-top: .3em;
+  color: #d8efff;
+  font-size: clamp(6px, .82cqw, 13px);
+  white-space: nowrap;
+}
+
+.wutos-header__meta > span,
+.wutos-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: .3em;
+}
+
+.wutos-header__meta svg,
+.wutos-connection svg {
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+}
+
+.wutos-connection.is-online {
+  color: var(--wutos-green);
+}
+
+.wutos-connection.is-offline {
+  color: #96a9ba;
+}
+
+.wutos-icon-button,
+.wutos-detail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25em;
+  min-width: 1.9em;
+  padding: .35em .45em;
+  color: #b9e7ff;
+  border: 1px solid rgba(40, 157, 238, .7);
+  background: rgba(5, 43, 78, .78);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wutos-icon-button:hover,
+.wutos-detail-button:hover {
+  color: #fff;
+  border-color: var(--wutos-cyan);
+  box-shadow: 0 0 8px rgba(0, 227, 255, .42);
+}
+
+.wutos-icon-button svg,
+.wutos-detail-button svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+
+.wutos-panel {
+  position: absolute;
+  z-index: 2;
+  overflow: hidden;
+  border: 1px solid var(--wutos-line);
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(2, 29, 59, .82), rgba(1, 14, 33, .78));
+  box-shadow:
+    0 0 13px rgba(0, 132, 255, .72),
+    inset 0 0 22px rgba(0, 141, 255, .2);
+}
+
+.wutos-panel::before {
+  position: absolute;
+  content: "";
+  inset: 6px;
+  border: 1px solid rgba(26, 92, 151, .76);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.wutos-panel::after {
+  position: absolute;
+  content: "";
+  z-index: 1;
+  top: 10.5%;
+  left: 8%;
+  right: 7%;
+  height: 1px;
+  background: #1a527d;
+  box-shadow: 0 0 5px rgba(36, 133, 210, .35);
+  pointer-events: none;
+}
+
+.wutos-panel__title {
+  position: absolute;
+  z-index: 3;
+  top: 2.1%;
+  left: 8%;
+  right: 7%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .8em;
+  min-width: 0;
+  margin: 0;
+  color: #f4fbff;
+  font-size: clamp(9px, 1.45cqw, 23px);
+  font-weight: 900;
+  letter-spacing: .05em;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(80, 180, 255, .9);
+}
+
+.wutos-panel__title-result {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: .45em;
+  overflow: hidden;
+  color: var(--wutos-muted);
+  font-size: clamp(5px, .6cqw, 9px);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+.wutos-panel__title-result small {
+  flex: 0 0 auto;
+  color: #7caac7;
+  font-size: .9em;
+  font-weight: 600;
+}
+
+.wutos-panel__title-result b {
+  min-width: 0;
+  overflow: hidden;
+  color: currentColor;
+  font-weight: 900;
+  text-overflow: ellipsis;
+}
+
+.wutos-panel__title-result em {
+  flex: 0 0 auto;
+  color: #79a9c4;
+  font: 700 .9em "Consolas", monospace;
+  font-style: normal;
+}
+
+.wutos-panel__title-result.pass { color: var(--wutos-green); }
+.wutos-panel__title-result.fail { color: var(--wutos-red); }
+.wutos-panel__title-result.pending { color: var(--wutos-blue); }
+
+.wutos-panel__title-result--final {
+  gap: .6em;
+  font-size: clamp(7px, .9cqw, 14px);
+  font-weight: 900;
+}
+
+.wutos-panel__title-result--final small {
+  font-size: .72em;
+}
+
+.wutos-panel__title-result--final b {
+  overflow: visible;
+  text-overflow: clip;
+  text-shadow: 0 0 8px currentColor;
+}
+
+.wutos-panel__body {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+}
+
+.wutos-panel--io {
+  top: 9.5%;
+  left: .55%;
+  width: 20.2%;
+  height: 67.8%;
+}
+
+.wutos-panel--alarm {
+  top: 9.2%;
+  right: .55%;
+  width: 28%;
+  height: 12.8%;
+}
+
+.wutos-panel--result {
+  top: 22.5%;
+  right: .55%;
+  width: 28%;
+  height: 56.6%;
+}
+
+.wutos-panel--flow {
+  right: .55%;
+  bottom: 1.35%;
+  left: .55%;
+  width: auto;
+  height: 18.5%;
+}
+
+.wutos-io-list {
+  position: absolute;
+  inset: 13% 7% 7%;
+  display: grid;
+  grid-template-rows: repeat(8, 1fr);
+}
+
+.wutos-plc-signal-groups {
+  position: absolute;
+  inset: 12% 6% 5.5%;
+  display: grid;
+  grid-template-rows: 1.45fr .9fr 1.85fr;
+  gap: 2.2%;
+}
+
+.wutos-signal-group {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.wutos-signal-group h3 {
+  flex: 0 0 auto;
+  margin: 0 0 3px;
+  color: #63cfff;
+  font-size: clamp(6px, .72cqw, 11px);
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.wutos-signal-group .wutos-io-list {
+  position: static;
+  inset: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: none;
+  grid-auto-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.wutos-signal-group .wutos-io-row {
+  padding: 0 2%;
+}
+
+.wutos-signal-group .wutos-io-row span {
+  font-size: clamp(6px, .78cqw, 12px);
+}
+
+.wutos-signal-group .wutos-io-row code {
+  font-size: clamp(6px, .65cqw, 10px);
+}
+
+.wutos-io-row {
+  display: grid;
+  grid-template-columns: 13% minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4%;
+  min-width: 0;
+  padding: 0 3%;
+  border-bottom: 1px solid rgba(19, 61, 98, .82);
+  background: rgba(3, 28, 54, .62);
+}
+
+.wutos-io-row img {
+  width: clamp(10px, 2.05cqw, 31px);
+  height: auto;
+}
+
+.wutos-io-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #e9f5ff;
+  font-size: clamp(7px, 1.05cqw, 17px);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-io-row code {
+  color: #2d9dff;
+  font: clamp(7px, .94cqw, 15px) / 1 "Consolas", monospace;
+}
+
+.wutos-stage {
+  position: absolute;
+  z-index: 1;
+  top: 9.5%;
+  left: 21.3%;
+  width: 50.5%;
+  height: 68%;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 12px 26px rgba(34, 84, 112, .16);
+}
+
+.wutos-stage::before {
+  content: none;
+}
+
+.wutos-machine {
+  position: absolute;
+  z-index: 3;
+  top: 1%;
+  left: 23%;
+  width: 54%;
+  height: 96%;
+  object-fit: contain;
+  filter: drop-shadow(0 22px 22px rgba(32, 68, 88, .28));
+}
+
+.wutos-stage__sensors {
+  position: absolute;
+  z-index: 5;
+  top: 4%;
+  bottom: 9%;
+  width: 21.5%;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 2.2%;
+}
+
+.wutos-stage__sensors--left { left: 1.5%; }
+.wutos-stage__sensors--right { right: 1.5%; }
+
+.wutos-sensor-card {
+  display: grid;
+  grid-template-rows: auto auto minmax(66px, 1fr) auto auto auto auto auto auto;
+  align-content: stretch;
+  row-gap: 1%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4% 5% 3%;
+  border: 1px solid rgba(28, 132, 207, .55);
+  border-radius: 5px;
+  color: #204f69;
+  background: linear-gradient(145deg, rgba(244, 251, 255, .97), rgba(224, 242, 251, .92));
+  box-shadow: 0 4px 12px rgba(25, 91, 127, .14), inset 0 0 10px rgba(38, 151, 215, .08);
+}
+
+.wutos-sensor-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  color: #194a68;
+  font-size: clamp(5px, .62cqw, 10px);
+  white-space: nowrap;
+}
+
+.wutos-sensor-card header > div { min-width: 0; }
+.wutos-sensor-card header small { display: block; margin-top: 2px; overflow: hidden; color: #7595a6; font-size: clamp(3px, .32cqw, 5px); text-overflow: ellipsis; white-space: nowrap; }
+
+.wutos-sensor-card header span { display: flex; align-items: center; gap: 4px; font-weight: 800; }
+.wutos-sensor-card header i { width: .65em; height: .65em; border-radius: 50%; background: #8ba9b7; }
+.wutos-sensor-card header b { color: #668595; font-weight: 800; }
+.wutos-sensor-card.is-online header i { background: #2dcf8d; box-shadow: 0 0 6px #2dcf8d; }
+.wutos-sensor-card.is-online header b { color: #16845b; }
+.wutos-sensor-card.is-fire { border-color: rgba(244, 128, 31, .8); background: linear-gradient(145deg, #fffaf2, #ffead1); }
+.wutos-sensor-card.is-fire header i { background: #ff922e; box-shadow: 0 0 7px #ff922e; }
+.wutos-sensor-card.is-fire header b { color: #c45b08; }
+.wutos-sensor-card.is-fault { border-color: rgba(225, 71, 65, .78); background: linear-gradient(145deg, #fff6f4, #ffe2dd); }
+.wutos-sensor-card.is-fault header i { background: #e44d47; box-shadow: 0 0 7px #e44d47; }
+.wutos-sensor-card.is-fault header b { color: #ba302d; }
+
+.wutos-sensor-wave {
+  display: grid;
+  position: relative;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  place-items: center;
+  overflow: hidden;
+  border-block: 1px solid rgba(44, 126, 172, .16);
+  background: linear-gradient(180deg, rgba(240, 250, 255, .86), rgba(227, 244, 251, .62));
+  color: #86a2b0;
+  font-size: clamp(5px, .48cqw, 8px);
+}
+
+.wutos-sensor-caption,
+.wutos-sensor-section-title { display: flex; align-items: center; justify-content: space-between; gap: 3px; margin-top: 0; color: #285a74; font-size: clamp(3px, .34cqw, 6px); line-height: 1; }
+.wutos-sensor-caption span,
+.wutos-sensor-section-title span { color: #7897a7; font-size: .86em; white-space: nowrap; }
+.wutos-sensor-legend { position: absolute; z-index: 1; top: 1px; left: 2px; display: flex; gap: 4px; color: #6e92a4; font-size: clamp(3px, .27cqw, 5px); }
+.wutos-sensor-legend span { display: flex; align-items: center; gap: 2px; }
+.wutos-sensor-legend i { width: 4px; height: 4px; border-radius: 50%; }
+.wutos-sensor-legend i.channel-1 { background: #008ee6; }
+.wutos-sensor-legend i.channel-2 { background: #21b881; }
+.wutos-sensor-legend i.channel-3 { background: #e5a112; }
+.wutos-sensor-legend i.channel-4 { background: #9a66d9; }
+
+.wutos-sensor-wave svg { display: block; width: 100%; height: 100%; }
+.wutos-wave-grid { fill: none; stroke: rgba(34, 113, 157, .12); stroke-width: .5; }
+.wutos-wave-line { fill: none; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.wutos-wave-line.channel-1 { stroke: #008ee6; }
+.wutos-wave-line.channel-2 { stroke: #21b881; }
+.wutos-wave-line.channel-3 { stroke: #e5a112; }
+.wutos-wave-line.channel-4 { stroke: #9a66d9; }
+
+.wutos-sensor-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3%;
+  text-align: center;
+}
+
+.wutos-sensor-values--probes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wutos-sensor-values--ratios { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.wutos-sensor-values span { min-width: 0; padding: 1px; color: #7693a3; border: 1px solid rgba(34, 113, 157, .18); font-size: clamp(3px, .29cqw, 5px); line-height: 1; white-space: nowrap; }
+.wutos-sensor-values b { display: inline; margin-top: 0; overflow: hidden; color: #174d6d; font: 700 clamp(4px, .45cqw, 7px) / 1 "Consolas", monospace; text-overflow: ellipsis; }
+.wutos-sensor-values small { display: inline; margin-left: 2px; overflow: hidden; color: #809ba8; font-size: clamp(3px, .25cqw, 4px); text-overflow: ellipsis; }
+.wutos-sensor-values--ratios b { color: #b57808; }
+.wutos-sensor-quality { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2%; margin-top: 0; }
+.wutos-sensor-quality span { min-width: 0; padding: 1px 2px; color: #7895a5; border: 1px solid rgba(34, 113, 157, .18); font-size: clamp(3px, .27cqw, 5px); line-height: 1; white-space: nowrap; }
+.wutos-sensor-quality b { display: block; color: #174d6d; font: 700 clamp(3px, .36cqw, 6px) "Consolas", monospace; }
+.wutos-sensor-card footer { margin-top: 0; color: #6f929f; font-size: clamp(3px, .28cqw, 5px); line-height: 1; }
+.wutos-sensor-card footer i { display: inline-block; width: 4px; height: 4px; margin-right: 3px; border-radius: 50%; background: #8ba9b7; }
+.wutos-sensor-card.is-online footer i { background: #2dcf8d; box-shadow: 0 0 5px #2dcf8d; }
+
+.wutos-live-waveform {
+  position: absolute;
+  z-index: 6;
+  right: 26%;
+  bottom: 9%;
+  left: 26%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 4%;
+  min-width: 0;
+  min-height: 0;
+  padding: 2.4% 3%;
+  overflow: hidden;
+  border: 1px solid rgba(0, 200, 255, .86);
+  border-radius: 6px;
+  color: #dff7ff;
+  background: linear-gradient(145deg, rgba(2, 25, 52, .94), rgba(3, 54, 82, .84));
+  box-shadow: 0 0 14px rgba(0, 174, 255, .42), inset 0 0 16px rgba(0, 200, 255, .12);
+  backdrop-filter: blur(3px);
+}
+
+.wutos-live-waveform__header,
+.wutos-live-waveform__footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.wutos-live-waveform__toggle { width: 100%; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.wutos-live-waveform__toggle:hover { color: #fff; }
+.wutos-live-waveform__toggle > svg { width: 1.2em; height: 1.2em; flex: 0 0 auto; color: #4de8f5; }
+.wutos-live-waveform.is-collapsed { display: block; padding: 1.2% 2%; }
+.wutos-live-waveform__header strong { display: block; margin-top: 3px; color: #f1fcff; font-size: clamp(8px, .95cqw, 15px); font-weight: 900; }
+.wutos-live-waveform__eyebrow { display: flex; align-items: center; gap: 3px; color: #4de8f5; font-size: clamp(5px, .42cqw, 7px); font-weight: 800; letter-spacing: .06em; }
+.wutos-live-waveform__eyebrow svg { width: 1.1em; height: 1.1em; }
+.wutos-live-waveform__status { display: grid; justify-items: end; gap: 3px; color: #80aec0; font: clamp(5px, .4cqw, 7px) / 1.1 "Consolas", monospace; text-align: right; white-space: nowrap; }
+.wutos-live-waveform__status b { color: #a0b8c3; font-family: "Microsoft YaHei", sans-serif; font-weight: 800; }
+.wutos-live-waveform__status b.is-live { color: #55efae; }
+
+.wutos-live-waveform__chart { position: relative; min-height: 0; overflow: hidden; border: 1px solid rgba(74, 179, 213, .42); background: linear-gradient(180deg, rgba(0, 17, 37, .78), rgba(0, 10, 26, .9)); }
+.wutos-live-waveform__chart svg { display: block; width: 100%; height: 100%; }
+.wutos-live-waveform__grid { fill: none; stroke: rgba(104, 207, 236, .2); stroke-width: .55; vector-effect: non-scaling-stroke; }
+.wutos-live-waveform__line { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.wutos-live-waveform__line.channel-1 { stroke: #27a9ff; }
+.wutos-live-waveform__line.channel-2 { stroke: #31e0ae; }
+.wutos-live-waveform__line.channel-3 { stroke: #ffd15c; }
+.wutos-live-waveform__line.channel-4 { stroke: #c28cff; }
+.wutos-live-waveform__empty { display: grid; height: 100%; place-items: center; color: #7698a7; font-size: clamp(6px, .52cqw, 9px); }
+
+.wutos-live-waveform__data { display: grid; gap: 4px; min-width: 0; }
+.wutos-live-waveform__values-title { display: flex; align-items: center; justify-content: space-between; gap: 4px; color: #285a74; font-size: clamp(5px, .4cqw, 7px); line-height: 1; }
+.wutos-live-waveform__values-title b { color: #d7f3fa; font-weight: 800; }
+.wutos-live-waveform__values-title span { color: #83adbd; font-size: .86em; white-space: nowrap; }
+.wutos-live-waveform__values { display: grid; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); gap: 4px; }
+.wutos-live-waveform__values span { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 5px; border: 1px solid rgba(74, 179, 213, .3); background: rgba(2, 20, 38, .62); color: #83adbd; font-size: clamp(5px, .4cqw, 7px); white-space: nowrap; }
+.wutos-live-waveform__values i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: #7894a1; }
+.wutos-live-waveform__values i.channel-1 { background: #27a9ff; }
+.wutos-live-waveform__values i.channel-2 { background: #31e0ae; }
+.wutos-live-waveform__values i.channel-3 { background: #ffd15c; }
+.wutos-live-waveform__values i.channel-4 { background: #c28cff; }
+.wutos-live-waveform__values label { overflow: hidden; text-overflow: ellipsis; }
+.wutos-live-waveform__values b { margin-left: auto; color: #f1fcff; font: 700 clamp(7px, .58cqw, 10px) "Consolas", monospace; }
+.wutos-live-waveform__values small { margin-left: 2px; color: #83adbd; font-size: clamp(5px, .36cqw, 7px); }
+.wutos-live-waveform__values .is-empty { justify-content: center; color: #7698a7; }
+
+.wutos-live-waveform__legend { display: flex; align-items: center; gap: 6px; min-width: 0; color: #83adbd; font-size: clamp(5px, .4cqw, 7px); white-space: nowrap; }
+.wutos-live-waveform__legend span { display: inline-flex; align-items: center; gap: 2px; }
+.wutos-live-waveform__legend i,
+.wutos-live-waveform__devices i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: #7894a1; }
+.wutos-live-waveform__legend i.channel-1 { background: #27a9ff; }
+.wutos-live-waveform__legend i.channel-2 { background: #31e0ae; }
+.wutos-live-waveform__legend i.channel-3 { background: #ffd15c; }
+.wutos-live-waveform__legend i.channel-4 { background: #c28cff; }
+.wutos-live-waveform__devices { display: flex; align-items: center; gap: 3px; }
+.wutos-live-waveform__devices button { display: inline-flex; align-items: center; gap: 2px; min-width: 15px; justify-content: center; padding: 2px 3px; color: #7195a5; border: 1px solid rgba(88, 164, 199, .3); border-radius: 3px; background: rgba(2, 24, 45, .8); font: 600 clamp(5px, .38cqw, 7px) "Consolas", monospace; cursor: pointer; }
+.wutos-live-waveform__devices button:hover,
+.wutos-live-waveform__devices button.is-selected { color: #e9fcff; border-color: #42e7f1; background: rgba(11, 93, 124, .8); box-shadow: 0 0 6px rgba(40, 216, 233, .35); }
+.wutos-live-waveform__devices i.is-online { background: #42e7ae; box-shadow: 0 0 4px #42e7ae; }
+
+.wutos-machine--real {
+  mix-blend-mode: multiply;
+  filter: contrast(1.04) saturate(.92) drop-shadow(0 22px 22px rgba(32, 68, 88, .28));
+}
+
+.wutos-stage__status {
+  position: absolute;
+  z-index: 4;
+  right: 4%;
+  bottom: 3.5%;
+  left: 4%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45em;
+  color: #2e6e93;
+  font-size: clamp(6px, .8cqw, 13px);
+  text-align: center;
+  text-shadow: none;
+}
+
+.wutos-stage__status > span {
+  width: .65em;
+  height: .65em;
+  border-radius: 50%;
+  background: var(--wutos-green);
+  box-shadow: 0 0 8px var(--wutos-green);
+  animation: wutos-live-pulse 1.7s ease-in-out infinite;
+}
+
+.wutos-stage__status.is-alarm {
+  color: #b3473d;
+}
+
+.wutos-stage__status.is-alarm > span {
+  background: var(--wutos-red);
+  box-shadow: 0 0 8px var(--wutos-red);
+}
+
+.wutos-stage__status b {
+  font-weight: 800;
+}
+
+.wutos-stage__status small {
+  color: rgba(46, 110, 147, .72);
+  font-size: .86em;
+}
+
+.wutos-alarm-table {
+  position: absolute;
+  inset: 18.5% 7% 7%;
+  display: grid;
+  grid-template-rows: 1.4fr repeat(6, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(18, 71, 123, .75);
+  border-radius: 5px;
+  background: rgba(3, 25, 48, .66);
+  font-size: clamp(6px, .75cqw, 12px);
+}
+
+.wutos-alarm-row {
+  display: grid;
+  grid-template-columns: 25% minmax(0, 1fr) 22%;
+  align-items: center;
+  gap: 3%;
+  min-width: 0;
+  padding: 0 4%;
+  border-top: 1px solid rgba(18, 55, 94, .78);
+  color: #e8f5ff;
+  text-align: center;
+}
+
+.wutos-alarm-row--head {
+  border-top: 0;
+  color: #dff4ff;
+  font-weight: 800;
+}
+
+.wutos-alarm-row > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-alarm-row > span:nth-child(2) small {
+  display: none;
+}
+
+.wutos-alarm-row time {
+  color: #c7e7fb;
+  font-family: "Consolas", monospace;
+}
+
+.wutos-alarm-row b {
+  font-weight: 800;
+}
+
+.wutos-alarm-row b.normal {
+  color: var(--wutos-green);
+}
+
+.wutos-alarm-row b.info {
+  color: var(--wutos-blue);
+}
+
+.wutos-alarm-row b.danger {
+  color: var(--wutos-red);
+}
+
+.wutos-detector-grid {
+  position: absolute;
+  top: 14.5%;
+  right: 7%;
+  bottom: 23%;
+  left: 7%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 2.2%;
+  min-height: 0;
+}
+
+.wutos-final-result-cards {
+  position: absolute;
+  z-index: 2;
+  right: 7%;
+  bottom: 5%;
+  left: 7%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2.2%;
+  height: clamp(22px, 14%, 54px);
+  min-height: 0;
+}
+
+.wutos-final-result-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  padding: 3px 6px;
+  border: 1px solid rgba(39, 133, 192, .72);
+  border-radius: 4px;
+  background: linear-gradient(145deg, rgba(3, 37, 69, .94), rgba(2, 19, 42, .92));
+  box-shadow: inset 0 0 10px rgba(0, 142, 255, .12);
+  text-align: center;
+}
+
+.wutos-final-result-card small,
+.wutos-final-result-card b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-final-result-card small {
+  color: #82adc4;
+  font-size: clamp(7px, .58cqw, 10px);
+  font-weight: 700;
+}
+
+.wutos-final-result-card b {
+  font: 900 clamp(13px, 1.15cqw, 20px) / 1 "Consolas", monospace;
+  text-shadow: 0 0 8px currentColor;
+}
+
+.wutos-final-result-card.is-a-pass {
+  border-color: rgba(68, 225, 172, .76);
+  color: #59efb4;
+  background: linear-gradient(145deg, rgba(3, 72, 67, .9), rgba(2, 37, 48, .92));
+}
+
+.wutos-final-result-card.is-b-pass {
+  border-color: rgba(52, 179, 255, .78);
+  color: #55cbff;
+}
+
+.wutos-final-result-card.is-fail {
+  border-color: rgba(255, 91, 82, .86);
+  color: #ff716d;
+  background: linear-gradient(145deg, rgba(79, 25, 42, .9), rgba(45, 17, 32, .92));
+}
+
+.wutos-detector-card {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  padding: 4.5% 6%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #0b75d6;
+  border-radius: 6px;
+  background: rgba(3, 30, 57, .86);
+  box-shadow: 0 0 9px rgba(0, 132, 255, .45), inset 0 0 13px rgba(0, 126, 255, .14);
+}
+
+.wutos-detector-card.pass {
+  border-color: rgba(53, 205, 163, .9);
+}
+
+.wutos-detector-card.fail {
+  border-color: rgba(255, 91, 82, .95);
+  background: rgba(49, 20, 34, .78);
+}
+
+.wutos-detector-card.is-noise {
+  border-color: rgba(83, 231, 192, .98);
+  box-shadow: 0 0 18px rgba(83, 231, 192, .52), inset 0 0 15px rgba(83, 231, 192, .12);
+}
+
+.wutos-detector-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+  padding-bottom: 4%;
+  border-bottom: 1px solid rgba(26, 87, 139, .8);
+}
+
+.wutos-detector-card header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f0f9ff;
+  font-size: clamp(7px, .92cqw, 14px);
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-detector-card header span {
+  color: #6ca7d5;
+  font: clamp(6px, .68cqw, 10px) "Consolas", monospace;
+}
+
+.wutos-detector-card__metrics {
+  display: grid;
+  gap: 4%;
+  padding: 4% 0 3%;
+}
+
+.wutos-detector-card__metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+}
+
+.wutos-detector-card__metric-label {
+  display: block;
+  color: #78a9c9;
+  font-size: clamp(5px, .52cqw, 8px);
+  line-height: 1.1;
+}
+
+.wutos-detector-card__metric-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 3%;
+  min-width: 0;
+}
+
+.wutos-detector-card__metric-values > span {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px;
+  color: #78a9c9;
+  font: 700 clamp(5px, .5cqw, 8px) "Consolas", monospace;
+}
+
+.wutos-detector-card__metric-values b {
+  min-width: 0;
+  color: #eef9ff;
+  font: 900 clamp(6px, .62cqw, 9px) "Consolas", monospace;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.wutos-detector-card__metric-values b.is-over-limit {
+  color: var(--wutos-red);
+  text-shadow: 0 0 6px rgba(255, 91, 82, .75);
+}
+
+.wutos-detector-card__processes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2.5%;
+  margin-top: auto;
+  border-top: 1px solid rgba(26, 87, 139, .65);
+  padding-top: 4%;
+}
+
+.wutos-process-lamp {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  gap: 3px;
+  padding: 0;
+  color: #7794a6;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wutos-process-lamp > i {
+  width: clamp(5px, .65cqw, 9px);
+  height: clamp(5px, .65cqw, 9px);
+  border: 1px solid #6b8795;
+  border-radius: 50%;
+  background: #536c79;
+  box-shadow: inset 0 0 3px rgba(255, 255, 255, .16);
+}
+
+.wutos-process-lamp > span {
+  overflow: hidden;
+  width: 100%;
+  font-size: clamp(4px, .45cqw, 7px);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-process-lamp.pass { color: #66dcb0; }
+.wutos-process-lamp.pass > i { border-color: #6ff0bc; background: var(--wutos-green); box-shadow: 0 0 7px var(--wutos-green); }
+.wutos-process-lamp.fail { color: #ff8c84; }
+.wutos-process-lamp.fail > i { border-color: #ff9b94; background: var(--wutos-red); box-shadow: 0 0 7px var(--wutos-red); }
+.wutos-process-lamp.pending > i { border-color: #7994a1; background: #5b7586; }
+.wutos-process-lamp:focus-visible > i,
+.wutos-process-lamp.is-open > i { outline: 1px solid #f0f9ff; outline-offset: 2px; }
+
+.wutos-process-lamp__popover {
+  position: absolute;
+  z-index: 8;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  width: max-content;
+  max-width: 130px;
+  padding: 6px 8px;
+  color: #9fc5db;
+  border: 1px solid #2a96d5;
+  border-radius: 3px;
+  background: rgba(2, 24, 45, .98);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, .4), 0 0 8px rgba(0, 143, 255, .3);
+  line-height: 1.35;
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.wutos-process-lamp__popover em,
+.wutos-process-lamp__popover b { display: block; font-style: normal; }
+.wutos-process-lamp__popover em { font-size: clamp(5px, .48cqw, 7px); font-weight: 400; }
+.wutos-process-lamp__popover b { margin-top: 2px; color: #f2fbff; font: 900 clamp(6px, .62cqw, 9px) "Consolas", monospace; overflow-wrap: anywhere; }
+
+.wutos-detector-card__failure {
+  display: block;
+  margin-top: 3%;
+  overflow: hidden;
+  color: #ff938b;
+  font-size: clamp(4px, .47cqw, 7px);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-flow-track {
+  position: absolute;
+  top: 22%;
+  right: 3.7%;
+  left: 3.7%;
+  display: flex;
+  align-items: flex-start;
+}
+
+.wutos-flow-segment {
+  display: contents;
+}
+
+.wutos-flow-node {
+  display: flex;
+  flex: 0 0 7.2%;
+  flex-direction: column;
+  align-items: center;
+  gap: 6%;
+  min-width: 0;
+  color: #b6d9f2;
+}
+
+.wutos-flow-node__circle {
+  display: grid;
+  width: clamp(20px, 4.5cqw, 72px);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid #7dbdf5;
+  border-radius: 50%;
+  background: #061d38;
+  box-shadow: 0 0 10px rgba(74, 160, 255, .6), inset 0 0 14px rgba(107, 189, 255, .2);
+}
+
+.wutos-flow-node__circle svg {
+  width: 56%;
+  height: 56%;
+  stroke-width: 2;
+}
+
+.wutos-flow-node small {
+  width: 100%;
+  overflow: hidden;
+  font-size: clamp(5px, .62cqw, 10px);
+  font-weight: 800;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-flow-node small b {
+  display: block;
+  margin-top: 2px;
+  color: rgba(102, 190, 239, .72);
+  font: 500 clamp(5px, .47cqw, 8px) / 1 "Consolas", monospace;
+}
+
+.wutos-flow-node.is-done {
+  color: #8cc7ec;
+}
+
+.wutos-flow-node.is-done .wutos-flow-node__circle {
+  border-color: #3cabe9;
+  background: #08305a;
+}
+
+.wutos-flow-node.is-current {
+  color: #f3fdff;
+}
+
+.wutos-flow-node.is-current .wutos-flow-node__circle {
+  border-color: var(--wutos-cyan);
+  background: #06475b;
+  box-shadow: 0 0 19px rgba(0, 247, 255, .95), inset 0 0 18px rgba(0, 255, 255, .42);
+}
+
+.wutos-flow-node.is-current.is-alarm .wutos-flow-node__circle {
+  border-color: var(--wutos-red);
+  background: #5d2733;
+  box-shadow: 0 0 18px rgba(255, 83, 82, .85), inset 0 0 16px rgba(255, 83, 82, .32);
+}
+
+.wutos-flow-arrow {
+  position: relative;
+  flex: 1 1 auto;
+  height: clamp(20px, 4.5cqw, 72px);
+  min-width: 4px;
+}
+
+.wutos-flow-arrow span {
+  position: absolute;
+  top: 50%;
+  right: 19%;
+  left: 9%;
+  height: 2px;
+  border-radius: 99px;
+  background: var(--wutos-blue);
+  box-shadow: 0 0 8px rgba(44, 164, 255, .85);
+  transform: translateY(-50%);
+}
+
+.wutos-flow-arrow svg {
+  position: absolute;
+  top: 50%;
+  right: 5%;
+  width: clamp(8px, 1.4cqw, 22px);
+  height: clamp(8px, 1.4cqw, 22px);
+  color: var(--wutos-blue);
+  transform: translateY(-50%);
+}
+
+.wutos-flow-baseline {
+  position: absolute;
+  right: 6%;
+  bottom: 8%;
+  left: 6%;
+  height: 1px;
+  background: #164983;
+}
+
+.wutos-flow-baseline i {
+  position: absolute;
+  top: 50%;
+  width: clamp(3px, .5cqw, 8px);
+  height: clamp(3px, .5cqw, 8px);
+  border: 1px solid #238cff;
+  border-radius: 50%;
+  background: #071b34;
+  transform: translate(-50%, -50%);
+}
+
+.wutos-flow-baseline i.is-lit {
+  background: var(--wutos-cyan);
+  box-shadow: 0 0 11px var(--wutos-cyan);
+}
+
+.wutos-flow-note {
+  position: absolute;
+  right: 5%;
+  bottom: 1.3%;
+  left: 5%;
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+  color: rgba(127, 183, 221, .72);
+  font-size: clamp(5px, .53cqw, 9px);
+  white-space: nowrap;
+}
+
+.wutos-flow-note code {
+  color: rgba(73, 202, 255, .8);
+  font: inherit;
+}
+
+@keyframes wutos-live-pulse {
+  0%, 100% { opacity: .52; transform: scale(.82); }
+  50% { opacity: 1; transform: scale(1.16); }
+}
+
+.wutos-detail-overlay {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+  background: rgba(1, 7, 17, .9);
+}
+
+.wutos-detail-shell {
+  width: min(1480px, 100%);
+  margin: auto;
+  border: 1px solid #2ddbe9;
+  background: linear-gradient(145deg, #082537, #04131f);
+  box-shadow: 0 0 35px rgba(10, 215, 229, .18);
+}
+
+.wutos-detail-shell > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #1f6474;
+}
+
+.wutos-detail-shell > header h2 {
+  margin: 0;
+  color: #effcff;
+  font-size: 20px;
+}
+
+.wutos-detail-shell > header p {
+  margin: 5px 0 0;
+  color: #79aebb;
+  font-size: 11px;
+}
+
+.wutos-detail-shell > header button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: #b9eff7;
+  border: 1px solid #38d7e5;
+  background: #0b3446;
+  cursor: pointer;
+}
+
+.wutos-detail-shell > .detector-workbench {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+@media (max-width: 920px) {
+  .wutos-header {
+    grid-template-columns: 18% 58% 24%;
+  }
+
+  .wutos-header__meta > span:nth-of-type(n + 3) {
+    display: none;
+  }
+
+  .wutos-detail-overlay {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 1400px) {
+  .wutos-sensor-card {
+    grid-template-rows: auto auto minmax(38px, 1fr) auto auto auto auto auto auto;
+    padding: 3% 4% 2%;
+    row-gap: .5%;
+  }
+
+  .wutos-sensor-values span,
+  .wutos-sensor-quality span { font-size: clamp(3px, .27cqw, 4px); }
+}
+
+@media (max-aspect-ratio: 1 / 1) {
+  .wutos-dashboard {
+    overflow: auto;
+    place-items: start center;
+  }
+
+  .wutos-frame {
+    flex: 0 0 auto;
+    width: max(760px, 100%);
+  }
+}

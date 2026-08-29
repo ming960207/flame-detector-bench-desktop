@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "火焰探测器检测台｜PLC 检测全流程时序",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.full-sequence.html",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1700, 950],
+    "views": [
+      {
+        "id": "mechanical-process",
+        "label": "机械工序",
+        "focus": ["operator", "plc", "fixture", "monitor"],
+        "note": "查看启动、归零、两个检测位、干扰工序、回初始位和完成状态。"
+      },
+      {
+        "id": "signal-quality",
+        "label": "信号采集与分析",
+        "focus": ["plc", "fixture", "detectors", "monitor", "analysis"],
+        "note": "查看热源稳定、噪声窗口、热源/爆闪/电磁三类干扰波形和分析输入。"
+      },
+      {
+        "id": "final-gate",
+        "label": "最终判定门禁",
+        "focus": ["monitor", "analysis", "record"],
+        "note": "只有 PLC 流程完成、分析完成且六台探测器满足条件，结果才可进入记录。"
+      }
+    ]
+  },
+  "participants": [
+    { "id": "operator", "type": "external", "label": "操作员" },
+    { "id": "plc", "type": "backend", "label": "PLC 程序" },
+    { "id": "fixture", "type": "external", "label": "检测台机构" },
+    { "id": "detectors", "type": "external", "label": "六台探测器" },
+    { "id": "monitor", "type": "frontend", "label": "上位机监测" },
+    { "id": "analysis", "type": "backend", "label": "分析与判定" },
+    { "id": "record", "type": "database", "label": "结果与记录" }
+  ],
+  "messages": [
+    { "id": "start-request", "from": "operator", "to": "plc", "y": 160, "label": "安全确认 → 请求启动", "variant": "security", "note": "I1.0=1；I1.3 上升沿或启动请求；M0.3=1、M0.2=0、M0.0=0 才放行。" },
+    { "id": "init-and-vertical-home", "from": "plc", "to": "fixture", "y": 192, "label": "初始化：垂直上行 2s", "variant": "emphasis", "note": "M0.0、M10.0 置位；Q0.4 电机总电源、Q1.1 上行；T44=2.0s。" },
+    { "id": "home-and-zone-one", "from": "fixture", "to": "plc", "y": 224, "label": "回初始位 8s → 检测区1", "variant": "return", "note": "T48=8.0s 重叠移动等待；I0.0 确认初始位；T49=1.0s 后移动，I0.2 确认检测区1。" },
+    { "id": "heat-clamp", "from": "plc", "to": "fixture", "y": 256, "label": "检测区1到位 → 下压 1s+10s", "variant": "emphasis", "note": "T50=1.0s 启动等待；T45=10.0s 完成热源位夹具下压。" },
+    { "id": "heat-state", "from": "plc", "to": "monitor", "y": 288, "label": "进入热源阶段 2/2", "variant": "emphasis", "note": "上位机识别 M10.3/M15.0，显示热源定位和信号稳定子阶段。" },
+    { "id": "heat-stabilize-noise", "from": "plc", "to": "detectors", "y": 320, "label": "热源稳定 30s + 噪声 30s", "variant": "emphasis", "note": "T63=30.0s 稳定；M25.2 开启噪声窗口；T51=30.0s。上位机另有5s信号稳定等待。" },
+    { "id": "noise-baseline", "from": "detectors", "to": "analysis", "y": 352, "label": "噪声基线：至少 400 样本", "variant": "default", "note": "默认噪声 RMS 50~200、绝对值≤1000；A 级 RMS 上限180，B 级上限200。" },
+    { "id": "heat-interference", "from": "plc", "to": "fixture", "y": 384, "label": "热源挥手：5×1s ≈ 5s", "variant": "emphasis", "note": "T37/T40/T41/T42/T43 各1.0s；Q0.1 热源、Q1.0 气缸/挥手；3段动作+2段间隔。" },
+    { "id": "heat-analysis", "from": "detectors", "to": "analysis", "y": 416, "label": "提交热源波形与指标", "variant": "default", "note": "记录热源检测位，计算干扰比、一致性趋势、SNR21/SNR23/SNR31。" },
+    { "id": "move-zone-two", "from": "plc", "to": "fixture", "y": 448, "label": "上升 10s → 2s 后移向检测区2", "variant": "emphasis", "note": "T46=10.0s 完成夹具上升；T62=2.0s 后允许垂直上升与水平移动重叠，I0.1 确认检测区2。" },
+    { "id": "flash-clamp-stabilize", "from": "plc", "to": "fixture", "y": 480, "label": "区2下压 1s+10s；稳定 10s", "variant": "emphasis", "note": "T52=1.0s 切换等待；T47=10.0s 下压；T38=10.0s 爆闪位稳定等待。" },
+    { "id": "flash-pulses", "from": "plc", "to": "fixture", "y": 512, "label": "五次爆闪：9×1s", "variant": "emphasis", "note": "T53~T61 共9段：5次亮灯+4次灭灯；Q1.2/Q1.3 同步驱动双爆闪灯。" },
+    { "id": "flash-analysis", "from": "detectors", "to": "analysis", "y": 544, "label": "提交爆闪波形与指标", "variant": "default", "note": "爆闪阶段样本不足或 SNR23 超限时，分析返回明确失败原因。" },
+    { "id": "emc-interference", "from": "plc", "to": "fixture", "y": 576, "label": "电磁干扰：10s", "variant": "emphasis", "note": "M11.2 经 M31.7 安全使能驱动 Q0.7；T39=10.0s。" },
+    { "id": "emc-analysis", "from": "detectors", "to": "analysis", "y": 608, "label": "提交 EMC 波形与指标", "variant": "default", "note": "干扰比默认上限1.5；一致性趋势 A≥0.8、B≥0.75；至少80个干扰样本。" },
+    { "id": "return-home", "from": "plc", "to": "fixture", "y": 640, "label": "电磁结束 → 回初始位", "variant": "emphasis", "note": "T39 到时置 M11.4；复用 T44=2.0s、T48=8.0s、T49=1.0s；I0.0 最终确认。" },
+    { "id": "complete", "from": "plc", "to": "monitor", "y": 672, "label": "流程完成：VW600/602=0/0", "variant": "emphasis", "note": "M0.1 锁存，动作输出清除；上位机将 COMPLETE 作为最终判定前置条件。" },
+    { "id": "quality-standard", "from": "analysis", "to": "monitor", "y": 704, "label": "按标准计算 A / B / NG", "variant": "return", "note": "每台设备检查噪声、绝对值、干扰比、一致性、SNR21/23/31、灵敏度和阶段完成状态。" },
+    { "id": "batch-verdict", "from": "analysis", "to": "monitor", "y": 736, "label": "返回六台批次结果", "variant": "return", "note": "故障或指标失败=FAIL；离线、未就绪、同步异常或数据未齐=PENDING；默认接受等级B。" },
+    { "id": "final-record", "from": "monitor", "to": "record", "y": 768, "label": "完成 + 分析 PASS → 记录", "variant": "emphasis", "note": "质量契约要求6台；只有 PLC COMPLETE、分析 PASS 且无 PENDING 才形成正式结果，记录两检测位、波形和阈值。" },
+    { "id": "export", "from": "record", "to": "operator", "y": 800, "label": "查询、导出、回看", "variant": "return", "note": "不合格或待检测不得直接放行；本地记录用于追溯，不替代现场安全和 FAT/SAT。" },
+    { "id": "stop-or-emergency", "from": "operator", "to": "plc", "y": 832, "label": "任意阶段 STOP / 急停", "variant": "security", "note": "M2.0 停止请求或 I1.0=0 安全链断开，PLC 置 M1.0 停止/中止锁存。" },
+    { "id": "abort-handling", "from": "plc", "to": "monitor", "y": 864, "label": "清除动作 + 上报告警", "variant": "security", "note": "清除自动步、热源、气缸、爆闪等输出，Q0.6 保持水平停止；上位机显示故障/中止并禁止当前批次放行。" }
+  ],
+  "activations": [
+    { "participant": "plc", "from": 160, "to": 864, "type": "backend" },
+    { "participant": "fixture", "from": 192, "to": 832, "type": "external" },
+    { "participant": "detectors", "from": 320, "to": 608, "type": "external" },
+    { "participant": "monitor", "from": 192, "to": 864, "type": "frontend" },
+    { "participant": "analysis", "from": 352, "to": 768, "type": "backend" },
+    { "participant": "record", "from": 768, "to": 800, "type": "database" }
+  ]
+}
