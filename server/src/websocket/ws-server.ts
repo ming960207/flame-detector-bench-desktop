@@ -33,9 +33,10 @@ const CLIENT_MESSAGE_TYPES = new Set<WSMessageType>([
   WSMessageType.UPDATE_CONFIG,
   WSMessageType.CLOSURE_COMMAND,
 ]);
+const FIELD_PUSH_ONLY_MESSAGES = new Set<WSMessageType>();
 
 export interface WSServerOptions {
-  /** Undefined preserves legacy behavior. An empty set creates a push-only socket. */
+  /** Undefined preserves legacy behavior except field mode, which is push-only by default. */
   allowedClientMessageTypes?: ReadonlySet<WSMessageType>;
   rejectedClientMessageCode?: string;
 }
@@ -105,8 +106,10 @@ export class WSServer extends EventEmitter {
 
   constructor(options: WSServerOptions = {}) {
     super();
-    this.allowedClientMessageTypes = options.allowedClientMessageTypes;
-    this.rejectedClientMessageCode = options.rejectedClientMessageCode ?? 'WS_CLIENT_COMMAND_DISABLED';
+    const fieldDefault = process.env.CLOSURE_MODE === 'field' ? FIELD_PUSH_ONLY_MESSAGES : undefined;
+    this.allowedClientMessageTypes = options.allowedClientMessageTypes ?? fieldDefault;
+    this.rejectedClientMessageCode = options.rejectedClientMessageCode
+      ?? (process.env.CLOSURE_MODE === 'field' ? 'FIELD_STATUS_READONLY' : 'WS_CLIENT_COMMAND_DISABLED');
   }
 
   init(server: Server): void {
@@ -210,18 +213,12 @@ export class WSServer extends EventEmitter {
   broadcast(message: WSMessage): void {
     const data = JSON.stringify(message);
     for (const client of this.clients) {
-      if (client.readyState === WebSocket.OPEN && client.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES) {
-        client.send(data);
-      }
+      if (client.readyState === WebSocket.OPEN && client.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES) client.send(data);
     }
   }
 
   broadcastIOState(state: IOState): void {
-    this.broadcast({
-      type: WSMessageType.IO_STATE,
-      payload: state,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ type: WSMessageType.IO_STATE, payload: state, timestamp: Date.now() });
   }
 
   private rememberFlameHistoryTotals(state: FlameDetectorState): void {
@@ -230,7 +227,6 @@ export class WSServer extends EventEmitter {
       this.hasFlameHistoryBaseline = false;
       return;
     }
-
     for (const unit of state.units) {
       const total = historySampleTotal(unit);
       if (total === null) {
@@ -248,20 +244,12 @@ export class WSServer extends EventEmitter {
       this.flameClientsNeedingResync.add(ws);
       return;
     }
-    this.sendToClient(ws, {
-      type: WSMessageType.FLAME_STATE,
-      payload: state,
-      timestamp,
-    });
+    this.sendToClient(ws, { type: WSMessageType.FLAME_STATE, payload: state, timestamp });
     this.flameClientsNeedingResync.delete(ws);
   }
 
   private broadcastFlameSnapshot(state: FlameDetectorState, timestamp: number): void {
-    const data = JSON.stringify({
-      type: WSMessageType.FLAME_STATE,
-      payload: state,
-      timestamp,
-    });
+    const data = JSON.stringify({ type: WSMessageType.FLAME_STATE, payload: state, timestamp });
     for (const client of this.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
       if (client.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
@@ -274,18 +262,11 @@ export class WSServer extends EventEmitter {
   }
 
   private broadcastFlameWaveformDelta(delta: FlameDetectorWaveformDelta): void {
-    const data = JSON.stringify({
-      type: WSMessageType.FLAME_WAVEFORM_DELTA,
-      payload: delta,
-      timestamp: delta.timestamp,
-    });
+    const data = JSON.stringify({ type: WSMessageType.FLAME_WAVEFORM_DELTA, payload: delta, timestamp: delta.timestamp });
     for (const client of this.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
-
       if (this.flameClientsNeedingResync.has(client)) {
-        if (this.latestFlameState && client.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES) {
-          this.sendFlameSnapshot(client, this.latestFlameState, delta.timestamp);
-        }
+        if (this.latestFlameState && client.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES) this.sendFlameSnapshot(client, this.latestFlameState, delta.timestamp);
         continue;
       }
       if (client.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
@@ -299,13 +280,11 @@ export class WSServer extends EventEmitter {
   private publishFlameState(state: FlameDetectorState): void {
     this.lastFlamePublishedAt = Date.now();
     const timestamp = this.lastFlamePublishedAt;
-
     if (!this.hasFlameHistoryBaseline) {
       this.rememberFlameHistoryTotals(state);
       this.broadcastFlameSnapshot(state, timestamp);
       return;
     }
-
     const delta = createFlameWaveformDelta(state, this.flameHistoryTotals);
     this.rememberFlameHistoryTotals(state);
     if (!delta) {
@@ -337,19 +316,12 @@ export class WSServer extends EventEmitter {
       return;
     }
     if (this.flamePublishTimer) return;
-    this.flamePublishTimer = setTimeout(
-      () => this.flushPendingFlameState(),
-      Math.max(0, REALTIME_UI_PUBLISH_INTERVAL_MS - elapsed),
-    );
+    this.flamePublishTimer = setTimeout(() => this.flushPendingFlameState(), Math.max(0, REALTIME_UI_PUBLISH_INTERVAL_MS - elapsed));
   }
 
   private publishFieldSummary(payload: unknown): void {
     this.lastFieldSummaryPublishedAt = Date.now();
-    this.broadcast({
-      type: WSMessageType.FIELD_SUMMARY,
-      payload,
-      timestamp: this.lastFieldSummaryPublishedAt,
-    });
+    this.broadcast({ type: WSMessageType.FIELD_SUMMARY, payload, timestamp: this.lastFieldSummaryPublishedAt });
   }
 
   private flushPendingFieldSummary(): void {
@@ -367,58 +339,31 @@ export class WSServer extends EventEmitter {
       return;
     }
     if (this.fieldSummaryPublishTimer) return;
-    this.fieldSummaryPublishTimer = setTimeout(
-      () => this.flushPendingFieldSummary(),
-      Math.max(0, REALTIME_UI_PUBLISH_INTERVAL_MS - elapsed),
-    );
+    this.fieldSummaryPublishTimer = setTimeout(() => this.flushPendingFieldSummary(), Math.max(0, REALTIME_UI_PUBLISH_INTERVAL_MS - elapsed));
   }
 
   broadcastClosureState(state: ClosureState): void {
-    this.broadcast({
-      type: WSMessageType.CLOSURE_STATE,
-      payload: state,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ type: WSMessageType.CLOSURE_STATE, payload: state, timestamp: Date.now() });
   }
 
   broadcastClosureCommandResult(result: ClosureCommandResult): void {
-    this.broadcast({
-      type: WSMessageType.CLOSURE_COMMAND_RESULT,
-      payload: result,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ type: WSMessageType.CLOSURE_COMMAND_RESULT, payload: result, timestamp: Date.now() });
   }
 
   broadcastPLCProcessStatus(status: PLCProcessStatus): void {
-    this.broadcast({
-      type: WSMessageType.PLC_PROCESS_STATUS,
-      payload: status,
-      timestamp: status.timestamp,
-    });
+    this.broadcast({ type: WSMessageType.PLC_PROCESS_STATUS, payload: status, timestamp: status.timestamp });
   }
 
   broadcastConnectionStatus(status: ConnectionStatus): void {
-    this.broadcast({
-      type: WSMessageType.CONNECTION_STATUS,
-      payload: status,
-      timestamp: Date.now(),
-    });
+    this.broadcast({ type: WSMessageType.CONNECTION_STATUS, payload: status, timestamp: Date.now() });
   }
 
   sendError(ws: WebSocket, error: string): void {
-    this.sendToClient(ws, {
-      type: WSMessageType.ERROR,
-      payload: { error },
-      timestamp: Date.now(),
-    });
+    this.sendToClient(ws, { type: WSMessageType.ERROR, payload: { error }, timestamp: Date.now() });
   }
 
   broadcastError(error: string): void {
-    this.broadcast({
-      type: WSMessageType.ERROR,
-      payload: { error },
-      timestamp: Date.now(),
-    });
+    this.broadcast({ type: WSMessageType.ERROR, payload: { error }, timestamp: Date.now() });
   }
 
   getClientCount(): number {
@@ -440,12 +385,10 @@ export class WSServer extends EventEmitter {
     this.flameHistoryTotals.clear();
     this.hasFlameHistoryBaseline = false;
     this.latestFlameState = null;
-
     if (this.wss) {
       this.wss.close();
       this.wss = null;
     }
-
     console.log('[WS] WebSocket 服务器已关闭');
   }
 }
