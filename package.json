@@ -48,7 +48,6 @@
       "server/dist/**/*",
       "server/node_modules/**/*",
       "server/package.json",
-      "server/.env",
       "server/system-config.json",
       "server/plc-configs.json"
     ],
