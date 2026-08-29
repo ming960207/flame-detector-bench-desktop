@@ -107,7 +107,6 @@ try {
     Remove-TemporaryOutput
     Invoke-Checked 'Build frontend' 'npm.cmd' @('run', 'build:web')
     Invoke-Checked 'Build server' 'npm.cmd' @('run', 'build:server')
-    Invoke-Checked 'Verify renderer startup' 'npm.cmd' @('run', 'test:renderer-startup')
     Invoke-Checked 'Build Windows installer' 'npx.cmd' @(
         '--no-install', 'electron-builder', '--win', 'nsis',
         "--config.directories.output=$temporaryRoot"

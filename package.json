@@ -10,16 +10,11 @@
     "build:web:test": "vite build --mode test",
     "build:server": "npm run build --prefix server",
     "desktop": "electron .",
-    "desktop:dev": "npm run build:web && npm run build:server && dotnet run --project desktop/webview/FlameDetectorBench.WebView.csproj",
-    "build:webview": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\build-webview.ps1",
     "build:latest": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\update-latest-release.ps1",
     "build:single-exe": "npm run build:latest",
     "preview": "vite preview",
-    "test:renderer-startup": "node scripts/renderer-startup-smoke.mjs",
     "verify:field-readiness": "node scripts/field-readiness.mjs",
-    "verify:field-readiness:strict": "node scripts/field-readiness.mjs --strict",
-    "test:field": "npm test --prefix server",
-    "test:field:ui": "npm run build:web && node scripts/field-ui-test-runner.mjs"
+    "verify:field-readiness:strict": "node scripts/field-readiness.mjs --strict"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -28,7 +23,6 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",

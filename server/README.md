@@ -21,8 +21,4 @@ npm start
 
 配置模板见 `.env.example`。现场模式至少需要设置 `CLOSURE_MODE=field`、PLC 的 `PLC_MODE/PLC_IP/PLC_PORT`，以及探测器通信参数；离线模式使用默认配置即可。
 
-## 验证
-
-在项目根目录运行 `npm run test:field`，该命令会先构建后端，再执行 `server/test/` 下的现场协议、连接、波形和闭环测试。
-
 服务端核心实现位于 `src/closure/`、`src/modbus/` 和 `src/plc-process-monitor.ts`；HTTP/WebSocket 入口由当前运行模式分别提供。

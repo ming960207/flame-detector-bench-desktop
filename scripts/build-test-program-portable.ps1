@@ -9,9 +9,9 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $packagingRoot = Join-Path $projectRoot 'packaging\test-program-portable'
-$launcherSource = Join-Path $projectRoot 'packaging\test-listener-portable\Launcher.cs'
-$staticServerSource = Join-Path $projectRoot 'packaging\test-listener-portable\static-server.mjs'
-$releaseRoot = Join-Path $projectRoot 'release-single'
+$launcherSource = Join-Path $packagingRoot 'Launcher.cs'
+$staticServerSource = Join-Path $packagingRoot 'static-server.mjs'
+$releaseRoot = Join-Path $projectRoot '测试程序-PLC与数据状态监听'
 $artifactPath = Join-Path $releaseRoot 'FlameDetectorTestProgram.exe'
 $hashPath = $artifactPath + '.sha256'
 $tempRoot = Join-Path $env:TEMP ('flame-detector-test-program-build-' + [guid]::NewGuid().ToString('N'))

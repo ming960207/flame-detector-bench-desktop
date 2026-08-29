@@ -48,9 +48,7 @@ npm run dev
 npm run build:single-exe
 ```
 
-最终交付文件为 `release/火焰探测器检测台-single-exe-setup.exe`。安装包内置最小 Electron Chromium/Node 运行环境，目标电脑无需安装 Node.js、.NET 或浏览器。首次双击会按当前用户安装并创建桌面/开始菜单快捷方式；后续从快捷方式直接启动，不会重复解压，因此可实现秒级启动。运行时配置和现场数据保存在用户应用数据目录，升级安装不会主动删除。
-
-开发调试仍可运行 `npm run desktop:dev` 使用 WebView2 宿主；`npm run build:webview` 可生成依赖系统 WebView2 的目录版，但它不是完整单 EXE 离线交付物。
+最终交付文件为 `release-latest/火焰探测器检测台-最新版.exe`，并同时生成 SHA-256 校验文件。安装包内置 Electron Chromium/Node 运行环境，目标电脑无需安装 Node.js、.NET 或浏览器。运行时配置和现场数据保存在用户应用数据目录，升级安装不会主动删除。
 
 默认配置见 [server/.env.example](server/.env.example)：`CLOSURE_MODE=offline`。现场模式是独立的只读监测入口：PLC 仍只读工序状态，探测器复用旧上位机的 Modbus 数据读取、三/四波长协议解码、波形显示、通信配置和七步只读自动检测；不会通过本入口写入 PLC 的 Q/M 区。旧的直写 I/O 服务仍由 `FIELD_RUNTIME_DISABLED` 硬门禁阻断。
 
@@ -64,22 +62,12 @@ npm run build:single-exe
 
 还应单独演练“原子停止”和“注入 UNKNOWN”：二者都必须使报告保持阻止。
 
-## 自动化验证
+## 构建验证
 
 ```powershell
-npm run build --prefix server
-npm run build
-npm run test:field
+npm run build:server
+npm run build:web
 ```
-
-现场断连/重连自动验收（完全使用本地 PLC/TCP 模拟器，不连接真实设备）：
-
-```powershell
-npm run test:field
-npm run test:field:ui
-```
-
-`test:field` 覆盖 PLC 的 INIT、HEAT、FLASH、EMC 采集窗口、连续断连重连、自动测试握手和 TCP 进程锁；`test:field:ui` 启动本地模拟状态服务和前端预览，验证断连状态与重连后波形在界面侧刷新。
 
 ## PLC / HMI 静态发布门禁
 

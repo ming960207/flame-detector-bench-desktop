@@ -62,7 +62,7 @@ export async function validateLaunchPlan(plan) {
     '当前文件夹不能单独作为源码运行包复制，缺少父目录中的程序源码或依赖：',
     ...missingFiles.map((path) => `  - ${path}`),
     '',
-    '其他电脑请复制并运行 release-single\\FlameDetectorTestProgram.exe；',
+    '其他电脑请复制并运行本目录中的 FlameDetectorTestProgram.exe；',
     '如需源码调试，请复制完整的“上位机界面原型版”项目，并安装 Node.js 及 npm 依赖。',
   ].join('\n'));
 }

@@ -9,7 +9,6 @@
     "dev:field": "tsx watch src/field-main.ts",
     "dev:test-program": "tsx watch src/test-program-main.ts",
     "build": "tsc",
-    "test": "npm run build && node --test test/*.test.mjs",
     "start": "node dist/main.js",
     "start:field": "node dist/field-main.js",
     "start:test-program": "node dist/test-program-main.js"

@@ -18,7 +18,7 @@
 
 ## 目录文件说明
 
-- **`FlameDetectorTestProgram.exe`**：单文件免安装独立版（开箱即用，内置运行时，直接双击运行，见 release-single 目录）。
+- **`FlameDetectorTestProgram.exe`**：本目录中的单文件免安装独立版（开箱即用，内置运行时，直接双击运行）。
 - **`一键启动测试程序(脚本版).bat`**：源码/脚本模式一键启动脚本。
 - **`一键停止测试程序(脚本版).bat`**：一键关闭脚本模式启动的所有后台观察进程。
 - **`test-program-runner.mjs`**：Node.js 运行调度器。
