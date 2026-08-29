@@ -1,11 +1,13 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { DEFAULT_MQTT_BROKER, type MQTTConfigLocal } from './config.js';
+import type { TestProgramArchive } from './test-program/test-program-types.js';
 import { ConnectionStatus, FlameDetectorState } from './types.js';
 
 const DEFAULT_FACTORY_ID = 'SH_F1';
 const DEFAULT_LINE_ID = 'LINE_A1';
 const DEFAULT_DEVICE_ID = 'flame_detector_bench';
 const HEARTBEAT_MS = 30000;
+const MAX_PENDING_RELIABLE_MESSAGES = 100;
 
 function cleanString(value: unknown, fallback = '', maxLength = 256): string {
   if (typeof value !== 'string') return fallback;
@@ -72,6 +74,10 @@ function eventTopic(config: MQTTConfigLocal): string {
   return `dt/up/${config.factoryId}/${config.lineId}/${config.deviceId}/event`;
 }
 
+function inspectionTopic(config: MQTTConfigLocal): string {
+  return `dt/up/${config.factoryId}/${config.lineId}/${config.deviceId}/inspection`;
+}
+
 function seqNo(timestamp: number): string {
   return `${timestamp}${Math.floor(1000 + Math.random() * 9000)}`;
 }
@@ -82,6 +88,12 @@ export interface MQTTPublisherStatus {
   broker: string;
   clientId?: string;
   lastError?: string;
+  pendingReliableMessages: number;
+}
+
+interface PendingReliableMessage {
+  topic: string;
+  payload: unknown;
 }
 
 export class MQTTPublisher {
@@ -93,6 +105,8 @@ export class MQTTPublisher {
   private lastSignature = '';
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private lastError = '';
+  private pendingReliableMessages = new Map<string, PendingReliableMessage>();
+  private flushingReliableMessages = false;
 
   constructor(config: Partial<MQTTConfigLocal> = {}) {
     this.config = normalizeMQTTConfig(config, {
@@ -110,7 +124,7 @@ export class MQTTPublisher {
 
   getPublicConfig(): Omit<MQTTConfigLocal, 'password'> & { passwordConfigured: boolean } {
     const { password, ...rest } = this.config;
-    return { ...rest, passwordConfigured: Boolean(password) };
+    return { ...rest, brokerUrl: brokerLabel(rest.brokerUrl), passwordConfigured: Boolean(password) };
   }
 
   getStatus(): MQTTPublisherStatus {
@@ -120,6 +134,7 @@ export class MQTTPublisher {
       broker: brokerLabel(this.config.brokerUrl),
       clientId: this.config.clientId,
       lastError: this.lastError || undefined,
+      pendingReliableMessages: this.pendingReliableMessages.size,
     };
   }
 
@@ -169,6 +184,8 @@ export class MQTTPublisher {
       this.connected = true;
       this.lastError = '';
       console.log('[MQTT Server] 云端连接成功');
+      void this.publishFlameStatus();
+      void this.flushReliableMessages();
     });
     this.client.on('close', () => {
       this.connected = false;
@@ -236,11 +253,8 @@ export class MQTTPublisher {
     const deviceId = this.config.deviceId;
     const flameCommFault = conn?.flame ? conn.flame.connected === false : false;
     let standardStatus = 'IDLE';
-    if (state.faultCount > 0 || flameCommFault) {
-      standardStatus = 'FAULT';
-    } else if (state.fireCount > 0) {
-      standardStatus = 'ALARM';
-    }
+    if (state.faultCount > 0 || flameCommFault) standardStatus = 'FAULT';
+    else if (state.fireCount > 0) standardStatus = 'ALARM';
 
     const alarms = [];
     if (state.fireCount > 0) alarms.push({ code: 'E1001', level: 'CRITICAL', msg: '探测器火警/报警触发' });
@@ -287,6 +301,49 @@ export class MQTTPublisher {
     return this.publish(statusTopic(this.config), payload);
   }
 
+  publishInspectionResult(run: TestProgramArchive): Promise<boolean> {
+    const timestamp = run.archivedAt || Date.now();
+    const payload = {
+      header: {
+        device_id: this.config.deviceId,
+        timestamp,
+        data_type: 'INSPECTION_RESULT',
+        seq_no: seqNo(timestamp),
+      },
+      payload: {
+        run_id: run.runId,
+        status: run.status,
+        verdict: run.decision.verdict,
+        grade: run.decision.grade,
+        started_at: run.startedAt,
+        ended_at: run.endedAt,
+        duration_ms: run.durationMs,
+        reasons: run.decision.reasons.slice(0, 20),
+        stages: run.stages.map((stage) => ({
+          sequence: stage.sequence,
+          id: stage.stageId,
+          label: stage.label,
+          status: stage.status,
+          started_at: stage.startedAt,
+          ended_at: stage.endedAt,
+          duration_ms: stage.durationMs,
+          planned_duration_ms: stage.plannedDurationMs,
+          within_plan: stage.withinPlan,
+          detector_count: stage.detectors.length,
+          relay_event_count: stage.relayEventCount,
+          waveform_sample_count: stage.waveforms.reduce((sum, unit) => sum + unit.sampleCount, 0),
+        })),
+        evidence: {
+          plc_available: Boolean(run.evidence.process),
+          detector_available: Boolean(run.evidence.detectorState),
+          final_verdict: run.evidence.finalVerdict?.verdict ?? null,
+          final_grade: run.evidence.finalVerdict?.grade ?? null,
+        },
+      },
+    };
+    return this.publishReliable(`inspection:${run.runId}`, inspectionTopic(this.config), payload);
+  }
+
   publishEvent(code: string, level: 'INFO' | 'WARNING' | 'CRITICAL' | 'FATAL', msg: string): Promise<boolean> {
     const timestamp = Date.now();
     const payload = {
@@ -304,6 +361,35 @@ export class MQTTPublisher {
       },
     };
     return this.publish(eventTopic(this.config), payload);
+  }
+
+  private async publishReliable(key: string, topic: string, payload: unknown): Promise<boolean> {
+    const success = await this.publish(topic, payload);
+    if (success) {
+      this.pendingReliableMessages.delete(key);
+      return true;
+    }
+    this.pendingReliableMessages.set(key, { topic, payload });
+    while (this.pendingReliableMessages.size > MAX_PENDING_RELIABLE_MESSAGES) {
+      const oldest = this.pendingReliableMessages.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.pendingReliableMessages.delete(oldest);
+    }
+    return false;
+  }
+
+  private async flushReliableMessages(): Promise<void> {
+    if (this.flushingReliableMessages || !this.connected) return;
+    this.flushingReliableMessages = true;
+    try {
+      for (const [key, message] of Array.from(this.pendingReliableMessages.entries())) {
+        if (!this.connected) break;
+        const success = await this.publish(message.topic, message.payload);
+        if (success) this.pendingReliableMessages.delete(key);
+      }
+    } finally {
+      this.flushingReliableMessages = false;
+    }
   }
 
   private startHeartbeat(): void {
