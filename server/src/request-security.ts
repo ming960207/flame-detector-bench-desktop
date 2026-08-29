@@ -12,12 +12,18 @@ function secureEquals(left: string, right: string): boolean {
 
 /**
  * Packaged Electron sets DESKTOP_API_TOKEN and injects the matching header at
- * the session network layer. Standalone development keeps the legacy local
- * workflow when no token is configured.
+ * the session network layer. Development remains convenient, while a
+ * production standalone server must opt in explicitly if it wants unauthenticated
+ * localhost mutations.
  */
 export const requireDesktopMutation: RequestHandler = (req, res, next) => {
   const expected = process.env.DESKTOP_API_TOKEN;
-  if (!expected) return next();
+  if (!expected) {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_UNAUTHENTICATED_LOCAL_MUTATIONS !== 'true') {
+      return res.status(503).json({ code: 'DESKTOP_SESSION_NOT_CONFIGURED' });
+    }
+    return next();
+  }
   const supplied = req.get(HEADER_NAME) ?? '';
   if (!supplied || !secureEquals(supplied, expected)) {
     return res.status(403).json({ code: 'DESKTOP_SESSION_REQUIRED' });
