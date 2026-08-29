@@ -64,6 +64,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
   config.mqttConfig = initialMQTT;
   const publisher = new MQTTPublisher(initialMQTT);
   const onTestArchive = (archive: TestProgramArchive) => {
+    if (!publisher.getStatus().enabled) return;
     void publisher.publishInspectionResult(archive).catch((error) => {
       console.error('[统一后端] 检测结果 MQTT 上传异常:', error instanceof Error ? error.message : String(error));
     });
