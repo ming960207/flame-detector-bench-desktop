@@ -4,10 +4,12 @@ import { hasActivePLCProcessAlarm, type PLCProcessStatus } from '../server/src/p
 import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdict';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-waveform-analysis';
+import type { ProductDetectionConfig, ProductPrecheckReport } from '../server/src/product-profile';
 import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/src/types';
 import type { FlameDetectorConfig } from '../types';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
+import { ProductTypeControl } from './ProductTypeControl';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
 
@@ -21,6 +23,10 @@ interface FieldSummaryPayload {
   waveformAnalysis?: FieldWaveformAnalysisSnapshot;
   detectorVerdict?: FieldDetectorBatchVerdict;
   finalVerdict: FieldFinalVerdict;
+  productConfig?: ProductDetectionConfig;
+  productSelectionLocked?: boolean;
+  productPrecheck?: ProductPrecheckReport | null;
+  productPrecheckBusy?: boolean;
 }
 
 function processDisplayLabel(status: PLCProcessStatus | null | undefined) {
@@ -36,6 +42,10 @@ export function FieldProcessStatusApp() {
   const [detectorVerdict, setDetectorVerdict] = useState<FieldDetectorBatchVerdict | null>(null);
   const [finalVerdict, setFinalVerdict] = useState<FieldFinalVerdict | null>(null);
   const [flameConfig, setFlameConfig] = useState<FlameDetectorConfig | null>(null);
+  const [productConfig, setProductConfig] = useState<ProductDetectionConfig | null>(null);
+  const [productLocked, setProductLocked] = useState(false);
+  const [productPrecheck, setProductPrecheck] = useState<ProductPrecheckReport | null>(null);
+  const [productPrecheckBusy, setProductPrecheckBusy] = useState(false);
   const [channelOnline, setChannelOnline] = useState(false);
   const [notice, setNotice] = useState('PLC 未接入：工序监测处于待同步状态。');
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -45,6 +55,10 @@ export function FieldProcessStatusApp() {
     setWaveformAnalysis(summary.waveformAnalysis ?? null);
     setDetectorVerdict(summary.detectorVerdict ?? null);
     setFinalVerdict(summary.finalVerdict);
+    if (summary.productConfig) setProductConfig(summary.productConfig);
+    setProductLocked(Boolean(summary.productSelectionLocked));
+    setProductPrecheck(summary.productPrecheck ?? null);
+    setProductPrecheckBusy(Boolean(summary.productPrecheckBusy));
   }, []);
 
   const refresh = useCallback(async () => {
@@ -66,6 +80,22 @@ export function FieldProcessStatusApp() {
       ? 'PLC 工序已同步：' + processDisplayLabel(summary.process)
       : 'PLC 未接入：工序监测处于待同步状态。');
   }, [applySummary]);
+
+  const updateProductConfig = useCallback(async (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => {
+    const response = await fetch(`${HTTP}/api/product-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const result = await response.json() as { success?: boolean; config?: ProductDetectionConfig; locked?: boolean; code?: string; error?: string };
+    if (!response.ok || !result.success || !result.config) {
+      throw new Error(result.error || result.code || '产品配置保存失败');
+    }
+    setProductConfig(result.config);
+    setProductLocked(Boolean(result.locked));
+    setProductPrecheck(null);
+    await refresh();
+  }, [refresh]);
 
   const handleRefresh = useCallback(() => {
     void refresh().catch(() => setNotice('PLC 未接入：工序监测处于待同步状态。'));
@@ -124,6 +154,13 @@ export function FieldProcessStatusApp() {
   }, [applySummary, refresh]);
 
   return <>
+    <ProductTypeControl
+      config={productConfig}
+      locked={productLocked}
+      precheck={productPrecheck}
+      busy={productPrecheckBusy}
+      onUpdate={updateProductConfig}
+    />
     <WutosDashboard
       status={status}
       detectors={detectors}
@@ -143,7 +180,7 @@ export function FieldProcessStatusApp() {
           <div>
             <span className="section-kicker">FIELD DATA DETAIL</span>
             <h2 id="wutos-detail-title">六路波形与通信详情</h2>
-            <p>保留现有只读波形、自检和通信配置逻辑；主屏仅展示原型化摘要。</p>
+            <p>保留现有只读波形、自检和通信配置逻辑；主屏展示产品类型、预检和正式检测摘要。</p>
           </div>
           <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
         </header>
