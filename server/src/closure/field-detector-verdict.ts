@@ -1,4 +1,11 @@
 import type { FlameDetectorState, FlameDetectorUnitState } from '../types.js';
+import {
+  expectedProbeChannels,
+  selectedProductProfile,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+  type ProductPrecheckUnitResult,
+} from '../product-profile.js';
 import { DEFAULT_DETECTION_QUALITY_CONFIG } from './field-waveform-analysis.js';
 import type {
   ChannelKey,
@@ -33,6 +40,8 @@ export interface FieldDetectorResult {
   reason?: string;
   sampledAt: number;
   metrics: FieldDetectorMetrics;
+  precheck?: ProductPrecheckUnitResult;
+  noDataProbes?: ChannelKey[];
 }
 
 export interface FieldDetectorBatchVerdict {
@@ -66,6 +75,7 @@ function thresholdMatches(
   metrics: FieldDetectorMetrics,
   limits: DetectionQualityThresholds,
   ratios: DetectionRatioThresholds,
+  expectedProbeCount: number,
 ): string | undefined {
   const upperBounds: Array<[keyof Pick<FieldDetectorMetrics, 'noiseRms' | 'noiseAbsolute' | 'interferenceRatio'>, number | undefined, string]> = [
     ['noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT'],
@@ -84,12 +94,18 @@ function thresholdMatches(
     if (metrics.consistencyTrend < limits.minConsistencyTrend!) return 'CONSISTENCY_TREND_BELOW_LIMIT';
   }
 
-  const snrRanges: Array<[keyof Pick<FieldDetectorMetrics, 'snr21' | 'snr23' | 'snr31'>, DetectionRatioThresholds[keyof DetectionRatioThresholds], string]> = [
-    ['snr21', ratios.snr21, 'SNR21'],
-    ['snr23', ratios.snr23, 'SNR23'],
-    ['snr31', ratios.snr31, 'SNR31'],
+  const snrRanges: Array<[
+    keyof Pick<FieldDetectorMetrics, 'snr21' | 'snr23' | 'snr31'>,
+    DetectionRatioThresholds[keyof DetectionRatioThresholds],
+    string,
+    number,
+  ]> = [
+    ['snr21', ratios.snr21, 'SNR21', 2],
+    ['snr23', ratios.snr23, 'SNR23', 3],
+    ['snr31', ratios.snr31, 'SNR31', 3],
   ];
-  for (const [key, range, label] of snrRanges) {
+  for (const [key, range, label, requiredProbeCount] of snrRanges) {
+    if (expectedProbeCount < requiredProbeCount) continue;
     const value = metrics[key];
     if (range.min > 0 || range.max > 0) {
       if (value === null) return `${key.toUpperCase()}_MISSING`;
@@ -106,23 +122,46 @@ function thresholdMatches(
   return undefined;
 }
 
+function noDataProbes(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  analysisSnapshot: FieldWaveformAnalysisSnapshot | undefined,
+  expectedChannels: ChannelKey[],
+): ChannelKey[] {
+  const noiseTest = analysis?.noiseTest;
+  const thresholds = analysisSnapshot?.thresholds;
+  if (!noiseTest || !thresholds || noiseTest.sampleCount < thresholds.minNoiseSamples) return [];
+  const absoluteLimit = Number(thresholds.maxNoiseAbsolute);
+  const fluctuationLimit = Number(thresholds.minNoiseRms);
+  if (!Number.isFinite(absoluteLimit) || absoluteLimit <= 0 || !Number.isFinite(fluctuationLimit) || fluctuationLimit < 0) return [];
+  const nearUpperLimit = absoluteLimit * 0.95;
+  return expectedChannels.filter((key) => {
+    const metrics = noiseTest.metrics[key];
+    return Boolean(
+      metrics
+      && Number.isFinite(metrics.absolute)
+      && Number.isFinite(metrics.fluctuation)
+      && metrics.absolute >= nearUpperLimit
+      && metrics.fluctuation <= fluctuationLimit,
+    );
+  });
+}
+
 function noiseThresholdFailure(
   analysis: WaveformAnalysisUnitResult,
   minNoiseRms: number,
   limits: DetectionQualityThresholds,
-  noiseProbes: ChannelKey[] | undefined,
+  expectedChannels: ChannelKey[],
 ): string | undefined {
   const noiseMetrics = analysis.noiseTest?.metrics;
   if (!noiseMetrics) return undefined;
-  const keys = noiseProbes?.length ? noiseProbes : (['probe1', 'probe2', 'probe3'] as ChannelKey[]);
-  for (const key of keys) {
+  for (const key of expectedChannels) {
     const metrics = noiseMetrics[key];
-    if (!metrics || !Number.isFinite(metrics.fluctuation)) return 'NOISE_RMS_MISSING';
-    if (minNoiseRms > 0 && metrics.fluctuation < minNoiseRms) return 'NOISE_RMS_BELOW_LIMIT';
-    if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return 'NOISE_RMS_EXCEEDS_LIMIT';
+    if (!metrics || !Number.isFinite(metrics.fluctuation)) return `${key.toUpperCase()}_NOISE_RMS_MISSING`;
+    if (minNoiseRms > 0 && metrics.fluctuation < minNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_BELOW_LIMIT`;
+    if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_EXCEEDS_LIMIT`;
     if (limits.maxNoiseAbsolute != null && limits.maxNoiseAbsolute > 0) {
-      if (!Number.isFinite(metrics.absolute)) return 'NOISE_ABSOLUTE_MISSING';
-      if (metrics.absolute > limits.maxNoiseAbsolute) return 'NOISE_ABSOLUTE_EXCEEDS_LIMIT';
+      if (!Number.isFinite(metrics.absolute)) return `${key.toUpperCase()}_NOISE_ABSOLUTE_MISSING`;
+      if (metrics.absolute > limits.maxNoiseAbsolute) return `${key.toUpperCase()}_NOISE_ABSOLUTE_EXCEEDS_LIMIT`;
     }
   }
   return undefined;
@@ -134,33 +173,56 @@ function result(
   verdict: FieldDetectorVerdict,
   grade: FieldQualityGrade,
   reason?: string,
+  precheck?: ProductPrecheckUnitResult,
+  missingProbes: ChannelKey[] = [],
 ): FieldDetectorResult {
-  return { ...base, metrics, verdict, grade, ...(reason ? { reason } : {}) };
+  return {
+    ...base,
+    metrics,
+    verdict,
+    grade,
+    ...(reason ? { reason } : {}),
+    ...(precheck ? { precheck } : {}),
+    ...(missingProbes.length > 0 ? { noDataProbes: missingProbes } : {}),
+  };
 }
 
 function evaluateUnit(
   unit: FlameDetectorUnitState,
   analysis: WaveformAnalysisUnitResult | undefined,
   analysisSnapshot: FieldWaveformAnalysisSnapshot | undefined,
+  precheck: ProductPrecheckUnitResult | undefined,
+  productConfig: ProductDetectionConfig | undefined,
 ): FieldDetectorResult {
   const base = { index: unit.index, address: unit.address, sampledAt: unit.lastUpdate };
   const metrics = detectorMetrics(unit, analysis);
   const complete = analysisSnapshot?.phase === 'COMPLETE';
   const quality = analysisSnapshot?.thresholds.quality ?? DEFAULT_DETECTION_QUALITY_CONFIG;
+  const expectedProbeCount = productConfig ? selectedProductProfile(productConfig).expectedProbeCount : Math.max(1, unit.probeCount || 3);
+  const expectedChannels = expectedProbeChannels(expectedProbeCount);
+  const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
-  if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT');
+  if (precheck?.verdict === 'FAIL') {
+    return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
+  }
+  if (productConfig && complete && !precheck) {
+    return result(base, metrics, 'FAIL', 'FAIL', 'PRODUCT_PRECHECK_NOT_COMPLETED', undefined, missingProbes);
+  }
+  if (missingProbes.length > 0) {
+    return result(base, metrics, 'FAIL', 'FAIL', `${missingProbes[0].toUpperCase()}_SIGNAL_NO_DATA`, precheck, missingProbes);
+  }
+  if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT', precheck);
   if (!complete || !analysis) {
-    if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE');
-    if (!unit.sourceReady) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SOURCE_NOT_READY');
-    if (!unit.syncOk) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SYNC_NOT_OK');
+    if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE', precheck);
+    if (!unit.sourceReady) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SOURCE_NOT_READY', precheck);
+    if (!unit.syncOk) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SYNC_NOT_OK', precheck);
   }
   if (!analysisSnapshot) {
-    // Preserve the original telemetry verdict while the process has not exposed its quality snapshot yet.
-    return result(base, metrics, 'PASS', 'PENDING');
+    return result(base, metrics, 'PASS', 'PENDING', undefined, precheck);
   }
-  if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL');
+  if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
   if (analysisSnapshot.phase !== 'COMPLETE' || analysis?.verdict !== 'PASS') {
-    return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA');
+    return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA', precheck);
   }
 
   const stageMetrics = (stage: InterferenceStage): FieldDetectorMetrics => {
@@ -180,37 +242,45 @@ function evaluateUnit(
       analysis,
       analysisSnapshot.thresholds.minNoiseRms,
       limits,
-      analysisSnapshot.thresholds.noiseProbes,
+      expectedChannels,
     );
     if (noiseReason) return noiseReason;
     for (const stage of stages) {
       const stageResult = analysis.stages?.[stage];
       if (stageResult?.verdict === 'FAIL') return `${stage.toUpperCase()}_${stageResult.reason || 'STAGE_FAIL'}`;
-      const reason = thresholdMatches(stageMetrics(stage), limits, ratios);
+      const reason = thresholdMatches(stageMetrics(stage), limits, ratios, expectedProbeCount);
       if (reason) return `${stage.toUpperCase()}_${reason}`;
     }
     return undefined;
   };
 
   const aReason = firstFailure(quality.a, quality.ratios.a);
-  if (!aReason) return result(base, metrics, 'PASS', 'A_PASS', 'ALL_STAGES_A_GRADE_WITHIN_LIMIT');
-  if (quality.acceptanceGrade === 'A') return result(base, metrics, 'FAIL', 'FAIL', aReason);
+  if (!aReason) return result(base, metrics, 'PASS', 'A_PASS', 'ALL_STAGES_A_GRADE_WITHIN_LIMIT', precheck);
+  if (quality.acceptanceGrade === 'A') return result(base, metrics, 'FAIL', 'FAIL', aReason, precheck);
   const bReason = firstFailure(quality.b, quality.ratios.b);
-  if (!bReason) return result(base, metrics, 'PASS', 'B_PASS', `A_GRADE_${aReason}`);
-  return result(base, metrics, 'FAIL', 'FAIL', bReason);
+  if (!bReason) return result(base, metrics, 'PASS', 'B_PASS', `A_GRADE_${aReason}`, precheck);
+  return result(base, metrics, 'FAIL', 'FAIL', bReason, precheck);
 }
 
 /**
- * Field verdicts are derived from read-only detector telemetry and the completed
- * waveform snapshot. Completed quantitative data is graded A, B, or NG using
- * the configured limits for the corresponding detector.
+ * Field verdicts are derived from read-only detector telemetry, product identity
+ * precheck, and the completed waveform snapshot.
  */
 export function evaluateFieldDetectorBatch(
   state: FlameDetectorState,
   analysisSnapshot?: FieldWaveformAnalysisSnapshot,
+  productPrecheck?: ProductPrecheckReport | null,
+  productConfig?: ProductDetectionConfig,
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
-  const units = state.units.map((unit) => evaluateUnit(unit, analysisByIndex.get(unit.index), analysisSnapshot));
+  const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
+  const units = state.units.map((unit) => evaluateUnit(
+    unit,
+    analysisByIndex.get(unit.index),
+    analysisSnapshot,
+    precheckByIndex.get(unit.index),
+    productConfig,
+  ));
   const grade = units.some((unit) => unit.grade === 'FAIL')
     ? 'FAIL'
     : analysisSnapshot && units.some((unit) => unit.grade === 'PENDING')
