@@ -3,6 +3,7 @@ import type { FieldStatusRuntime, FieldStatusSummary } from './closure/field-sta
 import { MQTTPublisher, normalizeMQTTConfig } from './mqtt-publisher.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
+import type { TestProgramArchive } from './test-program/test-program-types.js';
 import type { ConnectionStatus } from './types.js';
 
 export interface UnifiedAuxiliaryRuntime {
@@ -59,13 +60,19 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
       fieldRuntime.wsServer.broadcast({ type, payload, timestamp: Date.now() } as any);
     },
   });
-  testProgram.start();
 
   const stored = await loadSystemConfig();
   const storedMQTT = normalizeMQTTConfig(stored?.mqttConfig, config.mqttConfig);
   const initialMQTT = normalizeMQTTConfig(explicitEnvMQTTOverrides(), storedMQTT);
   config.mqttConfig = initialMQTT;
   const publisher = new MQTTPublisher(initialMQTT);
+  const onTestArchive = (archive: TestProgramArchive) => {
+    void publisher.publishInspectionResult(archive).catch((error) => {
+      console.error('[统一后端] 检测结果 MQTT 上传异常:', error instanceof Error ? error.message : String(error));
+    });
+  };
+  testProgram.observer.on('archive', onTestArchive);
+  testProgram.start();
   if (initialMQTT.mqttEnabled) publisher.connect();
 
   let stopped = false;
@@ -131,6 +138,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
       if (stopped) return;
       stopped = true;
       clearInterval(pollTimer);
+      testProgram.observer.removeListener('archive', onTestArchive);
       publisher.disconnect();
       await testProgram.close();
     },
