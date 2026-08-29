@@ -1,10 +1,12 @@
 const { app, BrowserWindow, dialog } = require('electron');
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
 const DEFAULT_BACKEND_PORT = 3003;
+const desktopApiToken = crypto.randomBytes(32).toString('hex');
 
 let mainWindow;
 let backendRuntime;
@@ -39,6 +41,7 @@ async function startBackend(port) {
   process.env.SERVER_PORT = String(port);
   process.env.DESKTOP_EMBEDDED_SERVER = '1';
   process.env.CLOSURE_MODE = 'field';
+  process.env.DESKTOP_API_TOKEN = desktopApiToken;
   const dataDirectory = prepareRuntimeData();
   if (dataDirectory) process.env.APP_DATA_DIR = dataDirectory;
   const serverModule = await import(pathToFileURL(serverEntry).href);
@@ -84,6 +87,21 @@ function waitForBackend(port) {
   });
 }
 
+function installBackendSessionHeader(window, port) {
+  const exactHttpPrefix = `http://127.0.0.1:${port}/`;
+  const exactWsPrefix = `ws://127.0.0.1:${port}/`;
+  window.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ['http://127.0.0.1/*', 'ws://127.0.0.1/*'] },
+    (details, callback) => {
+      const headers = { ...details.requestHeaders };
+      if (details.url.startsWith(exactHttpPrefix) || details.url.startsWith(exactWsPrefix)) {
+        headers['X-Desktop-Session'] = desktopApiToken;
+      }
+      callback({ requestHeaders: headers });
+    },
+  );
+}
+
 async function createWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -101,6 +119,7 @@ async function createWindow(port) {
       additionalArguments: [`--desktop-backend-port=${port}`],
     },
   });
+  installBackendSessionHeader(mainWindow, port);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('file://')) event.preventDefault();
@@ -127,8 +146,6 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(async () => {
     try {
-      // Keep the field backend on a stable local endpoint so the read-only
-      // test observer can attach without reaching into Electron internals.
       const port = readBackendPort(process.argv);
       await startBackend(port);
       await waitForBackend(port);
