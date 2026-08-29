@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Express } from 'express';
 import cors from 'cors';
 import { createServer, type Server } from 'http';
 import { type AddressInfo } from 'net';
@@ -42,7 +42,26 @@ export interface PLCProcessStatusSource {
   on(event: 'status' | 'error', listener: (value: any) => void): this;
 }
 
+export interface FieldStatusSummary {
+  process: PLCProcessStatus | undefined;
+  plcConnected: boolean;
+  detectorConnected: boolean;
+  detectorTransportConnected: boolean;
+  detectorDataStreamConnected: boolean;
+  detectorVerdict: FieldDetectorBatchVerdict;
+  waveformAnalysis: ReturnType<FieldWaveformAnalysis['snapshot']>;
+  finalVerdict: FieldFinalVerdict;
+}
+
+export interface FieldStatusSnapshot {
+  summary: FieldStatusSummary;
+  flame: FlameDetectorState;
+}
+
 export interface FieldStatusRuntime {
+  readonly app: Express;
+  readonly wsServer: WSServer;
+  snapshot(): FieldStatusSnapshot;
   listen(port?: number): Promise<number>;
   close(): Promise<void>;
 }
@@ -186,6 +205,8 @@ export function createFieldStatusRuntime(
       'http://localhost:3000',
       'http://127.0.0.1:3002',
       'http://localhost:3002',
+      'http://127.0.0.1:3005',
+      'http://localhost:3005',
     ],
   }));
   const server = createServer(app);
@@ -213,7 +234,7 @@ export function createFieldStatusRuntime(
 
   const detectorDataStreamConnected = () => detectors.isDataStreamConnected?.() ?? detectors.isConnected();
   const detectorTransportConnected = () => detectors.isTransportConnected?.() ?? detectors.isConnected();
-  const summary = () => ({
+  const summary = (): FieldStatusSummary => ({
     process: source.isConnected() ? currentStatus : undefined,
     plcConnected: source.isConnected(),
     detectorConnected: detectorDataStreamConnected(),
@@ -318,7 +339,7 @@ export function createFieldStatusRuntime(
   app.get('/api/plc/process-status', (_req, res) => {
     const current = source.isConnected() ? source.getCurrent() : undefined;
     if (!current) return res.status(503).json({ code: 'PLC_PROCESS_STATUS_UNAVAILABLE' });
-    res.json(current);
+    return res.json(current);
   });
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
   app.get('/api/flame/config', (_req, res) => {
@@ -342,9 +363,9 @@ export function createFieldStatusRuntime(
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({ ...store, flameConfig: next, lastUpdated: Date.now() });
       broadcastSummary();
-      res.json({ success: true, config: next });
+      return res.json({ success: true, config: next });
     } catch (error: any) {
-      res.status(500).json({ code: 'FLAME_CONFIG_UPDATE_FAILED', error: error?.message || String(error) });
+      return res.status(500).json({ code: 'FLAME_CONFIG_UPDATE_FAILED', error: error?.message || String(error) });
     }
   });
   app.post('/api/flame/auto-test', async (req, res) => {
@@ -353,9 +374,9 @@ export function createFieldStatusRuntime(
       const report = await detectors.runAutoTest((progress) => {
         wsServer.broadcast({ type: WSMessageType.FLAME_TEST_PROGRESS, payload: progress, timestamp: Date.now() });
       }, { enabledStepKeys: Array.isArray(req.body?.enabledStepKeys) ? req.body.enabledStepKeys : undefined });
-      res.json({ success: true, report });
+      return res.json({ success: true, report });
     } catch (error: any) {
-      res.status(409).json({ code: 'FLAME_AUTO_TEST_FAILED', error: error?.message || String(error) });
+      return res.status(409).json({ code: 'FLAME_AUTO_TEST_FAILED', error: error?.message || String(error) });
     }
   });
   app.get('/api/field/summary', (_req, res) => res.json(summary()));
@@ -364,6 +385,9 @@ export function createFieldStatusRuntime(
   });
 
   return {
+    app,
+    wsServer,
+    snapshot: () => ({ summary: summary(), flame: detectors.getCurrentState() }),
     async listen(port = config.serverPort): Promise<number> {
       await source.start();
       const actualPort = await new Promise<number>((resolve, reject) => {
