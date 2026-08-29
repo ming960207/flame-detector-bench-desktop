@@ -14,6 +14,7 @@ import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSam
 
 const DESKTOP_RUNTIME = typeof window !== 'undefined' ? window.desktopRuntime : undefined;
 const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || import.meta.env.VITE_BACKEND_API_URL || `http://${window.location.hostname}:3001`;
+const AUTO_TEST_STEP_KEYS = ['connection', 'params', 'status', 'realtime', 'mirror', 'report'] as const;
 
 interface FlameTestReport {
   passed: boolean;
@@ -423,9 +424,13 @@ export function FlameDetectorWorkbench({ state, config, analysis, onRefresh }: P
   };
 
   const runAutoTest = async () => {
-    setTesting(true); setMessage('设备自检进行中：按设备顺序执行七项只读检查。');
+    setTesting(true); setMessage('设备自检进行中：按设备顺序执行六项只读检查（不含软件版本检验）。');
     try {
-      const response = await fetch(`${HTTP}/api/flame/auto-test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const response = await fetch(`${HTTP}/api/flame/auto-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledStepKeys: AUTO_TEST_STEP_KEYS }),
+      });
       const result = await response.json() as { success?: boolean; report?: FlameTestReport; error?: string; code?: string };
       if (!response.ok || !result.success || !result.report) throw new Error(result.error || result.code || '自动检测失败');
       setMessage(result.report.passed ? '设备自检完成：全部启用设备通过。' : '设备自检完成：存在失败项目。'); onRefresh();
