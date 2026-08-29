@@ -50,6 +50,20 @@ function explicitEnvMQTTOverrides(): Record<string, unknown> {
 
 export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRuntime): Promise<UnifiedAuxiliaryRuntime> {
   const backendUrl = localBackendUrl();
+
+  // The observer has always expected this endpoint, but the old field server
+  // never exposed it. Return only the plan reference data it actually needs;
+  // never expose detector/MQTT credentials from the full system store.
+  fieldRuntime.app.get('/api/system-config', async (_req, res) => {
+    const store = await loadSystemConfig();
+    res.json({
+      config: store ? {
+        steps: Array.isArray(store.steps) ? store.steps : [],
+        lastUpdated: store.lastUpdated,
+      } : null,
+    });
+  });
+
   const testProgram = mountTestProgramRoutes(fieldRuntime.app, {
     formalBackendUrl: backendUrl,
     formalBackendWsUrl: backendUrl.replace(/^http:/i, 'ws:'),
