@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { FlameConfig, PLCDeviceConfigLocal } from './config.js';
+import type { ProductDetectionConfig } from './product-profile.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,6 +20,7 @@ export interface SystemConfigStore {
   wateringConfig?: unknown;
   doRelations?: unknown;
   mqttConfig?: unknown;
+  productDetectionConfig?: ProductDetectionConfig;
   lastUpdated: number;
 }
 
