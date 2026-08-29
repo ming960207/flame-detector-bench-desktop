@@ -1,17 +1,13 @@
 {
-  "name": "flame-detector-offline-closure-server",
+  "name": "flame-detector-unified-server",
   "version": "1.0.0",
-  "description": "火焰探测器检测台离线四阶段闭环服务",
+  "description": "火焰探测器检测台统一后端：现场监测、测试监听与 MQTT 上传",
   "main": "dist/main.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "dev:field": "tsx watch src/field-main.ts",
-    "dev:test-program": "tsx watch src/test-program-main.ts",
     "build": "tsc",
-    "start": "node dist/main.js",
-    "start:field": "node dist/field-main.js",
-    "start:test-program": "node dist/test-program-main.js"
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "axios": "^1.13.4",
