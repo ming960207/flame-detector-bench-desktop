@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import type { FieldStatusRuntime, FieldStatusSummary } from './closure/field-status-server.js';
-import { MQTTPublisher } from './mqtt-publisher.js';
+import { MQTTPublisher, normalizeMQTTConfig } from './mqtt-publisher.js';
+import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
 import type { ConnectionStatus } from './types.js';
 
@@ -11,11 +12,6 @@ export interface UnifiedAuxiliaryRuntime {
 
 function localBackendUrl(): string {
   return `http://127.0.0.1:${config.serverPort}`;
-}
-
-function mqttEnabled(): boolean {
-  if (process.env.MQTT_ENABLED !== undefined) return process.env.MQTT_ENABLED !== 'false';
-  return config.mqttConfig?.mqttEnabled !== false;
 }
 
 function buildConnectionStatus(summary: FieldStatusSummary): ConnectionStatus {
@@ -36,6 +32,20 @@ function buildConnectionStatus(summary: FieldStatusSummary): ConnectionStatus {
   };
 }
 
+function explicitEnvMQTTOverrides(): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (process.env.MQTT_ENABLED !== undefined) result.mqttEnabled = process.env.MQTT_ENABLED !== 'false';
+  if (process.env.MQTT_BROKER_URL) result.brokerUrl = process.env.MQTT_BROKER_URL;
+  if (process.env.MQTT_TOPIC) result.topic = process.env.MQTT_TOPIC;
+  if (process.env.MQTT_CLIENT_ID) result.clientId = process.env.MQTT_CLIENT_ID;
+  if (process.env.MQTT_USERNAME) result.username = process.env.MQTT_USERNAME;
+  if (process.env.MQTT_PASSWORD) result.password = process.env.MQTT_PASSWORD;
+  if (process.env.MQTT_FACTORY_ID) result.factoryId = process.env.MQTT_FACTORY_ID;
+  if (process.env.MQTT_LINE_ID) result.lineId = process.env.MQTT_LINE_ID;
+  if (process.env.MQTT_DEVICE_ID) result.deviceId = process.env.MQTT_DEVICE_ID;
+  return result;
+}
+
 /**
  * Start observation/upload services on the already-running field backend.
  * There is exactly one HTTP/WS listener and exactly one PLC/flame device stack.
@@ -51,18 +61,12 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
   });
   testProgram.start();
 
-  const enabled = mqttEnabled();
-  const publisher = new MQTTPublisher({
-    ...(config.mqttConfig ?? {}),
-    mqttEnabled: enabled,
-  });
-  if (enabled) {
-    try {
-      publisher.connect();
-    } catch (error) {
-      console.error('[统一后端] MQTT 初始化失败，将继续运行本地检测:', error instanceof Error ? error.message : String(error));
-    }
-  }
+  const stored = await loadSystemConfig();
+  const storedMQTT = normalizeMQTTConfig(stored?.mqttConfig, config.mqttConfig);
+  const initialMQTT = normalizeMQTTConfig(explicitEnvMQTTOverrides(), storedMQTT);
+  config.mqttConfig = initialMQTT;
+  const publisher = new MQTTPublisher(initialMQTT);
+  if (initialMQTT.mqttEnabled) publisher.connect();
 
   let stopped = false;
   let forwarding = false;
@@ -87,13 +91,31 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
 
   fieldRuntime.app.get('/api/mqtt/status', (_req, res) => {
     res.json({
-      enabled,
-      connected: publisher.isConnected(),
+      ...publisher.getStatus(),
       lastForwardAt,
       lastForwardError,
       source: 'field-runtime-memory',
       timestamp: Date.now(),
     });
+  });
+  fieldRuntime.app.get('/api/mqtt/config', (_req, res) => {
+    res.json({ success: true, config: publisher.getPublicConfig() });
+  });
+  fieldRuntime.app.put('/api/mqtt/config', async (req, res) => {
+    try {
+      const next = normalizeMQTTConfig(req.body, publisher.getConfig());
+      publisher.updateConfig(next);
+      config.mqttConfig = next;
+      const currentStore = await loadSystemConfig() ?? createDefaultSystemConfig();
+      await saveSystemConfig({ ...currentStore, mqttConfig: next, lastUpdated: Date.now() });
+      forwardFieldState();
+      return res.json({ success: true, config: publisher.getPublicConfig(), status: publisher.getStatus() });
+    } catch (error) {
+      return res.status(500).json({
+        code: 'MQTT_CONFIG_UPDATE_FAILED',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   forwardFieldState();
@@ -101,7 +123,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
   pollTimer.unref?.();
 
   console.log(`[统一后端] 测试监听 API 已并入正式端口: ${backendUrl}/api/test-program/*`);
-  console.log(`[统一后端] MQTT 上传: ${enabled ? '已启用' : '已禁用'}`);
+  console.log(`[统一后端] MQTT 上传: ${publisher.getStatus().enabled ? '已启用' : '已禁用'}`);
 
   return {
     testProgram,
