@@ -23,6 +23,7 @@ import {
   DEFAULT_WAVEFORM_ANALYSIS_CONFIG,
   FieldWaveformAnalysis,
   normalizeDetectionQualityConfig,
+  type ChannelKey,
 } from './field-waveform-analysis.js';
 import { loadPLCConfigs, mergeWithDefaults } from '../plc-config-store.js';
 import { requireDesktopMutation } from '../request-security.js';
@@ -95,6 +96,13 @@ function boundedNumber(value: unknown, fallback: number, min: number, max: numbe
   return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+function normalizeProbeList(value: unknown, fallback: ChannelKey[]): ChannelKey[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const allowed = new Set<ChannelKey>(['probe1', 'probe2', 'probe3', 'probe4']);
+  const result = [...new Set(value.filter((item): item is ChannelKey => typeof item === 'string' && allowed.has(item as ChannelKey)))];
+  return result.length > 0 ? result : [...fallback];
+}
+
 export function normalizeFlameConfig(input: unknown, current: FlameConfig): FlameConfig {
   const source = isRecord(input) ? input : {};
   const inputUnits = Array.isArray(source.units) ? source.units : [];
@@ -108,12 +116,14 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
   const currentMaxInterferenceRatio = boundedNumber(currentAnalysis.maxInterferenceRatio, 1.5, 0, 1_000_000);
   const currentMaxNoiseAbsolute = boundedNumber(currentAnalysis.maxNoiseAbsolute, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseAbsolute ?? 800, 0, 1_000_000);
   const currentMinConsistencyTrend = boundedNumber(currentAnalysis.minConsistencyTrend, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minConsistencyTrend ?? 0.75, 0, 1);
-  const validProbe = (value: unknown, fallback: 'probe1' | 'probe2' | 'probe3' | 'probe4') => ['probe1', 'probe2', 'probe3', 'probe4'].includes(String(value)) ? String(value) as typeof fallback : fallback;
+  const validProbe = (value: unknown, fallback: ChannelKey): ChannelKey => ['probe1', 'probe2', 'probe3', 'probe4'].includes(String(value)) ? String(value) as ChannelKey : fallback;
   const currentRatio: Record<string, unknown> = isRecord(currentAnalysis.interferenceRatio) ? currentAnalysis.interferenceRatio : {};
   const inputRatio: Record<string, unknown> = isRecord(inputAnalysis.interferenceRatio) ? inputAnalysis.interferenceRatio : {};
   const currentPollIntervalMs = boundedInteger(current.pollIntervalMs, DEFAULT_FLAME_POLL_INTERVAL_MS, 100, MAX_FLAME_POLL_INTERVAL_MS);
   const currentQuality = normalizeDetectionQualityConfig(currentAnalysis.quality);
   const quality = normalizeDetectionQualityConfig(inputAnalysis.quality, currentQuality);
+  const currentNoiseProbes = normalizeProbeList(currentAnalysis.noiseProbes, ['probe2', 'probe3']);
+  const currentConsistencyProbes = normalizeProbeList(currentAnalysis.consistencyProbes, ['probe2', 'probe3']);
   const units: FlameUnitConfig[] = [];
   for (let index = 1; index <= 6; index += 1) {
     const existing = currentByIndex.get(index) ?? { index, address: index, enabled: false };
@@ -164,8 +174,8 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
       maxNoiseAbsolute: boundedNumber(inputAnalysis.maxNoiseAbsolute, currentMaxNoiseAbsolute, 0, 1_000_000),
       maxInterferenceRatio: boundedNumber(inputAnalysis.maxInterferenceRatio, currentMaxInterferenceRatio, 0, 1_000_000),
       minConsistencyTrend: boundedNumber(inputAnalysis.minConsistencyTrend, currentMinConsistencyTrend, 0, 1),
-      noiseProbes: Array.isArray(inputAnalysis.noiseProbes) ? inputAnalysis.noiseProbes : (Array.isArray(currentAnalysis.noiseProbes) ? currentAnalysis.noiseProbes : ['probe1', 'probe2', 'probe3']),
-      consistencyProbes: Array.isArray(inputAnalysis.consistencyProbes) ? inputAnalysis.consistencyProbes : (Array.isArray(currentAnalysis.consistencyProbes) ? currentAnalysis.consistencyProbes : ['probe1', 'probe2', 'probe3']),
+      noiseProbes: normalizeProbeList(inputAnalysis.noiseProbes, currentNoiseProbes),
+      consistencyProbes: normalizeProbeList(inputAnalysis.consistencyProbes, currentConsistencyProbes),
       interferenceRatio: {
         numerator: validProbe(inputRatio.numerator, validProbe(currentRatio.numerator, 'probe2')),
         denominator: validProbe(inputRatio.denominator, validProbe(currentRatio.denominator, 'probe3')),
@@ -211,6 +221,7 @@ export function createFieldStatusRuntime(
   let finalVerdict: FieldFinalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
   let loggedBatchId: string | null = null;
   let positionBatchId: string | null = null;
+  let detectorMutationBusy = false;
   let inspectionPositions = new Map<InspectionPositionId, InspectionPositionResult>();
   const positionStartedAt = new Map<InspectionPositionId, number>();
 
@@ -323,6 +334,7 @@ export function createFieldStatusRuntime(
     detectorConnected: detectorDataStreamConnected(),
     detectorTransportConnected: detectorTransportConnected(),
     detectorDataStreamConnected: detectorDataStreamConnected(),
+    detectorMutationBusy,
     timestamp: Date.now(),
   }));
   app.get('/api/plc/process-status', (_req, res) => {
@@ -336,27 +348,55 @@ export function createFieldStatusRuntime(
     res.json({ success: true, config: current });
   });
   app.put('/api/flame/config', requireDesktopMutation, async (req, res) => {
+    if (detectorMutationBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
     if (!detectors.updateConfig || !detectors.getConfig) return res.status(501).json({ code: 'FLAME_CONFIG_UNSUPPORTED' });
-    const next = normalizeFlameConfig(req.body, detectors.getConfig());
+    detectorMutationBusy = true;
+    const previous = detectors.getConfig();
+    const next = normalizeFlameConfig(req.body, previous);
     try {
       await detectors.disconnect();
       detectors.updateConfig(next);
       config.flame = next;
       waveformAnalysis.updateConfig(next.waveformAnalysis);
       waveformAnalysisState = waveformAnalysis.snapshot();
+      await detectors.connect();
+      const requiresTransport = next.units.some((unit) => unit.enabled);
+      if (requiresTransport && !detectorTransportConnected()) throw new Error('FLAME_CONFIG_NEW_CONNECTION_UNAVAILABLE');
       detectorVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState);
       finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
-      await detectors.connect();
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({ ...store, flameConfig: next, lastUpdated: Date.now() });
       broadcastSummary();
       return res.json({ success: true, config: next });
     } catch (error: any) {
-      return res.status(500).json({ code: 'FLAME_CONFIG_UPDATE_FAILED', error: error?.message || String(error) });
+      let rollbackError: string | null = null;
+      try {
+        await detectors.disconnect();
+        detectors.updateConfig(previous);
+        config.flame = previous;
+        waveformAnalysis.updateConfig(previous.waveformAnalysis);
+        waveformAnalysisState = waveformAnalysis.snapshot();
+        await detectors.connect();
+        detectorVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState);
+        finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
+        broadcastSummary();
+      } catch (rollback) {
+        rollbackError = rollback instanceof Error ? rollback.message : String(rollback);
+      }
+      return res.status(500).json({
+        code: 'FLAME_CONFIG_UPDATE_FAILED',
+        error: error?.message || String(error),
+        rolledBack: rollbackError === null,
+        rollbackError,
+      });
+    } finally {
+      detectorMutationBusy = false;
     }
   });
   app.post('/api/flame/auto-test', requireDesktopMutation, async (req, res) => {
+    if (detectorMutationBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
     if (!detectors.runAutoTest) return res.status(501).json({ code: 'FLAME_AUTO_TEST_UNSUPPORTED' });
+    detectorMutationBusy = true;
     try {
       const report = await detectors.runAutoTest((progress) => {
         wsServer.broadcast({ type: WSMessageType.FLAME_TEST_PROGRESS, payload: progress, timestamp: Date.now() });
@@ -364,6 +404,8 @@ export function createFieldStatusRuntime(
       return res.json({ success: true, report });
     } catch (error: any) {
       return res.status(409).json({ code: 'FLAME_AUTO_TEST_FAILED', error: error?.message || String(error) });
+    } finally {
+      detectorMutationBusy = false;
     }
   });
   app.get('/api/field/summary', (_req, res) => res.json(summary()));
