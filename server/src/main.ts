@@ -7,10 +7,30 @@ export interface ConfiguredServerRuntime {
 
 export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> {
   assertSupportedRuntimeMode(config.closureMode);
+
   if (config.closureMode === 'field') {
-    const { startFieldStatusServer } = await import('./closure/field-status-server.js');
-    return startFieldStatusServer();
+    const [{ startFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
+      import('./closure/field-status-server.js'),
+      import('./unified-services.js'),
+    ]);
+
+    const fieldRuntime = await startFieldStatusServer();
+    let auxiliaryRuntime: Awaited<ReturnType<typeof startUnifiedAuxiliaryServices>> | undefined;
+    try {
+      auxiliaryRuntime = await startUnifiedAuxiliaryServices();
+    } catch (error) {
+      await fieldRuntime.close();
+      throw error;
+    }
+
+    return {
+      async close(): Promise<void> {
+        await auxiliaryRuntime?.close();
+        await fieldRuntime.close();
+      },
+    };
   }
+
   const { startOfflineServer } = await import('./closure/offline-server.js');
   return startOfflineServer();
 }
