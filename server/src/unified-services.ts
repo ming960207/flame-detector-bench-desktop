@@ -36,7 +36,7 @@ function buildConnectionStatus(summary: FieldStatusSummary): ConnectionStatus {
 
 function explicitEnvMQTTOverrides(): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  if (process.env.MQTT_ENABLED !== undefined) result.mqttEnabled = process.env.MQTT_ENABLED !== 'false';
+  if (process.env.MQTT_ENABLED !== undefined) result.mqttEnabled = process.env.MQTT_ENABLED === 'true';
   if (process.env.MQTT_BROKER_URL) result.brokerUrl = process.env.MQTT_BROKER_URL;
   if (process.env.MQTT_TOPIC) result.topic = process.env.MQTT_TOPIC;
   if (process.env.MQTT_CLIENT_ID) result.clientId = process.env.MQTT_CLIENT_ID;
@@ -74,6 +74,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
 
   let stopped = false;
   let forwarding = false;
+  let mqttConfigBusy = false;
   let lastForwardError: string | null = null;
   let lastForwardAt: number | null = null;
 
@@ -93,32 +94,49 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRun
     }
   };
 
+  const publicMQTTStatus = () => {
+    const { outboxFile: _outboxFile, ...status } = publisher.getStatus();
+    return status;
+  };
+
   fieldRuntime.app.get('/api/mqtt/status', (_req, res) => {
     res.json({
-      ...publisher.getStatus(),
+      ...publicMQTTStatus(),
+      configBusy: mqttConfigBusy,
       lastForwardAt,
       lastForwardError,
       source: 'field-runtime-memory',
       timestamp: Date.now(),
     });
   });
-  fieldRuntime.app.get('/api/mqtt/config', (_req, res) => {
+  fieldRuntime.app.get('/api/mqtt/config', requireDesktopMutation, (_req, res) => {
     res.json({ success: true, config: publisher.getPublicConfig() });
   });
   fieldRuntime.app.put('/api/mqtt/config', requireDesktopMutation, async (req, res) => {
+    if (mqttConfigBusy) return res.status(409).json({ code: 'MQTT_CONFIG_BUSY' });
+    mqttConfigBusy = true;
+    const previous = publisher.getConfig();
     try {
-      const next = normalizeMQTTConfig(req.body, publisher.getConfig());
+      const next = normalizeMQTTConfig(req.body, previous);
+      const currentStore = await loadSystemConfig() ?? createDefaultSystemConfig();
       publisher.updateConfig(next);
       config.mqttConfig = next;
-      const currentStore = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({ ...currentStore, mqttConfig: next, lastUpdated: Date.now() });
       forwardFieldState();
-      return res.json({ success: true, config: publisher.getPublicConfig(), status: publisher.getStatus() });
+      return res.json({ success: true, config: publisher.getPublicConfig(), status: publicMQTTStatus() });
     } catch (error) {
+      try {
+        publisher.updateConfig(previous);
+        config.mqttConfig = previous;
+      } catch (rollback) {
+        console.error('[统一后端] MQTT 配置回滚失败:', rollback);
+      }
       return res.status(500).json({
         code: 'MQTT_CONFIG_UPDATE_FAILED',
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      mqttConfigBusy = false;
     }
   });
 
