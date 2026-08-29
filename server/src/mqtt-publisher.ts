@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import mqtt, { MqttClient } from 'mqtt';
 import { DEFAULT_MQTT_BROKER, type MQTTConfigLocal } from './config.js';
 import type { TestProgramArchive } from './test-program/test-program-types.js';
@@ -82,6 +84,11 @@ function seqNo(timestamp: number): string {
   return `${timestamp}${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
+function defaultOutboxFile(): string {
+  return process.env.MQTT_OUTBOX_FILE
+    || join(process.env.APP_DATA_DIR || process.cwd(), 'mqtt-outbox.json');
+}
+
 export interface MQTTPublisherStatus {
   enabled: boolean;
   connected: boolean;
@@ -89,11 +96,57 @@ export interface MQTTPublisherStatus {
   clientId?: string;
   lastError?: string;
   pendingReliableMessages: number;
+  outboxFile: string;
 }
 
 interface PendingReliableMessage {
   topic: string;
   payload: unknown;
+  queuedAt: number;
+}
+
+interface PersistedOutboxItem extends PendingReliableMessage {
+  key: string;
+}
+
+function readOutbox(file: string): Map<string, PendingReliableMessage> {
+  if (!existsSync(file)) return new Map();
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (!Array.isArray(parsed)) return new Map();
+    const entries: Array<[string, PendingReliableMessage]> = [];
+    for (const item of parsed.slice(-MAX_PENDING_RELIABLE_MESSAGES)) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const value = item as Partial<PersistedOutboxItem>;
+      if (typeof value.key !== 'string' || !value.key || typeof value.topic !== 'string' || !value.topic) continue;
+      entries.push([value.key.slice(0, 256), {
+        topic: value.topic.slice(0, 1024),
+        payload: value.payload,
+        queuedAt: Number.isFinite(Number(value.queuedAt)) ? Number(value.queuedAt) : Date.now(),
+      }]);
+    }
+    return new Map(entries);
+  } catch (error) {
+    console.error('[MQTT Server] 待上传队列读取失败，将从空队列启动:', error instanceof Error ? error.message : String(error));
+    return new Map();
+  }
+}
+
+function persistOutbox(file: string, messages: ReadonlyMap<string, PendingReliableMessage>): void {
+  mkdirSync(dirname(file), { recursive: true });
+  if (messages.size === 0) {
+    try { unlinkSync(file); } catch { /* file may not exist */ }
+    return;
+  }
+  const items: PersistedOutboxItem[] = Array.from(messages.entries()).map(([key, message]) => ({ key, ...message }));
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
+    renameSync(temporary, file);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch { /* no temporary file */ }
+    throw error;
+  }
 }
 
 export class MQTTPublisher {
@@ -105,10 +158,11 @@ export class MQTTPublisher {
   private lastSignature = '';
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private lastError = '';
-  private pendingReliableMessages = new Map<string, PendingReliableMessage>();
+  private readonly outboxFile: string;
+  private pendingReliableMessages: Map<string, PendingReliableMessage>;
   private flushingReliableMessages = false;
 
-  constructor(config: Partial<MQTTConfigLocal> = {}) {
+  constructor(config: Partial<MQTTConfigLocal> = {}, options: { outboxFile?: string } = {}) {
     this.config = normalizeMQTTConfig(config, {
       mqttEnabled: true,
       brokerUrl: DEFAULT_MQTT_BROKER,
@@ -116,6 +170,8 @@ export class MQTTPublisher {
       lineId: DEFAULT_LINE_ID,
       deviceId: DEFAULT_DEVICE_ID,
     });
+    this.outboxFile = options.outboxFile || defaultOutboxFile();
+    this.pendingReliableMessages = readOutbox(this.outboxFile);
   }
 
   getConfig(): MQTTConfigLocal {
@@ -135,6 +191,7 @@ export class MQTTPublisher {
       clientId: this.config.clientId,
       lastError: this.lastError || undefined,
       pendingReliableMessages: this.pendingReliableMessages.size,
+      outboxFile: this.outboxFile,
     };
   }
 
@@ -347,11 +404,7 @@ export class MQTTPublisher {
   publishEvent(code: string, level: 'INFO' | 'WARNING' | 'CRITICAL' | 'FATAL', msg: string): Promise<boolean> {
     const timestamp = Date.now();
     const payload = {
-      header: {
-        device_id: this.config.deviceId,
-        timestamp,
-        data_type: 'REALTIME',
-      },
+      header: { device_id: this.config.deviceId, timestamp, data_type: 'REALTIME' },
       payload: {
         event_code: code,
         event_level: level,
@@ -363,18 +416,28 @@ export class MQTTPublisher {
     return this.publish(eventTopic(this.config), payload);
   }
 
+  private persistReliableMessages(): void {
+    try {
+      persistOutbox(this.outboxFile, this.pendingReliableMessages);
+    } catch (error) {
+      this.lastError = `MQTT_OUTBOX_WRITE_FAILED: ${error instanceof Error ? error.message : String(error)}`;
+      console.error('[MQTT Server] 待上传队列保存失败:', this.lastError);
+    }
+  }
+
   private async publishReliable(key: string, topic: string, payload: unknown): Promise<boolean> {
     const success = await this.publish(topic, payload);
     if (success) {
-      this.pendingReliableMessages.delete(key);
+      if (this.pendingReliableMessages.delete(key)) this.persistReliableMessages();
       return true;
     }
-    this.pendingReliableMessages.set(key, { topic, payload });
+    this.pendingReliableMessages.set(key, { topic, payload, queuedAt: Date.now() });
     while (this.pendingReliableMessages.size > MAX_PENDING_RELIABLE_MESSAGES) {
       const oldest = this.pendingReliableMessages.keys().next().value as string | undefined;
       if (!oldest) break;
       this.pendingReliableMessages.delete(oldest);
     }
+    this.persistReliableMessages();
     return false;
   }
 
@@ -385,7 +448,10 @@ export class MQTTPublisher {
       for (const [key, message] of Array.from(this.pendingReliableMessages.entries())) {
         if (!this.connected) break;
         const success = await this.publish(message.topic, message.payload);
-        if (success) this.pendingReliableMessages.delete(key);
+        if (success) {
+          this.pendingReliableMessages.delete(key);
+          this.persistReliableMessages();
+        }
       }
     } finally {
       this.flushingReliableMessages = false;
@@ -394,9 +460,7 @@ export class MQTTPublisher {
 
   private startHeartbeat(): void {
     if (this.heartbeatTimer) return;
-    this.heartbeatTimer = setInterval(() => {
-      void this.publishFlameStatus();
-    }, HEARTBEAT_MS);
+    this.heartbeatTimer = setInterval(() => { void this.publishFlameStatus(); }, HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
   }
 }
