@@ -278,8 +278,6 @@ export class TestProgramObserver extends EventEmitter {
         break;
       case 'flame_state':
         this.tracker.observeFlameState(message.payload as FlameDetectorState);
-        // Formal field status broadcasts the summary alongside detector state;
-        // avoid pushing the full raw history on every waveform packet.
         break;
       case 'flame_waveform_delta':
         this.tracker.observeWaveformDelta(message.payload as FlameDetectorWaveformDelta);
@@ -303,8 +301,16 @@ export class TestProgramObserver extends EventEmitter {
       this.tracker.markPoll(Date.now());
       this.tracker.observeSummary(summary);
       this.pollConnected = true;
-      const devices = await this.fetchJson<FlameDetectorState>('/api/flame/devices');
-      this.tracker.observeFlameState(devices);
+
+      // The WebSocket path already carries the initial full flame snapshot and
+      // subsequent waveform deltas. Only fetch the large full history as a
+      // fallback while WS is unavailable; otherwise six detector histories are
+      // serialized and copied again every polling cycle for no additional data.
+      if (!this.wsConnected) {
+        const devices = await this.fetchJson<FlameDetectorState>('/api/flame/devices');
+        this.tracker.observeFlameState(devices);
+      }
+
       void this.refreshPLCConfiguration();
       this.updateSourceConnection();
       this.emitSnapshot();
