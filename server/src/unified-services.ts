@@ -1,17 +1,11 @@
 import { config } from './config.js';
+import type { FieldStatusRuntime, FieldStatusSummary } from './closure/field-status-server.js';
 import { MQTTPublisher } from './mqtt-publisher.js';
-import { createTestProgramRuntime, type TestProgramRuntime } from './test-program/test-program-server.js';
-import type { ConnectionStatus, FlameDetectorState } from './types.js';
-
-interface FieldSummaryPayload {
-  plcConnected?: boolean;
-  detectorConnected?: boolean;
-  detectorTransportConnected?: boolean;
-  detectorDataStreamConnected?: boolean;
-}
+import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
+import type { ConnectionStatus } from './types.js';
 
 export interface UnifiedAuxiliaryRuntime {
-  readonly testProgram: TestProgramRuntime;
+  readonly testProgram: EmbeddedTestProgramRuntime;
   close(): Promise<void>;
 }
 
@@ -20,88 +14,94 @@ function localBackendUrl(): string {
 }
 
 function mqttEnabled(): boolean {
-  return process.env.MQTT_ENABLED !== 'false';
+  if (process.env.MQTT_ENABLED !== undefined) return process.env.MQTT_ENABLED !== 'false';
+  return config.mqttConfig?.mqttEnabled !== false;
 }
 
-function testProgramPort(): number {
-  const configured = Number(process.env.TEST_PROGRAM_PORT);
-  if (Number.isInteger(configured) && configured > 0 && configured <= 65535) return configured;
-  return config.serverPort + 1;
-}
-
-function buildConnectionStatus(summary: FieldSummaryPayload): ConnectionStatus {
+function buildConnectionStatus(summary: FieldStatusSummary): ConnectionStatus {
+  const plc = config.plcs[0] ?? config.plc;
   return {
     relay: {
-      connected: summary.plcConnected === true,
+      connected: summary.plcConnected,
       mode: 'S7',
-      ip: config.plc.ip,
-      port: config.plc.port,
+      ip: plc.ip,
+      port: plc.port,
     },
     flame: {
-      connected: summary.detectorConnected === true,
-      transportConnected: summary.detectorTransportConnected === true,
-      dataStreamConnected: summary.detectorDataStreamConnected === true,
+      connected: summary.detectorConnected,
+      transportConnected: summary.detectorTransportConnected,
+      dataStreamConnected: summary.detectorDataStreamConnected,
       mode: config.flame.mode,
     },
   };
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${localBackendUrl()}${path}`, {
-    signal: AbortSignal.timeout(2_500),
-  });
-  if (!response.ok) throw new Error(`UNIFIED_BACKEND_HTTP_${response.status}`);
-  return response.json() as Promise<T>;
-}
-
 /**
- * Starts non-controlling services inside the same Node.js backend process.
- *
- * The test observer remains read-only and consumes the field backend through
- * localhost. MQTT publishing consumes the same authoritative field state, so
- * neither service opens a second PLC/Modbus connection or writes PLC I/O.
+ * Start observation/upload services on the already-running field backend.
+ * There is exactly one HTTP/WS listener and exactly one PLC/flame device stack.
  */
-export async function startUnifiedAuxiliaryServices(): Promise<UnifiedAuxiliaryRuntime> {
+export async function startUnifiedAuxiliaryServices(fieldRuntime: FieldStatusRuntime): Promise<UnifiedAuxiliaryRuntime> {
   const backendUrl = localBackendUrl();
-  const testProgram = createTestProgramRuntime({
+  const testProgram = mountTestProgramRoutes(fieldRuntime.app, {
     formalBackendUrl: backendUrl,
     formalBackendWsUrl: backendUrl.replace(/^http:/i, 'ws:'),
+    broadcast: (type, payload) => {
+      fieldRuntime.wsServer.broadcast({ type, payload, timestamp: Date.now() } as any);
+    },
   });
-  const observerPort = await testProgram.listen(testProgramPort());
+  testProgram.start();
 
+  const enabled = mqttEnabled();
   const publisher = new MQTTPublisher({
     ...(config.mqttConfig ?? {}),
-    mqttEnabled: mqttEnabled(),
+    mqttEnabled: enabled,
   });
-  if (mqttEnabled()) publisher.connect();
+  if (enabled) {
+    try {
+      publisher.connect();
+    } catch (error) {
+      console.error('[统一后端] MQTT 初始化失败，将继续运行本地检测:', error instanceof Error ? error.message : String(error));
+    }
+  }
 
   let stopped = false;
-  let pollInFlight = false;
+  let forwarding = false;
+  let lastForwardError: string | null = null;
+  let lastForwardAt: number | null = null;
 
-  const forwardFieldState = async (): Promise<void> => {
-    if (stopped || pollInFlight) return;
-    pollInFlight = true;
+  const forwardFieldState = (): void => {
+    if (stopped || forwarding) return;
+    forwarding = true;
     try {
-      const [state, summary] = await Promise.all([
-        fetchJson<FlameDetectorState>('/api/flame/devices'),
-        fetchJson<FieldSummaryPayload>('/api/field/summary'),
-      ]);
-      publisher.handleFlameState(state, buildConnectionStatus(summary));
+      const snapshot = fieldRuntime.snapshot();
+      publisher.handleFlameState(snapshot.flame, buildConnectionStatus(snapshot.summary));
+      lastForwardAt = Date.now();
+      lastForwardError = null;
     } catch (error) {
-      // Field runtime owns device connectivity. Auxiliary services must never
-      // make backend startup fail merely because equipment is temporarily down.
-      console.warn('[统一后端] MQTT 状态同步暂不可用:', error instanceof Error ? error.message : String(error));
+      lastForwardError = error instanceof Error ? error.message : String(error);
+      console.warn('[统一后端] MQTT 状态同步暂不可用:', lastForwardError);
     } finally {
-      pollInFlight = false;
+      forwarding = false;
     }
   };
 
-  await forwardFieldState();
-  const pollTimer = setInterval(() => { void forwardFieldState(); }, 1_000);
+  fieldRuntime.app.get('/api/mqtt/status', (_req, res) => {
+    res.json({
+      enabled,
+      connected: publisher.isConnected(),
+      lastForwardAt,
+      lastForwardError,
+      source: 'field-runtime-memory',
+      timestamp: Date.now(),
+    });
+  });
+
+  forwardFieldState();
+  const pollTimer = setInterval(forwardFieldState, 1_000);
   pollTimer.unref?.();
 
-  console.log(`[统一后端] 测试监听已并入当前 Node 进程，兼容 API: http://127.0.0.1:${observerPort}`);
-  console.log(`[统一后端] MQTT 上传: ${mqttEnabled() ? '已启用' : '已禁用(MQTT_ENABLED=false)'}`);
+  console.log(`[统一后端] 测试监听 API 已并入正式端口: ${backendUrl}/api/test-program/*`);
+  console.log(`[统一后端] MQTT 上传: ${enabled ? '已启用' : '已禁用'}`);
 
   return {
     testProgram,
