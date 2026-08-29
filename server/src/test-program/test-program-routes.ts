@@ -1,4 +1,5 @@
 import type { Express } from 'express';
+import { requireDesktopMutation } from '../request-security.js';
 import { TestProgramArchiveStore } from './test-program-archive.js';
 import { TestProgramObserver, type TestProgramObserverOptions } from './test-program-observer.js';
 
@@ -37,12 +38,11 @@ export function mountTestProgramRoutes(app: Express, options: EmbeddedTestProgra
     status: 'ok',
     mode: 'embedded-readonly-observer',
     source: observer.snapshot().source,
-    archiveDirectory: archiveStore.directory,
     timestamp: Date.now(),
   }));
   app.get('/api/test-program/snapshot', (_req, res) => res.json(observer.snapshot()));
   app.get('/api/test-program/config', (_req, res) => res.json(observer.configuration()));
-  app.put('/api/test-program/config', (req, res) => {
+  app.put('/api/test-program/config', requireDesktopMutation, (req, res) => {
     try {
       res.json(observer.updatePlan(req.body?.plan));
     } catch (error) {
