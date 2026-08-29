@@ -36,9 +36,13 @@ export async function loadSystemConfig(): Promise<SystemConfigStore | null> {
 }
 
 export async function saveSystemConfig(store: SystemConfigStore): Promise<void> {
+  const temporaryPath = `${CONFIG_FILE_PATH}.tmp-${process.pid}-${Date.now()}`;
+  const content = `${JSON.stringify(store, null, 2)}\n`;
   try {
-    await fs.writeFile(CONFIG_FILE_PATH, JSON.stringify(store, null, 2), 'utf-8');
+    await fs.writeFile(temporaryPath, content, 'utf-8');
+    await fs.rename(temporaryPath, CONFIG_FILE_PATH);
   } catch (error: any) {
+    try { await fs.unlink(temporaryPath); } catch { /* no temporary file */ }
     console.error('[SystemConfigStore] 保存配置失败:', error.message);
     throw error;
   }
@@ -47,6 +51,6 @@ export async function saveSystemConfig(store: SystemConfigStore): Promise<void> 
 export function createDefaultSystemConfig(): SystemConfigStore {
   return {
     steps: [],
-    lastUpdated: Date.now()
+    lastUpdated: Date.now(),
   };
 }
