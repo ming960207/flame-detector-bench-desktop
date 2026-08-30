@@ -31,6 +31,9 @@ jobs:
       - name: Install web dependencies
         run: npm ci
 
+      - name: Restore Rollup Linux optional dependency
+        run: npm install --no-save --package-lock=false @rollup/rollup-linux-x64-gnu@4.53.3
+
       - name: Install server dependencies
         run: npm ci --prefix server
 
