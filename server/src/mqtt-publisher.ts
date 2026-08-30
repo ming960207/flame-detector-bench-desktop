@@ -149,6 +149,79 @@ function persistOutbox(file: string, messages: ReadonlyMap<string, PendingReliab
   }
 }
 
+export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: string, timestamp = run.archivedAt || Date.now()) {
+  const detectorUnits = run.evidence.detectorVerdict?.units ?? [];
+  const precheckUnits = detectorUnits.flatMap((unit) => unit.precheck ? [unit.precheck] : []);
+  const firstPrecheck = precheckUnits[0];
+  const productPrecheckVerdict = precheckUnits.length === 0
+    ? null
+    : precheckUnits.some((unit) => unit.verdict === 'FAIL')
+      ? 'FAIL'
+      : precheckUnits.some((unit) => unit.verdict === 'PENDING')
+        ? 'PENDING'
+        : 'PASS';
+
+  return {
+    header: {
+      device_id: deviceId,
+      timestamp,
+      data_type: 'INSPECTION_RESULT',
+      seq_no: seqNo(timestamp),
+    },
+    payload: {
+      run_id: run.runId,
+      status: run.status,
+      verdict: run.decision.verdict,
+      grade: run.decision.grade,
+      started_at: run.startedAt,
+      ended_at: run.endedAt,
+      duration_ms: run.durationMs,
+      reasons: run.decision.reasons.slice(0, 20),
+      product_type: firstPrecheck?.productType ?? null,
+      expected_software_version: firstPrecheck?.expectedSoftwareVersion || null,
+      expected_probe_count: firstPrecheck?.expectedProbeCount ?? null,
+      product_precheck_verdict: productPrecheckVerdict,
+      detector_results: detectorUnits.map((unit) => ({
+        index: unit.index,
+        address: unit.address,
+        verdict: unit.verdict,
+        grade: unit.grade,
+        reason: unit.reason ?? null,
+        actual_software_version: unit.precheck?.actualSoftwareVersion ?? null,
+        expected_software_version: unit.precheck?.expectedSoftwareVersion || null,
+        actual_probe_count: unit.precheck?.actualProbeCount ?? null,
+        expected_probe_count: unit.precheck?.expectedProbeCount ?? null,
+        precheck_verdict: unit.precheck?.verdict ?? null,
+        precheck_reasons: unit.precheck?.reasons ?? [],
+        fire_alarm_at_precheck: unit.precheck?.fireAlarm ?? null,
+        fault_at_precheck: unit.precheck?.fault ?? null,
+        no_data_probes: unit.noDataProbes ?? [],
+      })),
+      stages: run.stages.map((stage) => ({
+        sequence: stage.sequence,
+        id: stage.stageId,
+        label: stage.label,
+        status: stage.status,
+        started_at: stage.startedAt,
+        ended_at: stage.endedAt,
+        duration_ms: stage.durationMs,
+        planned_duration_ms: stage.plannedDurationMs,
+        within_plan: stage.withinPlan,
+        detector_count: stage.detectors.length,
+        relay_event_count: stage.relayEventCount,
+        waveform_sample_count: stage.waveforms.reduce((sum, unit) => sum + unit.sampleCount, 0),
+      })),
+      evidence: {
+        plc_available: Boolean(run.evidence.process),
+        detector_available: Boolean(run.evidence.detectorState),
+        product_precheck_available: precheckUnits.length > 0,
+        final_verdict: run.evidence.finalVerdict?.verdict ?? null,
+        final_grade: run.evidence.finalVerdict?.grade ?? null,
+      },
+    },
+  };
+}
+
 export class MQTTPublisher {
   private config: MQTTConfigLocal;
   private client: MqttClient | null = null;
@@ -360,44 +433,7 @@ export class MQTTPublisher {
 
   publishInspectionResult(run: TestProgramArchive): Promise<boolean> {
     const timestamp = run.archivedAt || Date.now();
-    const payload = {
-      header: {
-        device_id: this.config.deviceId,
-        timestamp,
-        data_type: 'INSPECTION_RESULT',
-        seq_no: seqNo(timestamp),
-      },
-      payload: {
-        run_id: run.runId,
-        status: run.status,
-        verdict: run.decision.verdict,
-        grade: run.decision.grade,
-        started_at: run.startedAt,
-        ended_at: run.endedAt,
-        duration_ms: run.durationMs,
-        reasons: run.decision.reasons.slice(0, 20),
-        stages: run.stages.map((stage) => ({
-          sequence: stage.sequence,
-          id: stage.stageId,
-          label: stage.label,
-          status: stage.status,
-          started_at: stage.startedAt,
-          ended_at: stage.endedAt,
-          duration_ms: stage.durationMs,
-          planned_duration_ms: stage.plannedDurationMs,
-          within_plan: stage.withinPlan,
-          detector_count: stage.detectors.length,
-          relay_event_count: stage.relayEventCount,
-          waveform_sample_count: stage.waveforms.reduce((sum, unit) => sum + unit.sampleCount, 0),
-        })),
-        evidence: {
-          plc_available: Boolean(run.evidence.process),
-          detector_available: Boolean(run.evidence.detectorState),
-          final_verdict: run.evidence.finalVerdict?.verdict ?? null,
-          final_grade: run.evidence.finalVerdict?.grade ?? null,
-        },
-      },
-    };
+    const payload = buildInspectionResultPayload(run, this.config.deviceId, timestamp);
     return this.publishReliable(`inspection:${run.runId}`, inspectionTopic(this.config), payload);
   }
 
