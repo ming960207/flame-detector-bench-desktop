@@ -8,6 +8,7 @@
     "dev": "tsx watch src/main.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
+    "test:product": "tsx --test test/product-profile-precheck.test.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {
