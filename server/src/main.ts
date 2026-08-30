@@ -17,12 +17,12 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
   assertSupportedRuntimeMode(config.closureMode);
 
   if (config.closureMode === 'field') {
-    const [{ startFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
-      import('./closure/field-status-server.js'),
+    const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
+      import('./product-aware-field-runtime.js'),
       import('./unified-services.js'),
     ]);
 
-    const fieldRuntime = await startFieldStatusServer();
+    const fieldRuntime = await startProductAwareFieldStatusServer();
     let auxiliaryRuntime: Awaited<ReturnType<typeof startUnifiedAuxiliaryServices>> | undefined;
     try {
       auxiliaryRuntime = await startUnifiedAuxiliaryServices(fieldRuntime);
