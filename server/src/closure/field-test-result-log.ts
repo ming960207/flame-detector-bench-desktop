@@ -152,6 +152,13 @@ const REASON_TEXT: Record<string, string> = {
   SNR31_ABOVE_LIMIT: 'P3/P1 信噪比高于上限',
 };
 
+const PRODUCT_TYPE_LABELS: Record<string, string> = {
+  DUAL_WAVELENGTH: '双波长',
+  THREE_WAVELENGTH: '三波长',
+  FOUR_WAVELENGTH: '四波长',
+  IMAGE_DETECTOR: '图探型',
+};
+
 function reasonText(unit: FieldDetectorResult): string {
   const reason = unit.reason ?? '';
   if (reason.endsWith('_SIGNAL_NO_DATA')) return '探头疑似无有效数据（高绝对值/低波动）';
@@ -257,23 +264,31 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const file = join(this.directory, `test-results-${datePart(test.completedAt)}.log`);
     rotateCorruptLog(file);
     const units = test.detectorVerdict.units;
+    const embeddedPrecheckUnits = units.flatMap((unit) => unit.precheck ? [unit.precheck] : []);
+    const precheckUnits = test.productPrecheck?.units?.length ? test.productPrecheck.units : embeddedPrecheckUnits;
+    const firstPrecheck = precheckUnits[0];
     const analysisByIndex = new Map((test.waveformAnalysis?.units ?? []).map((unit) => [unit.index, unit]));
     const durationMs = test.startedAt === null ? null : Math.max(0, test.completedAt - test.startedAt);
     const finalResult = resultText(test.finalVerdict.verdict);
     const finalGrade = gradeText(test.finalVerdict.grade);
     const profile = test.productConfig ? selectedProductProfile(test.productConfig) : null;
+    const productType = test.productConfig?.selectedType ?? test.productPrecheck?.productType ?? firstPrecheck?.productType;
+    const productLabel = profile?.label ?? test.productPrecheck?.productLabel ?? (productType ? PRODUCT_TYPE_LABELS[productType] ?? productType : null);
+    const expectedSoftwareVersion = profile?.expectedSoftwareVersion ?? test.productPrecheck?.expectedSoftwareVersion ?? firstPrecheck?.expectedSoftwareVersion ?? '';
+    const expectedProbeCount = profile?.expectedProbeCount ?? test.productPrecheck?.expectedProbeCount ?? firstPrecheck?.expectedProbeCount ?? null;
     const summary = [
       `批次：${test.batchId}`,
-      ...(test.productConfig ? [`产品：${profile?.label ?? test.productConfig.selectedType}`] : []),
-      ...(profile ? [`版本基准：${profile.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}`] : []),
-      ...(profile ? [`探头基准：${profile.expectedProbeCount}`] : []),
+      ...(productLabel ? [`产品：${productLabel}`] : []),
+      ...(productType ? [`产品类型：${productType}`] : []),
+      ...(productType ? [`版本基准：${expectedSoftwareVersion ? formatSoftwareVersion(expectedSoftwareVersion) : '未配置'}`] : []),
+      ...(expectedProbeCount !== null ? [`探头基准：${expectedProbeCount}`] : []),
       `结果：${finalResult}`,
       `等级：${finalGrade}`,
       `耗时：${durationMs === null ? '未知' : `${(durationMs / 1000).toFixed(1)}秒`}`,
       `设备：${units.length}（A ${units.filter((unit) => unit.grade === 'A_PASS').length} / B ${units.filter((unit) => unit.grade === 'B_PASS').length} / NG ${units.filter((unit) => unit.grade === 'FAIL').length} / 待检 ${units.filter((unit) => unit.grade === 'PENDING').length}）`,
     ].join(' | ');
 
-    const precheckRows = (test.productPrecheck?.units ?? []).map((unit) => [
+    const precheckRows = precheckUnits.map((unit) => [
       String(unit.index),
       String(unit.address),
       unit.actualSoftwareVersion ?? '读取失败',
