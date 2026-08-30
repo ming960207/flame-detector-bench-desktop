@@ -159,6 +159,7 @@ export function FieldProcessStatusApp() {
       locked={productLocked}
       precheck={productPrecheck}
       busy={productPrecheckBusy}
+      detectorVerdict={detectorVerdict}
       onUpdate={updateProductConfig}
     />
     <WutosDashboard
