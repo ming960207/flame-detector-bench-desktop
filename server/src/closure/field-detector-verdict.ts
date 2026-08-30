@@ -5,6 +5,7 @@ import {
   type ProductDetectionConfig,
   type ProductPrecheckReport,
   type ProductPrecheckUnitResult,
+  type ProductType,
 } from '../product-profile.js';
 import { DEFAULT_DETECTION_QUALITY_CONFIG } from './field-waveform-analysis.js';
 import type {
@@ -49,6 +50,10 @@ export interface FieldDetectorBatchVerdict {
   grade: FieldQualityGrade;
   units: FieldDetectorResult[];
   timestamp: number;
+  productType?: ProductType;
+  expectedSoftwareVersion?: string;
+  expectedProbeCount?: number;
+  productPrecheckVerdict?: ProductPrecheckReport['verdict'] | null;
 }
 
 function finiteOrNull(value: unknown): number | null {
@@ -274,6 +279,7 @@ export function evaluateFieldDetectorBatch(
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
   const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
+  const productProfile = productConfig ? selectedProductProfile(productConfig) : null;
   const units = state.units.map((unit) => evaluateUnit(
     unit,
     analysisByIndex.get(unit.index),
@@ -299,6 +305,12 @@ export function evaluateFieldDetectorBatch(
     grade,
     units,
     timestamp: state.timestamp,
+    ...(productConfig && productProfile ? {
+      productType: productConfig.selectedType,
+      expectedSoftwareVersion: productProfile.expectedSoftwareVersion,
+      expectedProbeCount: productProfile.expectedProbeCount,
+      productPrecheckVerdict: productPrecheck?.verdict ?? null,
+    } : {}),
   };
 }
 
