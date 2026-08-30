@@ -4,6 +4,12 @@ import type { FieldDetectorBatchVerdict, FieldDetectorMetrics, FieldDetectorResu
 import type { FieldFinalVerdict } from './field-final-verdict.js';
 import type { FlameDetectorState } from '../types.js';
 import {
+  formatSoftwareVersion,
+  selectedProductProfile,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+} from '../product-profile.js';
+import {
   DEFAULT_DETECTION_QUALITY_CONFIG,
   normalizeDetectionQualityConfig,
   type DetectionQualityConfig,
@@ -20,6 +26,8 @@ export interface CompletedFieldTest {
   thresholds: WaveformAnalysisConfig;
   waveformAnalysis?: FieldWaveformAnalysisSnapshot;
   inspectionPositions: InspectionPositionResult[];
+  productConfig?: ProductDetectionConfig;
+  productPrecheck?: ProductPrecheckReport | null;
 }
 
 export type InspectionPositionId = 'DETECTION_POSITION_1_HEAT' | 'DETECTION_POSITION_2_FLASH';
@@ -124,6 +132,12 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_OFFLINE: '探测器离线',
   DETECTOR_SOURCE_NOT_READY: '光源未就绪',
   DETECTOR_SYNC_NOT_OK: '同步异常',
+  SOFTWARE_VERSION_NOT_CONFIGURED: '未配置软件版本基准',
+  SOFTWARE_VERSION_MISMATCH: '软件版本不一致',
+  PROBE_COUNT_MISMATCH: '探头数量不一致',
+  DETECTOR_FAULT_AT_PRECHECK: '产品预检时探测器故障',
+  PRECHECK_READ_FAILED: '产品预检读取失败',
+  PRODUCT_PRECHECK_NOT_COMPLETED: '产品预检未完成',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
   NOISE_RMS_EXCEEDS_LIMIT: '噪声 RMS 超过上限',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
@@ -140,6 +154,7 @@ const REASON_TEXT: Record<string, string> = {
 
 function reasonText(unit: FieldDetectorResult): string {
   const reason = unit.reason ?? '';
+  if (reason.endsWith('_SIGNAL_NO_DATA')) return '探头疑似无有效数据（高绝对值/低波动）';
   const direct = REASON_TEXT[reason];
   if (direct) return direct;
   const suffix = Object.keys(REASON_TEXT).find((code) => reason.endsWith(code));
@@ -148,6 +163,10 @@ function reasonText(unit: FieldDetectorResult): string {
 
 function resultText(verdict: 'PASS' | 'FAIL' | 'PENDING'): string {
   return verdict === 'PASS' ? '合格' : verdict === 'FAIL' ? '不合格' : '待检测';
+}
+
+function precheckReasonText(reason: string): string {
+  return REASON_TEXT[reason] ?? reason;
 }
 
 function valueText(value: unknown): string {
@@ -242,13 +261,30 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const durationMs = test.startedAt === null ? null : Math.max(0, test.completedAt - test.startedAt);
     const finalResult = resultText(test.finalVerdict.verdict);
     const finalGrade = gradeText(test.finalVerdict.grade);
+    const profile = test.productConfig ? selectedProductProfile(test.productConfig) : null;
     const summary = [
       `批次：${test.batchId}`,
+      ...(test.productConfig ? [`产品：${profile?.label ?? test.productConfig.selectedType}`] : []),
+      ...(profile ? [`版本基准：${profile.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}`] : []),
+      ...(profile ? [`探头基准：${profile.expectedProbeCount}`] : []),
       `结果：${finalResult}`,
       `等级：${finalGrade}`,
       `耗时：${durationMs === null ? '未知' : `${(durationMs / 1000).toFixed(1)}秒`}`,
       `设备：${units.length}（A ${units.filter((unit) => unit.grade === 'A_PASS').length} / B ${units.filter((unit) => unit.grade === 'B_PASS').length} / NG ${units.filter((unit) => unit.grade === 'FAIL').length} / 待检 ${units.filter((unit) => unit.grade === 'PENDING').length}）`,
     ].join(' | ');
+
+    const precheckRows = (test.productPrecheck?.units ?? []).map((unit) => [
+      String(unit.index),
+      String(unit.address),
+      unit.actualSoftwareVersion ?? '读取失败',
+      unit.expectedSoftwareVersion ? formatSoftwareVersion(unit.expectedSoftwareVersion) : '未配置',
+      valueText(unit.actualProbeCount),
+      String(unit.expectedProbeCount),
+      unit.fireAlarm === null ? '-' : unit.fireAlarm ? '有火警' : '无火警',
+      unit.fault === null ? '-' : unit.fault ? '故障' : '无故障',
+      unit.verdict === 'PASS' ? '通过' : unit.verdict === 'FAIL' ? '异常' : '待检',
+      unit.reasons.length ? unit.reasons.map(precheckReasonText).join('；') : '-',
+    ]);
 
     const deviceRows = units.map((unit) => {
       const metrics = unit.metrics;
@@ -256,7 +292,8 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       const detail = failures.length
         ? failures.map((failure) => `${valueText(failure.value)} ${failure.operator === '<=' ? '≤' : '≥'} ${valueText(failure.limit)}`).join('；')
         : '';
-      const explanation = [reasonText(unit), detail && `（${detail}）`].filter(Boolean).join('');
+      const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map((probe) => probe.replace('probe', 'P')).join('/')}` : '';
+      const explanation = [reasonText(unit), noData, detail && `（${detail}）`].filter(Boolean).join('；');
       return [
         String(unit.index), String(unit.address), gradeText(unit.grade),
         valueText(metrics.noiseRms), valueText(metrics.noisePeakToPeak), valueText(metrics.noiseAbsolute),
@@ -290,6 +327,11 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       '='.repeat(96),
       `完成时间：${localDateTime(test.completedAt)}`,
       summary,
+      '',
+      '产品预检',
+      ...(precheckRows.length
+        ? table(['设备', '地址', '实际版本', '期望版本', '实际探头数', '期望探头数', '报警', '故障', '结果', '说明'], precheckRows)
+        : ['未记录产品预检结果']),
       '',
       '设备结果明细',
       ...table(
