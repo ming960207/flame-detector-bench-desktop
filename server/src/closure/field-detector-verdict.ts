@@ -279,8 +279,14 @@ export function evaluateFieldDetectorBatch(
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
   const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
+  const participatingIndexes = productPrecheck?.units?.length
+    ? new Set(productPrecheck.units.map((unit) => unit.index))
+    : null;
   const productProfile = productConfig ? selectedProductProfile(productConfig) : null;
-  const units = state.units.map((unit) => evaluateUnit(
+  const sourceUnits = participatingIndexes
+    ? state.units.filter((unit) => participatingIndexes.has(unit.index))
+    : state.units;
+  const units = sourceUnits.map((unit) => evaluateUnit(
     unit,
     analysisByIndex.get(unit.index),
     analysisSnapshot,
