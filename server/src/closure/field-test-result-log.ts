@@ -272,10 +272,21 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const finalResult = resultText(test.finalVerdict.verdict);
     const finalGrade = gradeText(test.finalVerdict.grade);
     const profile = test.productConfig ? selectedProductProfile(test.productConfig) : null;
-    const productType = test.productConfig?.selectedType ?? test.productPrecheck?.productType ?? firstPrecheck?.productType;
+    const productType = test.productConfig?.selectedType
+      ?? test.detectorVerdict.productType
+      ?? test.productPrecheck?.productType
+      ?? firstPrecheck?.productType;
     const productLabel = profile?.label ?? test.productPrecheck?.productLabel ?? (productType ? PRODUCT_TYPE_LABELS[productType] ?? productType : null);
-    const expectedSoftwareVersion = profile?.expectedSoftwareVersion ?? test.productPrecheck?.expectedSoftwareVersion ?? firstPrecheck?.expectedSoftwareVersion ?? '';
-    const expectedProbeCount = profile?.expectedProbeCount ?? test.productPrecheck?.expectedProbeCount ?? firstPrecheck?.expectedProbeCount ?? null;
+    const expectedSoftwareVersion = profile?.expectedSoftwareVersion
+      ?? test.detectorVerdict.expectedSoftwareVersion
+      ?? test.productPrecheck?.expectedSoftwareVersion
+      ?? firstPrecheck?.expectedSoftwareVersion
+      ?? '';
+    const expectedProbeCount = profile?.expectedProbeCount
+      ?? test.detectorVerdict.expectedProbeCount
+      ?? test.productPrecheck?.expectedProbeCount
+      ?? firstPrecheck?.expectedProbeCount
+      ?? null;
     const summary = [
       `批次：${test.batchId}`,
       ...(productLabel ? [`产品：${productLabel}`] : []),
