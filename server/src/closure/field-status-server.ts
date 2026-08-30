@@ -210,13 +210,12 @@ function processLocksProductSelection(status: PLCProcessStatus | undefined): boo
   return Boolean(stage && stage !== 'IDLE' && stage !== 'COMPLETE' && stage !== 'UNKNOWN');
 }
 
-function isPastPositionOneClamp(status: PLCProcessStatus): boolean {
-  if (status.processStage === 'FLASH' || status.processStage === 'EMC' || status.processStage === 'RETURN_HOME' || status.processStage === 'COMPLETE') return true;
-  if (status.processStage !== 'HEAT' && status.processStage !== 'INIT') return false;
+function isSafePositionOnePrecheckWindow(status: PLCProcessStatus): boolean {
+  if (status.stage === 'FAULT' || status.processStage !== 'HEAT') return false;
+  if (status.io?.steps?.stepM10_4 === true) return false;
   return Boolean(
     status.io?.internal?.signalStabilizing
-    || status.io?.internal?.noiseCaptureWindow
-    || status.io?.steps?.stepM10_4,
+    || status.io?.internal?.noiseCaptureWindow,
   );
 }
 
@@ -356,7 +355,8 @@ export function createFieldStatusRuntime(
     }
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
-    if (positionOneClampCompleted || (!productPrecheck && isPastPositionOneClamp(status))) {
+    const safePrecheckWindow = isSafePositionOnePrecheckWindow(status);
+    if (safePrecheckWindow && (positionOneClampCompleted || !productPrecheck)) {
       void runProductPrecheck(waveformAnalysisState.batchId);
     }
     if (heatInterferenceStarted) positionStartedAt.set('DETECTION_POSITION_1_HEAT', status.timestamp);
