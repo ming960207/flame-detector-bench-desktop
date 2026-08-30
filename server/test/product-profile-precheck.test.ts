@@ -170,6 +170,31 @@ function precheck(): ProductPrecheckReport {
   };
 }
 
+function archiveWithVerdict(detectorVerdict: ReturnType<typeof evaluateFieldDetectorBatch>, state: FlameDetectorState, result: WaveformAnalysisUnitResult): TestProgramArchive {
+  return {
+    runId: 'run-1',
+    status: 'COMPLETED',
+    startedAt: 100,
+    endedAt: 200,
+    durationMs: 100,
+    currentStage: 'COMPLETE',
+    stages: [],
+    relayEvents: [],
+    latestRelayOutputs: [],
+    decision: { verdict: detectorVerdict.verdict, grade: detectorVerdict.grade, reasons: detectorVerdict.units.map((item) => item.reason ?? ''), basis: [], evaluatedAt: 200 },
+    evidence: {
+      process: null,
+      detectorState: state,
+      waveformAnalysis: snapshot(result),
+      detectorVerdict,
+      finalVerdict: null,
+    },
+    stagePlan: [],
+    archivedAt: 300,
+    reportFile: 'run-1.json',
+  } as unknown as TestProgramArchive;
+}
+
 test('software version comparison ignores separators and 0x prefix', () => {
   assert.equal(canonicalSoftwareVersion('0x01-02.03_04'), '01020304');
   assert.equal(softwareVersionMatches('01.02.03.04', '01020304'), true);
@@ -244,30 +269,7 @@ test('MQTT inspection payload keeps product identity and per-detector precheck e
   const result = analysisUnit();
   result.noiseTest.metrics.probe1 = { absolute: 995, fluctuation: 5 };
   const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
-  const archive = {
-    runId: 'run-1',
-    status: 'COMPLETED',
-    startedAt: 100,
-    endedAt: 200,
-    durationMs: 100,
-    currentStage: 'COMPLETE',
-    stages: [],
-    relayEvents: [],
-    latestRelayOutputs: [],
-    decision: { verdict: 'FAIL', grade: 'FAIL', reasons: ['PROBE1_SIGNAL_NO_DATA'], basis: [], evaluatedAt: 200 },
-    evidence: {
-      process: null,
-      detectorState: state,
-      waveformAnalysis: snapshot(result),
-      detectorVerdict,
-      finalVerdict: null,
-    },
-    stagePlan: [],
-    archivedAt: 300,
-    reportFile: 'run-1.json',
-  } as unknown as TestProgramArchive;
-
-  const message = buildInspectionResultPayload(archive, 'bench-1', 300) as {
+  const message = buildInspectionResultPayload(archiveWithVerdict(detectorVerdict, state, result), 'bench-1', 300) as {
     payload: {
       product_type: string | null;
       expected_software_version: string | null;
@@ -288,4 +290,45 @@ test('MQTT inspection payload keeps product identity and per-detector precheck e
   assert.equal(message.payload.detector_results[0]?.actual_software_version, '01.02.03.04');
   assert.equal(message.payload.detector_results[0]?.actual_probe_count, 2);
   assert.deepEqual(message.payload.detector_results[0]?.no_data_probes, ['probe1']);
+});
+
+test('missing precheck is NG but batch product identity still survives into MQTT', () => {
+  const stateUnit = unit();
+  const state: FlameDetectorState = {
+    units: [stateUnit],
+    onlineCount: 1,
+    fireCount: 0,
+    faultCount: 0,
+    timestamp: 1_000,
+  };
+  const result = analysisUnit();
+  const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), null, dualProduct());
+  assert.equal(detectorVerdict.verdict, 'FAIL');
+  assert.equal(detectorVerdict.units[0]?.reason, 'PRODUCT_PRECHECK_NOT_COMPLETED');
+  assert.equal(detectorVerdict.productType, 'DUAL_WAVELENGTH');
+  assert.equal(detectorVerdict.expectedSoftwareVersion, '01.02.03.04');
+  assert.equal(detectorVerdict.expectedProbeCount, 2);
+  assert.equal(detectorVerdict.productPrecheckVerdict, null);
+
+  const message = buildInspectionResultPayload(archiveWithVerdict(detectorVerdict, state, result), 'bench-1', 300) as {
+    payload: {
+      product_type: string | null;
+      expected_software_version: string | null;
+      expected_probe_count: number | null;
+      product_precheck_verdict: string | null;
+      detector_results: Array<{
+        actual_software_version: string | null;
+        actual_probe_count: number | null;
+        expected_probe_count: number | null;
+      }>;
+    };
+  };
+
+  assert.equal(message.payload.product_type, 'DUAL_WAVELENGTH');
+  assert.equal(message.payload.expected_software_version, '01.02.03.04');
+  assert.equal(message.payload.expected_probe_count, 2);
+  assert.equal(message.payload.product_precheck_verdict, null);
+  assert.equal(message.payload.detector_results[0]?.actual_software_version, null);
+  assert.equal(message.payload.detector_results[0]?.actual_probe_count, null);
+  assert.equal(message.payload.detector_results[0]?.expected_probe_count, 2);
 });
