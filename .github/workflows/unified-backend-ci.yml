@@ -40,5 +40,8 @@ jobs:
       - name: Build unified server
         run: npm run build:server
 
+      - name: Test product precheck rules
+        run: npm run test:product --prefix server
+
       - name: Build desktop web
         run: npm run build:web
