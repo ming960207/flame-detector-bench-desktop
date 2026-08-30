@@ -133,27 +133,22 @@ export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] 
 }
 
 /**
- * Keep the operator's waveform thresholds intact, but prevent a two-probe
- * product from being judged against P3. Three/four-probe products retain the
- * configured analysis behavior; explicit no-data checks cover every expected
- * probe later in the detector verdict.
+ * A dual-wavelength product must be analyzed as a real two-channel system,
+ * rather than by removing P3 from a three-channel operator selection. If the
+ * old selection was P2/P3, simple filtering would leave only P2 and make trend
+ * agreement impossible. Explicitly use P1+P2 for noise/trend and P2/P1 for the
+ * interference ratio. Three/four-probe products keep their configured rules;
+ * the detector verdict separately checks every expected probe for no-data.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
   expectedProbeCount: number,
 ): Partial<WaveformAnalysisConfig> | undefined {
   if (!source || expectedProbeCount !== 2) return source;
-  const allowed = new Set<ChannelKey>(['probe1', 'probe2']);
-  const filter = (value: ChannelKey[] | undefined, fallback: ChannelKey[]) => {
-    const next = (value ?? fallback).filter((key) => allowed.has(key));
-    return next.length > 0 ? next : fallback;
-  };
-  const configuredRatio = source.interferenceRatio;
-  const ratioValid = configuredRatio && allowed.has(configuredRatio.numerator) && allowed.has(configuredRatio.denominator);
   return {
     ...source,
-    noiseProbes: filter(source.noiseProbes, ['probe1', 'probe2']),
-    consistencyProbes: filter(source.consistencyProbes, ['probe1', 'probe2']),
-    interferenceRatio: ratioValid ? configuredRatio : { numerator: 'probe2', denominator: 'probe1' },
+    noiseProbes: ['probe1', 'probe2'],
+    consistencyProbes: ['probe1', 'probe2'],
+    interferenceRatio: { numerator: 'probe2', denominator: 'probe1' },
   };
 }
