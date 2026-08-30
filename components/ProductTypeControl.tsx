@@ -17,11 +17,23 @@ interface Props {
   onUpdate: (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => Promise<void>;
 }
 
+const PRECHECK_REASON_LABELS: Record<string, string> = {
+  SOFTWARE_VERSION_NOT_CONFIGURED: '未配置版本基准',
+  SOFTWARE_VERSION_MISMATCH: '软件版本不一致',
+  PROBE_COUNT_MISMATCH: '探头数量不一致',
+  DETECTOR_FAULT_AT_PRECHECK: '检测前设备故障',
+  PRECHECK_READ_FAILED: '状态读取失败',
+};
+
 function statusText(precheck: ProductPrecheckReport | null, busy: boolean): string {
   if (busy || precheck?.verdict === 'PENDING') return '产品预检中';
   if (precheck?.verdict === 'PASS') return '产品预检通过';
   if (precheck?.verdict === 'FAIL') return '产品预检异常';
   return '等待检测位 1 预检';
+}
+
+function reasonText(reason: string): string {
+  return PRECHECK_REASON_LABELS[reason] ?? reason;
 }
 
 export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }: Props) {
@@ -33,7 +45,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }:
   useEffect(() => { if (config) setDraft(JSON.parse(JSON.stringify(config)) as ProductDetectionConfig); }, [config]);
 
   const profile = useMemo(() => config ? selectedProductProfile(config) : null, [config]);
-  const failed = precheck?.units.filter((unit) => unit.verdict === 'FAIL').length ?? 0;
+  const failedUnits = precheck?.units.filter((unit) => unit.verdict === 'FAIL') ?? [];
   const precheckTone = precheck?.verdict === 'FAIL' ? '#ff6b73' : precheck?.verdict === 'PASS' ? '#62e5a9' : '#f4cf68';
 
   const updateSelectedType = async (selectedType: ProductType) => {
@@ -66,7 +78,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }:
       zIndex: 80,
       top: 86,
       right: 28,
-      width: 330,
+      width: 350,
       padding: '12px 14px',
       border: '1px solid rgba(74,214,232,.38)',
       borderRadius: 10,
@@ -90,7 +102,15 @@ export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }:
         <span style={{ color: '#84aeb5' }}>预检 <b style={{ color: precheckTone }}>{statusText(precheck, busy)}</b></span>
       </div>
       {precheck && <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(105,191,202,.18)', color: '#9cc4ca', fontSize: 11 }}>
-        实际检查 {precheck.units.length} 台 · {failed ? `${failed} 台异常` : precheck.verdict === 'PASS' ? '版本/探头数一致' : '等待结果'}
+        <div>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '版本/探头数一致' : '等待结果'}</div>
+        {failedUnits.length > 0 && <div style={{ display: 'grid', gap: 5, marginTop: 7 }}>
+          {failedUnits.slice(0, 6).map((unit) => <div key={unit.index} style={{ padding: '6px 7px', borderRadius: 6, background: 'rgba(115,22,31,.28)', border: '1px solid rgba(255,107,115,.18)', color: '#ffc0c4' }}>
+            <b>探测器 {unit.index}</b> · {unit.reasons.map(reasonText).join(' / ')}
+            <div style={{ marginTop: 2, color: '#bc9397' }}>
+              版本 {unit.actualSoftwareVersion ?? '读取失败'} / {unit.expectedSoftwareVersion ? formatSoftwareVersion(unit.expectedSoftwareVersion) : '未配置'} · 探头 {unit.actualProbeCount ?? '-'}/{unit.expectedProbeCount}
+            </div>
+          </div>)}
+        </div>}
       </div>}
       {message && <div style={{ marginTop: 7, color: '#ff8088', fontSize: 11 }}>{message}</div>}
     </section>
