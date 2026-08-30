@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Settings2, ShieldCheck, X } from 'lucide-react';
+import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import {
   PRODUCT_TYPE_ORDER,
   formatSoftwareVersion,
@@ -14,6 +15,7 @@ interface Props {
   locked: boolean;
   precheck: ProductPrecheckReport | null;
   busy: boolean;
+  detectorVerdict: FieldDetectorBatchVerdict | null;
   onUpdate: (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => Promise<void>;
 }
 
@@ -36,7 +38,12 @@ function reasonText(reason: string): string {
   return PRECHECK_REASON_LABELS[reason] ?? reason;
 }
 
-export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }: Props) {
+function probeLabel(key: string): string {
+  const index = Number(key.replace('probe', ''));
+  return Number.isFinite(index) ? `P${index}` : key;
+}
+
+export function ProductTypeControl({ config, locked, precheck, busy, detectorVerdict, onUpdate }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState<ProductDetectionConfig | null>(config);
   const [saving, setSaving] = useState(false);
@@ -46,6 +53,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }:
 
   const profile = useMemo(() => config ? selectedProductProfile(config) : null, [config]);
   const failedUnits = precheck?.units.filter((unit) => unit.verdict === 'FAIL') ?? [];
+  const noDataUnits = detectorVerdict?.units.filter((unit) => (unit.noDataProbes?.length ?? 0) > 0) ?? [];
   const precheckTone = precheck?.verdict === 'FAIL' ? '#ff6b73' : precheck?.verdict === 'PASS' ? '#62e5a9' : '#f4cf68';
 
   const updateSelectedType = async (selectedType: ProductType) => {
@@ -111,6 +119,10 @@ export function ProductTypeControl({ config, locked, precheck, busy, onUpdate }:
             </div>
           </div>)}
         </div>}
+      </div>}
+      {noDataUnits.length > 0 && <div style={{ marginTop: 8, padding: '7px 8px', borderRadius: 7, background: 'rgba(132,70,10,.28)', border: '1px solid rgba(245,188,76,.24)', color: '#ffd990', fontSize: 11 }}>
+        <b>波形无数据异常</b>
+        {noDataUnits.map((unit) => <div key={unit.index} style={{ marginTop: 3 }}>探测器 {unit.index}：{unit.noDataProbes?.map(probeLabel).join(' / ')} 无有效数据（高绝对值 / 低波动）</div>)}
       </div>}
       {message && <div style={{ marginTop: 7, color: '#ff8088', fontSize: 11 }}>{message}</div>}
     </section>
