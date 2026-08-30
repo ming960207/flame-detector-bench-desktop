@@ -7,6 +7,7 @@ import {
   type InterferenceStageResult,
   type WaveformAnalysisUnitResult,
 } from '../src/closure/field-waveform-analysis.js';
+import { buildInspectionResultPayload } from '../src/mqtt-publisher.js';
 import {
   DEFAULT_PRODUCT_DETECTION_CONFIG,
   canonicalSoftwareVersion,
@@ -15,6 +16,7 @@ import {
   softwareVersionMatches,
   type ProductPrecheckReport,
 } from '../src/product-profile.js';
+import type { TestProgramArchive } from '../src/test-program/test-program-types.js';
 import type { FlameDetectorState, FlameDetectorUnitState } from '../src/types.js';
 
 const stagePass: InterferenceStageResult = {
@@ -228,4 +230,62 @@ test('unused P3 on a dual-wavelength product does not create a no-data NG', () =
   const verdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
   assert.notEqual(verdict.units[0]?.reason, 'PROBE3_SIGNAL_NO_DATA');
   assert.deepEqual(verdict.units[0]?.noDataProbes ?? [], []);
+});
+
+test('MQTT inspection payload keeps product identity and per-detector precheck evidence', () => {
+  const stateUnit = unit();
+  const state: FlameDetectorState = {
+    units: [stateUnit],
+    onlineCount: 1,
+    fireCount: 0,
+    faultCount: 0,
+    timestamp: 1_000,
+  };
+  const result = analysisUnit();
+  result.noiseTest.metrics.probe1 = { absolute: 995, fluctuation: 5 };
+  const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
+  const archive = {
+    runId: 'run-1',
+    status: 'COMPLETED',
+    startedAt: 100,
+    endedAt: 200,
+    durationMs: 100,
+    currentStage: 'COMPLETE',
+    stages: [],
+    relayEvents: [],
+    latestRelayOutputs: [],
+    decision: { verdict: 'FAIL', grade: 'FAIL', reasons: ['PROBE1_SIGNAL_NO_DATA'], basis: [], evaluatedAt: 200 },
+    evidence: {
+      process: null,
+      detectorState: state,
+      waveformAnalysis: snapshot(result),
+      detectorVerdict,
+      finalVerdict: null,
+    },
+    stagePlan: [],
+    archivedAt: 300,
+    reportFile: 'run-1.json',
+  } as unknown as TestProgramArchive;
+
+  const message = buildInspectionResultPayload(archive, 'bench-1', 300) as {
+    payload: {
+      product_type: string | null;
+      expected_software_version: string | null;
+      expected_probe_count: number | null;
+      product_precheck_verdict: string | null;
+      detector_results: Array<{
+        actual_software_version: string | null;
+        actual_probe_count: number | null;
+        no_data_probes: string[];
+      }>;
+    };
+  };
+
+  assert.equal(message.payload.product_type, 'DUAL_WAVELENGTH');
+  assert.equal(message.payload.expected_software_version, '01.02.03.04');
+  assert.equal(message.payload.expected_probe_count, 2);
+  assert.equal(message.payload.product_precheck_verdict, 'PASS');
+  assert.equal(message.payload.detector_results[0]?.actual_software_version, '01.02.03.04');
+  assert.equal(message.payload.detector_results[0]?.actual_probe_count, 2);
+  assert.deepEqual(message.payload.detector_results[0]?.no_data_probes, ['probe1']);
 });
