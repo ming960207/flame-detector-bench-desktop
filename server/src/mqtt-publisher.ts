@@ -150,16 +150,21 @@ function persistOutbox(file: string, messages: ReadonlyMap<string, PendingReliab
 }
 
 export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: string, timestamp = run.archivedAt || Date.now()) {
-  const detectorUnits = run.evidence.detectorVerdict?.units ?? [];
+  const detectorVerdict = run.evidence.detectorVerdict;
+  const detectorUnits = detectorVerdict?.units ?? [];
   const precheckUnits = detectorUnits.flatMap((unit) => unit.precheck ? [unit.precheck] : []);
   const firstPrecheck = precheckUnits[0];
-  const productPrecheckVerdict = precheckUnits.length === 0
+  const derivedPrecheckVerdict = precheckUnits.length === 0
     ? null
     : precheckUnits.some((unit) => unit.verdict === 'FAIL')
       ? 'FAIL'
       : precheckUnits.some((unit) => unit.verdict === 'PENDING')
         ? 'PENDING'
         : 'PASS';
+  const productType = detectorVerdict?.productType ?? firstPrecheck?.productType ?? null;
+  const expectedSoftwareVersion = detectorVerdict?.expectedSoftwareVersion ?? firstPrecheck?.expectedSoftwareVersion ?? null;
+  const expectedProbeCount = detectorVerdict?.expectedProbeCount ?? firstPrecheck?.expectedProbeCount ?? null;
+  const productPrecheckVerdict = detectorVerdict?.productPrecheckVerdict ?? derivedPrecheckVerdict;
 
   return {
     header: {
@@ -177,9 +182,9 @@ export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: 
       ended_at: run.endedAt,
       duration_ms: run.durationMs,
       reasons: run.decision.reasons.slice(0, 20),
-      product_type: firstPrecheck?.productType ?? null,
-      expected_software_version: firstPrecheck?.expectedSoftwareVersion || null,
-      expected_probe_count: firstPrecheck?.expectedProbeCount ?? null,
+      product_type: productType,
+      expected_software_version: expectedSoftwareVersion || null,
+      expected_probe_count: expectedProbeCount,
       product_precheck_verdict: productPrecheckVerdict,
       detector_results: detectorUnits.map((unit) => ({
         index: unit.index,
@@ -188,9 +193,9 @@ export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: 
         grade: unit.grade,
         reason: unit.reason ?? null,
         actual_software_version: unit.precheck?.actualSoftwareVersion ?? null,
-        expected_software_version: unit.precheck?.expectedSoftwareVersion || null,
+        expected_software_version: unit.precheck?.expectedSoftwareVersion || expectedSoftwareVersion || null,
         actual_probe_count: unit.precheck?.actualProbeCount ?? null,
-        expected_probe_count: unit.precheck?.expectedProbeCount ?? null,
+        expected_probe_count: unit.precheck?.expectedProbeCount ?? expectedProbeCount,
         precheck_verdict: unit.precheck?.verdict ?? null,
         precheck_reasons: unit.precheck?.reasons ?? [],
         fire_alarm_at_precheck: unit.precheck?.fireAlarm ?? null,
@@ -214,6 +219,7 @@ export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: 
       evidence: {
         plc_available: Boolean(run.evidence.process),
         detector_available: Boolean(run.evidence.detectorState),
+        product_identity_available: Boolean(productType),
         product_precheck_available: precheckUnits.length > 0,
         final_verdict: run.evidence.finalVerdict?.verdict ?? null,
         final_grade: run.evidence.finalVerdict?.grade ?? null,
