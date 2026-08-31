@@ -26,6 +26,26 @@ const PRECHECK_REASON_LABELS: Record<string, string> = {
   PROBE_COUNT_MISMATCH: '探头数量不一致',
   DETECTOR_FAULT_AT_PRECHECK: '检测前设备故障',
   PRECHECK_READ_FAILED: '状态读取失败',
+  SENSITIVITY_READ_FAILED: '灵敏度读取失败',
+  RELAY_FUNCTIONAL_TEST_FAILED: '继电器功能测试失败',
+};
+
+const RELAY_REASON_LABELS: Record<string, string> = {
+  ALARM_COMMAND_FAILED: '火警模拟指令失败',
+  ALARM_INTERNAL_STATE_NOT_SET: '内部火警状态未成立',
+  ALARM_RELAY_NOT_ACTUATED: '火警实体继电器未动作',
+  ALARM_TRIGGERED_FAULT_RELAY: '火警阶段故障继电器误动作',
+  ALARM_RESET_COMMAND_FAILED: '火警阶段复位指令失败',
+  ALARM_RESET_INTERNAL_FAILED: '火警内部状态未复位',
+  ALARM_RELAY_STUCK_AFTER_RESET: '火警继电器复位后未恢复',
+  FAULT_COMMAND_FAILED: '故障模拟指令失败',
+  FAULT_INTERNAL_STATE_NOT_SET: '内部故障状态未成立',
+  FAULT_RELAY_NOT_ACTUATED: '故障实体继电器未动作',
+  FAULT_TRIGGERED_ALARM_RELAY: '故障阶段火警继电器误动作',
+  FAULT_RESET_COMMAND_FAILED: '故障阶段复位指令失败',
+  FAULT_RESET_INTERNAL_FAILED: '故障内部状态未复位',
+  FAULT_RELAY_STUCK_AFTER_RESET: '故障继电器复位后未恢复',
+  RELAY_BASELINE_READ_FAILED: '继电器基线读取失败',
 };
 
 function statusText(precheck: ProductPrecheckReport | null, busy: boolean): string {
@@ -36,12 +56,31 @@ function statusText(precheck: ProductPrecheckReport | null, busy: boolean): stri
 }
 
 function reasonText(reason: string): string {
+  if (reason.startsWith('RELAY:')) {
+    const raw = reason.slice('RELAY:'.length);
+    const stripped = raw.replace(/^ALARM:/, '').replace(/^FAULT:/, '');
+    if (raw.includes('RELAY_TEST_GLOBAL_DISABLED')) return '型号要求继电器测试，但设备级总开关未启用';
+    if (raw.includes('RELAY_FEEDBACK_MAPPING_MISSING')) return '型号要求继电器测试，但 PLC DI 映射未完整配置';
+    return RELAY_REASON_LABELS[stripped] ?? raw;
+  }
   return PRECHECK_REASON_LABELS[reason] ?? reason;
 }
 
 function probeLabel(key: string): string {
   const index = Number(key.replace('probe', ''));
   return Number.isFinite(index) ? `P${index}` : key;
+}
+
+function allocationText(precheck: ProductPrecheckReport | null): { text: string; color: string } {
+  const allocation = precheck?.productCodeAllocation;
+  if (!allocation) return { text: '等待批次启动', color: '#9bb8bd' };
+  if (allocation.status === 'GENERATED') {
+    const codes = allocation.items.map((item) => item.productCode).filter(Boolean) as string[];
+    return { text: codes.length === 6 ? `已预占 ${codes[0]} … ${codes[5]}` : '已生成产品编号', color: '#62e5a9' };
+  }
+  if (allocation.status === 'RULE_MISSING') return { text: '规则缺失 · 记录显示未生成', color: '#f4cf68' };
+  if (allocation.status === 'DISABLED') return { text: '该型号关闭自动编号', color: '#9bb8bd' };
+  return { text: '编号系统异常 · 不影响产品检测', color: '#ff9b75' };
 }
 
 const inputStyle = {
@@ -67,6 +106,14 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
   const noDataUnits = detectorVerdict?.units.filter((unit) => (unit.noDataProbes?.length ?? 0) > 0) ?? [];
   const precheckTone = precheck?.verdict === 'FAIL' ? '#ff6b73' : precheck?.verdict === 'PASS' ? '#62e5a9' : '#f4cf68';
   const codeMissing = profile ? productCodeRuleMissingFields(profile.productCodeRule) : [];
+  const allocation = allocationText(precheck);
+  const relayReport = precheck?.relayFunctionalTest;
+  const relayText = !profile?.relayFunctionalTestEnabled
+    ? '型号关闭'
+    : !relayReport
+      ? '等待执行'
+      : relayReport.verdict === 'PASS' ? '通过' : relayReport.verdict === 'FAIL' ? '失败' : relayReport.verdict;
+  const relayTone = !profile?.relayFunctionalTestEnabled ? '#9bb8bd' : relayReport?.verdict === 'PASS' ? '#62e5a9' : relayReport?.verdict === 'FAIL' ? '#ff6b73' : '#f4cf68';
 
   const updateSelectedType = async (selectedType: ProductType) => {
     if (locked || !config) return;
@@ -94,19 +141,9 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
 
   return <>
     <section style={{
-      position: 'fixed',
-      zIndex: 80,
-      top: 86,
-      right: 28,
-      width: 350,
-      padding: '12px 14px',
-      border: '1px solid rgba(74,214,232,.38)',
-      borderRadius: 10,
-      background: 'rgba(3,22,34,.94)',
-      boxShadow: '0 10px 32px rgba(0,0,0,.28)',
-      color: '#d7f4f7',
-      fontFamily: 'Microsoft YaHei UI, sans-serif',
-      backdropFilter: 'blur(10px)',
+      position: 'fixed', zIndex: 80, top: 86, right: 28, width: 350, padding: '12px 14px',
+      border: '1px solid rgba(74,214,232,.38)', borderRadius: 10, background: 'rgba(3,22,34,.94)',
+      boxShadow: '0 10px 32px rgba(0,0,0,.28)', color: '#d7f4f7', fontFamily: 'Microsoft YaHei UI, sans-serif', backdropFilter: 'blur(10px)',
     }} aria-label="产品类型选择">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <div><small style={{ color: '#69b9c4', letterSpacing: 1 }}>PRODUCT PROFILE</small><div style={{ fontWeight: 700 }}>产品类型 / 型号</div></div>
@@ -119,19 +156,21 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9, fontSize: 12 }}>
         <span style={{ color: '#84aeb5' }}>期望版本 <b style={{ color: '#e8f8fa' }}>{profile?.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}</b></span>
         <span style={{ color: '#84aeb5' }}>期望探头 <b style={{ color: '#e8f8fa' }}>{profile?.expectedProbeCount ?? '-'} 路</b></span>
-        <span style={{ color: '#84aeb5' }}>继电器测试 <b style={{ color: profile?.relayFunctionalTestEnabled ? '#62e5a9' : '#9bb8bd' }}>{profile?.relayFunctionalTestEnabled ? '启用' : '关闭'}</b></span>
+        <span style={{ color: '#84aeb5' }}>继电器测试 <b style={{ color: relayTone }}>{relayText}</b></span>
         <span style={{ color: '#84aeb5' }}>编号规则 <b style={{ color: codeMissing.length ? '#f4cf68' : '#62e5a9' }}>{codeMissing.length ? '未完整配置' : '已配置'}</b></span>
         <span style={{ color: '#84aeb5' }}>批次状态 <b style={{ color: locked ? '#f4cf68' : '#62e5a9' }}>{locked ? '已锁定' : '可选择'}</b></span>
         <span style={{ color: '#84aeb5' }}>预检 <b style={{ color: precheckTone }}>{statusText(precheck, busy)}</b></span>
       </div>
-      {codeMissing.length > 0 && <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'rgba(132,70,10,.25)', color: '#ffd990', fontSize: 11 }}>编号规则缺失不影响正常检测；该型号完成检测后产品编号将标记为“未生成”。</div>}
+      <div style={{ marginTop: 8, padding: '6px 8px', borderRadius: 6, background: 'rgba(10,47,59,.62)', color: allocation.color, fontSize: 11 }}>产品编号：{allocation.text}</div>
+      {codeMissing.length > 0 && <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 6, background: 'rgba(132,70,10,.25)', color: '#ffd990', fontSize: 11 }}>编号规则缺失不影响正常检测；完成记录中的产品编号显示“未生成”。</div>}
       {precheck && <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(105,191,202,.18)', color: '#9cc4ca', fontSize: 11 }}>
-        <div>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '版本/探头数一致' : '等待结果'}</div>
+        <div>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '版本 / 探头 / 灵敏度预检通过' : '等待结果'}</div>
+        {relayReport && <div style={{ marginTop: 4, color: relayTone }}>继电器：{relayReport.mode} · {relayText}</div>}
         {failedUnits.length > 0 && <div style={{ display: 'grid', gap: 5, marginTop: 7 }}>
           {failedUnits.slice(0, 6).map((unit) => <div key={unit.index} style={{ padding: '6px 7px', borderRadius: 6, background: 'rgba(115,22,31,.28)', border: '1px solid rgba(255,107,115,.18)', color: '#ffc0c4' }}>
             <b>探测器 {unit.index}</b> · {unit.reasons.map(reasonText).join(' / ')}
             <div style={{ marginTop: 2, color: '#bc9397' }}>
-              版本 {unit.actualSoftwareVersion ?? '读取失败'} / {unit.expectedSoftwareVersion ? formatSoftwareVersion(unit.expectedSoftwareVersion) : '未配置'} · 探头 {unit.actualProbeCount ?? '-'}/{unit.expectedProbeCount}
+              版本 {unit.actualSoftwareVersion ?? '读取失败'} / {unit.expectedSoftwareVersion ? formatSoftwareVersion(unit.expectedSoftwareVersion) : '未配置'} · 探头 {unit.actualProbeCount ?? '-'}/{unit.expectedProbeCount} · 灵敏度 {unit.sensitivityLevel ?? '-'}
             </div>
           </div>)}
         </div>}
@@ -176,8 +215,8 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
               </div>
             </div>;
           })}
-          <p style={{ color: '#83adb4', fontSize: 12, lineHeight: 1.7 }}><ShieldCheck size={14} style={{ verticalAlign: -2, marginRight: 5 }} />版本比较会自动忽略点号、横线和 0x 前缀。双/三/四波长探头数固定为 2/3/4；图探型可按实际协议调整。EE/FF/GG 当前默认均为 01。编号规则缺失不会阻塞正常检测。</p>
-          <p style={{ color: '#83adb4', fontSize: 12, lineHeight: 1.7 }}>继电器功能测试为产品型号级开关；关闭时生产记录中的火警动作、故障动作按已确认业务规则显示“合格”，后台保留 DEFAULT_PASS/RELAY_TEST_DISABLED 数据来源。实际继电器批量测试还受设备级总开关与 PLC DI 映射控制。</p>
+          <p style={{ color: '#83adb4', fontSize: 12, lineHeight: 1.7 }}><ShieldCheck size={14} style={{ verticalAlign: -2, marginRight: 5 }} />版本比较会自动忽略点号、横线和 0x 前缀。双/三/四波长探头数固定为 2/3/4；图探型可按实际协议调整。EE/FF/GG 当前默认均为 01。编号规则缺失或编号存储异常都不会阻塞正常检测。</p>
+          <p style={{ color: '#83adb4', fontSize: 12, lineHeight: 1.7 }}>继电器功能测试为产品型号级开关；关闭时生产记录中的火警动作、故障动作显示“合格”，后台保留 DEFAULT_PASS/RELAY_TEST_DISABLED。启用时还必须配置设备级总开关与 12 路 PLC DI 映射。</p>
           {message && <p style={{ color: '#ff8088', fontSize: 12 }}>{message}</p>}
         </div>
         <footer style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, padding: '14px 20px 18px', borderTop: '1px solid rgba(90,196,210,.18)' }}>
