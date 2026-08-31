@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, RefreshCw, Save, Settings2, X } from 'lucide-react';
+import { Download, ExternalLink, FileText, RefreshCw, Save, Settings2, X } from 'lucide-react';
 import type { RelayFunctionalTestConfig } from '../server/src/relay-functional-test';
 import type { ProductionInspectionRecordConfig } from '../server/src/production-inspection-record';
 
@@ -12,6 +12,13 @@ interface RelayPayload {
   config: RelayFunctionalTestConfig;
   missingMappings: string[];
   ready: boolean;
+}
+
+interface ProductionRecordSummary {
+  batchId: string;
+  generatedAt: number;
+  productModel: string;
+  conclusion: '合格' | '不合格';
 }
 
 const palette = {
@@ -59,16 +66,39 @@ function configuredInputCount(relay: RelayPayload | null): number {
   ), 0);
 }
 
+function recordTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return '-';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) {
   const [open, setOpen] = useState(false);
   const [relay, setRelay] = useState<RelayPayload | null>(null);
   const [recordConfig, setRecordConfig] = useState<ProductionInspectionRecordConfig | null>(null);
+  const [records, setRecords] = useState<ProductionRecordSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
   const inputCount = useMemo(() => configuredInputCount(relay), [relay]);
   const mappingsComplete = inputCount === 12;
+
+  const loadRecords = useCallback(async () => {
+    setRecordsLoading(true);
+    try {
+      const response = await fetch(`${backendHttpUrl}/api/production-records?limit=20`);
+      if (!response.ok) throw new Error(`生产记录读取失败 (${response.status})`);
+      const payload = await response.json() as { records?: ProductionRecordSummary[] };
+      setRecords(Array.isArray(payload.records) ? payload.records : []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecordsLoading(false);
+    }
+  }, [backendHttpUrl]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,12 +114,13 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
       const recordPayload = await recordResponse.json() as { config: ProductionInspectionRecordConfig };
       setRelay(relayPayload);
       setRecordConfig(recordPayload.config);
+      void loadRecords();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  }, [backendHttpUrl]);
+  }, [backendHttpUrl, loadRecords]);
 
   useEffect(() => { if (open) void load(); }, [open, load]);
 
@@ -120,13 +151,17 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
     }
   };
 
+  const openRecord = (batchId: string) => {
+    window.open(`${backendHttpUrl}/api/production-records/${encodeURIComponent(batchId)}/html`, '_blank', 'noopener,noreferrer');
+  };
+
   const openLatestRecord = async () => {
     setMessage('');
     try {
       const response = await fetch(`${backendHttpUrl}/api/production-records/latest`);
       if (!response.ok) throw new Error('尚无已完成的生产检验记录');
       const record = await response.json() as { batchId: string };
-      window.open(`${backendHttpUrl}/api/production-records/${encodeURIComponent(record.batchId)}/html`, '_blank', 'noopener,noreferrer');
+      openRecord(record.batchId);
     } catch (error) {
       setOpen(true);
       setMessage(error instanceof Error ? error.message : String(error));
@@ -137,7 +172,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
 
   return <>
     <div style={{ position: 'fixed', right: 28, bottom: 24, zIndex: 85, display: 'flex', gap: 7 }}>
-      <button type="button" onClick={() => void openLatestRecord()} title="查看最新自动生产检验记录" style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: 'rgba(6,27,43,.96)', color: palette.text, padding: '7px 10px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={14} />检验记录</button>
+      <button type="button" onClick={() => setOpen(true)} title="查看生产检验记录与生产配置" style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: 'rgba(6,27,43,.96)', color: palette.text, padding: '7px 10px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={14} />检验记录</button>
       <button type="button" onClick={() => setOpen(true)} title={locked ? '流程运行中可查看，禁止修改' : '继电器 DI 与生产记录配置'} style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: 'rgba(6,27,43,.96)', color: locked ? palette.warn : palette.text, padding: '7px 10px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><Settings2 size={14} />生产配置{locked ? ' · 只读' : ''}</button>
     </div>
 
@@ -146,11 +181,11 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '16px 18px', borderBottom: `1px solid ${palette.borderSoft}` }}>
           <div>
             <small style={{ color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.16em' }}>PRODUCTION CONFIG</small>
-            <h2 id="production-config-title" style={{ margin: '4px 0 0', color: palette.title, fontSize: 18 }}>生产检验与继电器反馈配置</h2>
-            <div style={{ marginTop: 5, color: locked ? palette.warn : palette.dim, fontSize: 10.5 }}>{locked ? '当前流程运行中：允许查看，所有修改控件保持只读' : '配置保存后永久生效；正式批次启动时锁定本批次配置'}</div>
+            <h2 id="production-config-title" style={{ margin: '4px 0 0', color: palette.title, fontSize: 18 }}>生产检验、记录与继电器反馈</h2>
+            <div style={{ marginTop: 5, color: locked ? palette.warn : palette.dim, fontSize: 10.5 }}>{locked ? '当前流程运行中：记录可查看，配置保持只读' : '配置永久保存；正式批次启动时冻结本批次配置与产品编号'}</div>
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
-            <button type="button" onClick={() => void load()} disabled={loading} title="重新读取后台配置" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: loading ? 'wait' : 'pointer', opacity: loading ? .5 : 1 }}><RefreshCw size={14} /></button>
+            <button type="button" onClick={() => void load()} disabled={loading} title="重新读取后台配置与记录" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: loading ? 'wait' : 'pointer', opacity: loading ? .5 : 1 }}><RefreshCw size={14} /></button>
             <button type="button" onClick={() => setOpen(false)} aria-label="关闭" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, cursor: 'pointer' }}><X size={15} /></button>
           </div>
         </header>
@@ -198,7 +233,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
           </section>
 
           <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
-            <b style={{ color: palette.title, fontSize: 13 }}>自动生产检验记录</b>
+            <b style={{ color: palette.title, fontSize: 13 }}>自动生产检验记录配置</b>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.45fr 1fr .65fr', gap: 8, marginTop: 11 }}>
               <label style={labelStyle}>检验员<input disabled={locked} value={recordConfig.inspector} placeholder="请输入检验员" onChange={(e) => setRecordConfig({ ...recordConfig, inspector: e.target.value })} style={inputStyle} /></label>
               <label style={labelStyle}>检验标准<input disabled={locked} value={recordConfig.standard} onChange={(e) => setRecordConfig({ ...recordConfig, standard: e.target.value })} style={inputStyle} /></label>
@@ -208,10 +243,30 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>本配置在正式批次启动时冻结；完成后自动保存结构化 JSON、完整原始归档、打印 HTML 与 Word 兼容 `.doc`，正式记录同时进入 MQTT 可靠上传队列。</p>
           </section>
 
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div><b style={{ color: palette.title, fontSize: 13 }}>最近生产检验记录</b><div style={{ marginTop: 3, color: palette.dim, fontSize: 10 }}>最近 20 批 · 自动归档 · 可查看打印或导出 Word</div></div>
+              <button type="button" disabled={recordsLoading} onClick={() => void loadRecords()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '6px 9px', cursor: recordsLoading ? 'wait' : 'pointer', opacity: recordsLoading ? .5 : 1, font: 'inherit', fontSize: 10 }}><RefreshCw size={12} />刷新</button>
+            </div>
+            <div style={{ marginTop: 10, borderTop: `1px solid ${palette.borderSoft}` }}>
+              {recordsLoading && <div style={{ padding: '12px 6px', color: palette.cyan, fontSize: 10.5 }}>正在读取记录…</div>}
+              {!recordsLoading && records.length === 0 && <div style={{ padding: '12px 6px', color: palette.dim, fontSize: 10.5 }}>暂无已完成生产批次。完成正式流程后会自动出现在这里。</div>}
+              {!recordsLoading && records.map((record) => <div key={record.batchId} style={{ display: 'grid', gridTemplateColumns: '1.15fr 1.45fr .7fr auto', gap: 9, alignItems: 'center', minHeight: 38, padding: '6px', borderBottom: `1px solid ${palette.borderSoft}`, fontSize: 10.5 }}>
+                <div><b style={{ color: palette.title }}>{record.productModel || '型号未记录'}</b><div style={{ marginTop: 2, color: palette.dim, font: '9px Consolas, monospace' }}>{record.batchId}</div></div>
+                <span style={{ color: palette.muted }}>{recordTime(record.generatedAt)}</span>
+                <b style={{ color: record.conclusion === '合格' ? palette.pass : palette.fail }}>{record.conclusion}</b>
+                <div style={{ display: 'flex', gap: 5 }}>
+                  <button type="button" onClick={() => openRecord(record.batchId)} title="查看/打印记录" style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: 'pointer' }}><ExternalLink size={12} /></button>
+                  <a href={`${backendHttpUrl}/api/production-records/${encodeURIComponent(record.batchId)}/doc`} title="导出 Word 兼容记录" style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, textDecoration: 'none' }}><Download size={12} /></a>
+                </div>
+              </div>)}
+            </div>
+          </section>
+
           {message && <div style={{ padding: '8px 10px', border: `1px solid ${message.includes('已保存') ? 'rgba(98,231,182,.28)' : 'rgba(242,119,105,.28)'}`, color: message.includes('已保存') ? palette.pass : palette.fail, background: 'rgba(6,23,34,.72)', fontSize: 10.5 }}>{message}</div>}
 
           <footer style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，批次结束后可修改。' : mappingsComplete ? '12 路 DI 已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路 DI 未填写。`}</span>
+            <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，历史记录仍可查看/导出。' : mappingsComplete ? '12 路 DI 已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路 DI 未填写。`}</span>
             <div style={{ display: 'flex', gap: 7 }}>
               <button type="button" onClick={() => void openLatestRecord()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={13} />最新记录</button>
               <button type="button" onClick={() => setOpen(false)} style={{ border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}>关闭</button>
