@@ -8,9 +8,20 @@ import {
   type ProductCodeRule,
 } from './product-code.js';
 
+interface PersistedAllocation {
+  batchId: string;
+  status: 'GENERATED';
+  productModel: string;
+  monthKey: string;
+  productionDate: number;
+  items: ProductCodeAllocationItem[];
+  allocatedAt: number;
+}
+
 interface ProductCodeCounterState {
   version: 1;
   counters: Record<string, number>;
+  allocations: Record<string, PersistedAllocation>;
   updatedAt: number;
 }
 
@@ -21,6 +32,7 @@ export interface ProductCodeAllocationItem {
 }
 
 export interface ProductCodeAllocation {
+  batchId: string | null;
   status: ProductCodeGenerationStatus;
   productModel: string;
   monthKey: string | null;
@@ -29,7 +41,7 @@ export interface ProductCodeAllocation {
   reason?: string;
 }
 
-const DEFAULT_STATE: ProductCodeCounterState = { version: 1, counters: {}, updatedAt: 0 };
+const DEFAULT_STATE: ProductCodeCounterState = { version: 1, counters: {}, allocations: {}, updatedAt: 0 };
 
 function defaultStorePath(): string {
   return join(process.env.APP_DATA_DIR || process.cwd(), 'product-code-state.json');
@@ -47,11 +59,12 @@ export class ProductCodeStore {
       return {
         version: 1,
         counters: parsed.counters && typeof parsed.counters === 'object' ? { ...parsed.counters } : {},
+        allocations: parsed.allocations && typeof parsed.allocations === 'object' ? { ...parsed.allocations } : {},
         updatedAt: Number(parsed.updatedAt) || 0,
       };
     } catch (error: any) {
       if (error?.code !== 'ENOENT') throw error;
-      return { ...DEFAULT_STATE, counters: {} };
+      return { ...DEFAULT_STATE, counters: {}, allocations: {} };
     }
   }
 
@@ -68,22 +81,41 @@ export class ProductCodeStore {
     }
   }
 
+  async getBatchAllocation(batchId: string): Promise<ProductCodeAllocation | null> {
+    const normalized = batchId.trim();
+    if (!normalized) return null;
+    const state = await this.load();
+    const found = state.allocations[normalized];
+    if (!found) return null;
+    return {
+      batchId: found.batchId,
+      status: 'GENERATED',
+      productModel: found.productModel,
+      monthKey: found.monthKey,
+      productionDate: found.productionDate,
+      items: found.items.map((item) => ({ ...item })),
+    };
+  }
+
   /**
-   * 一次性预占本批次流水号。已经预占的编号即使后续批次中止也不回收，
-   * 从而避免断电、急停或软件异常造成产品编号重复。
+   * 一次性预占本批次流水号。已经预占的编号即使后续批次中止也不回收。
+   * batchId 已经分配过时返回原分配结果，确保轮询、重连和重复事件不会二次占号。
    */
   async allocateBatch(
     productModel: string,
     rule: ProductCodeRule,
     productionDate: Date,
     count = 6,
+    batchId: string | null = null,
   ): Promise<ProductCodeAllocation> {
     const task = async (): Promise<ProductCodeAllocation> => {
       const timestamp = productionDate.getTime();
       if (!Number.isFinite(timestamp)) throw new Error('PRODUCT_CODE_DATE_INVALID');
       const model = productModel.trim();
+      const normalizedBatchId = batchId?.trim() || null;
       if (!model) {
         return {
+          batchId: normalizedBatchId,
           status: 'RULE_MISSING',
           productModel: '',
           monthKey: null,
@@ -94,6 +126,7 @@ export class ProductCodeStore {
       }
       if (!rule.enabled) {
         return {
+          batchId: normalizedBatchId,
           status: 'DISABLED',
           productModel: model,
           monthKey: null,
@@ -105,6 +138,7 @@ export class ProductCodeStore {
       const missing = productCodeRuleMissingFields(rule);
       if (missing.length > 0) {
         return {
+          batchId: normalizedBatchId,
           status: 'RULE_MISSING',
           productModel: model,
           monthKey: null,
@@ -117,14 +151,23 @@ export class ProductCodeStore {
 
       const monthKey = productMonthlySerialKey(model, productionDate);
       const state = await this.load();
+      if (normalizedBatchId) {
+        const existing = state.allocations[normalizedBatchId];
+        if (existing) {
+          return {
+            batchId: existing.batchId,
+            status: 'GENERATED',
+            productModel: existing.productModel,
+            monthKey: existing.monthKey,
+            productionDate: existing.productionDate,
+            items: existing.items.map((item) => ({ ...item })),
+          };
+        }
+      }
+
       const previous = Number(state.counters[monthKey]) || 0;
       const nextLast = previous + count;
       if (nextLast > 99999) throw new Error(`PRODUCT_CODE_SERIAL_EXHAUSTED:${monthKey}`);
-
-      // 先持久化占号，再把号码返回给批次。调用方后续失败也不得回滚。
-      state.counters[monthKey] = nextLast;
-      state.updatedAt = Date.now();
-      await this.save(state);
 
       const items: ProductCodeAllocationItem[] = [];
       for (let offset = 1; offset <= count; offset += 1) {
@@ -135,7 +178,25 @@ export class ProductCodeStore {
         }
         items.push({ slot: offset, serial, productCode: generated.code });
       }
+
+      // 计数器和 batchId -> 编号绑定一次原子保存；后续业务失败不得回滚。
+      state.counters[monthKey] = nextLast;
+      if (normalizedBatchId) {
+        state.allocations[normalizedBatchId] = {
+          batchId: normalizedBatchId,
+          status: 'GENERATED',
+          productModel: model,
+          monthKey,
+          productionDate: timestamp,
+          items,
+          allocatedAt: Date.now(),
+        };
+      }
+      state.updatedAt = Date.now();
+      await this.save(state);
+
       return {
+        batchId: normalizedBatchId,
         status: 'GENERATED',
         productModel: model,
         monthKey,
