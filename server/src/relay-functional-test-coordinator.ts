@@ -101,12 +101,185 @@ export class RelayFunctionalTestCoordinator {
     }));
   }
 
-  private async sendBatchCommand(
+  /**
+   * 正常生产 FAST_BATCH：每台探测器一次写入 fire+fault=true。
+   * 对地址 01 的当前实机，该调用最终对应已验证帧：
+   * 01 10 A0 00 00 02 04 00 00 00 01 CA 68
+   * 六台独立连接时并行下发，从而把继电器功能测试压缩为一次激励 + 一次复位。
+   */
+  private async sendCombinedBatchCommand(work: Map<number, UnitWorkState>): Promise<void> {
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
+      state.commandStartedAt = Date.now();
+      try {
+        await this.detectors.simulate(index, { fire: true, fault: true });
+        state.result.alarm.commandAccepted = true;
+        state.result.fault.commandAccepted = true;
+      } catch {
+        uniquePush(state.result.alarm.reasons, 'ALARM_COMMAND_FAILED');
+        uniquePush(state.result.fault.reasons, 'FAULT_COMMAND_FAILED');
+      }
+    }));
+  }
+
+  private async waitForCombinedAction(work: Map<number, UnitWorkState>): Promise<void> {
+    const deadline = Date.now() + this.config.feedbackTimeoutMs;
+    const stable = new Map<number, number>();
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.entries()].map(async ([index, state]) => {
+        const alarm = state.result.alarm;
+        const fault = state.result.fault;
+        if (!alarm.commandAccepted || !fault.commandAccepted) return;
+        if (
+          alarm.internalStateReached
+          && fault.internalStateReached
+          && alarm.physicalStateReached
+          && fault.physicalStateReached
+          && (stable.get(index) ?? 0) >= this.config.stableSamples
+        ) return;
+        try {
+          const internal = await this.detectors.readLatched(index);
+          const physical = this.physicalState(index);
+          const alarmInternalReached = internal.fire === true;
+          const faultInternalReached = internal.fault === true;
+          const alarmPhysicalReached = physical.alarm === true;
+          const faultPhysicalReached = physical.fault === true;
+
+          alarm.internalStateReached ||= alarmInternalReached;
+          fault.internalStateReached ||= faultInternalReached;
+          alarm.physicalStateReached ||= alarmPhysicalReached;
+          fault.physicalStateReached ||= faultPhysicalReached;
+          // FAST_BATCH 同时要求两路动作，因此“对侧保持正常”不适用，固定视为满足。
+          alarm.oppositeRelayStayedNormal = true;
+          fault.oppositeRelayStayedNormal = true;
+
+          const allReached = alarmInternalReached
+            && faultInternalReached
+            && alarmPhysicalReached
+            && faultPhysicalReached;
+          if (allReached) {
+            const next = (stable.get(index) ?? 0) + 1;
+            stable.set(index, next);
+            if (next >= this.config.stableSamples) {
+              const responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
+              if (alarm.responseTimeMs === null) alarm.responseTimeMs = responseTimeMs;
+              if (fault.responseTimeMs === null) fault.responseTimeMs = responseTimeMs;
+            }
+          } else {
+            stable.set(index, 0);
+          }
+        } catch {
+          stable.set(index, 0);
+        }
+      }));
+
+      const done = [...work.entries()].every(([index, state]) => {
+        const alarm = state.result.alarm;
+        const fault = state.result.fault;
+        return !alarm.commandAccepted || !fault.commandAccepted || (
+          alarm.internalStateReached
+          && fault.internalStateReached
+          && alarm.physicalStateReached
+          && fault.physicalStateReached
+          && (stable.get(index) ?? 0) >= this.config.stableSamples
+        );
+      });
+      if (done) break;
+      await sleep(this.config.sampleIntervalMs);
+    }
+
+    for (const state of work.values()) {
+      const alarm = state.result.alarm;
+      const fault = state.result.fault;
+      if (alarm.commandAccepted) {
+        if (!alarm.internalStateReached) uniquePush(alarm.reasons, 'ALARM_INTERNAL_STATE_NOT_SET');
+        if (!alarm.physicalStateReached) uniquePush(alarm.reasons, 'ALARM_RELAY_NOT_ACTUATED');
+      }
+      if (fault.commandAccepted) {
+        if (!fault.internalStateReached) uniquePush(fault.reasons, 'FAULT_INTERNAL_STATE_NOT_SET');
+        if (!fault.physicalStateReached) uniquePush(fault.reasons, 'FAULT_RELAY_NOT_ACTUATED');
+      }
+    }
+  }
+
+  private async resetCombinedBatch(work: Map<number, UnitWorkState>): Promise<void> {
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
+      try {
+        await this.detectors.reset(index);
+        state.result.alarm.resetAccepted = true;
+        state.result.fault.resetAccepted = true;
+      } catch {
+        uniquePush(state.result.alarm.reasons, 'ALARM_RESET_COMMAND_FAILED');
+        uniquePush(state.result.fault.reasons, 'FAULT_RESET_COMMAND_FAILED');
+      }
+    }));
+  }
+
+  private async waitForCombinedReset(work: Map<number, UnitWorkState>): Promise<void> {
+    const deadline = Date.now() + this.config.resetTimeoutMs;
+    const stable = new Map<number, number>();
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.entries()].map(async ([index, state]) => {
+        const alarm = state.result.alarm;
+        const fault = state.result.fault;
+        if (!alarm.resetAccepted || !fault.resetAccepted) return;
+        try {
+          const internal = await this.detectors.readLatched(index);
+          const physical = this.physicalState(index);
+          const alarmInternalRecovered = internal.fire === false;
+          const faultInternalRecovered = internal.fault === false;
+          const alarmPhysicalRecovered = physical.alarm === false;
+          const faultPhysicalRecovered = physical.fault === false;
+
+          alarm.internalRecovered ||= alarmInternalRecovered;
+          fault.internalRecovered ||= faultInternalRecovered;
+          alarm.physicalRecovered ||= alarmPhysicalRecovered;
+          fault.physicalRecovered ||= faultPhysicalRecovered;
+
+          const allRecovered = alarmInternalRecovered
+            && faultInternalRecovered
+            && alarmPhysicalRecovered
+            && faultPhysicalRecovered;
+          stable.set(index, allRecovered ? (stable.get(index) ?? 0) + 1 : 0);
+        } catch {
+          stable.set(index, 0);
+        }
+      }));
+
+      const done = [...work.entries()].every(([index, state]) => {
+        const alarm = state.result.alarm;
+        const fault = state.result.fault;
+        return !alarm.resetAccepted || !fault.resetAccepted || (
+          alarm.internalRecovered
+          && fault.internalRecovered
+          && alarm.physicalRecovered
+          && fault.physicalRecovered
+          && (stable.get(index) ?? 0) >= this.config.stableSamples
+        );
+      });
+      if (done) break;
+      await sleep(this.config.sampleIntervalMs);
+    }
+
+    for (const state of work.values()) {
+      const alarm = state.result.alarm;
+      const fault = state.result.fault;
+      if (alarm.resetAccepted) {
+        if (!alarm.internalRecovered) uniquePush(alarm.reasons, 'ALARM_RESET_INTERNAL_FAILED');
+        if (!alarm.physicalRecovered) uniquePush(alarm.reasons, 'ALARM_RELAY_STUCK_AFTER_RESET');
+      }
+      if (fault.resetAccepted) {
+        if (!fault.internalRecovered) uniquePush(fault.reasons, 'FAULT_RESET_INTERNAL_FAILED');
+        if (!fault.physicalRecovered) uniquePush(fault.reasons, 'FAULT_RELAY_STUCK_AFTER_RESET');
+      }
+    }
+  }
+
+  /** DIAGNOSTIC 模式仍然分开激励 Alarm/Fault，保留故障定位能力。 */
+  private async sendDiagnosticCommand(
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
-    const entries = [...work.entries()];
-    const execute = async ([index, state]: [number, UnitWorkState]) => {
+    for (const [index, state] of work.entries()) {
       const action = state.result[kind];
       state.commandStartedAt = Date.now();
       try {
@@ -117,16 +290,10 @@ export class RelayFunctionalTestCoordinator {
       } catch {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
       }
-    };
-
-    if (this.config.mode === 'FAST_BATCH') {
-      await Promise.all(entries.map(execute));
-    } else {
-      for (const entry of entries) await execute(entry);
     }
   }
 
-  private async waitForAction(
+  private async waitForDiagnosticAction(
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
@@ -182,9 +349,8 @@ export class RelayFunctionalTestCoordinator {
     }
   }
 
-  private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
-    const entries = [...work.entries()];
-    const execute = async ([index, state]: [number, UnitWorkState]) => {
+  private async resetDiagnostic(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    for (const [index, state] of work.entries()) {
       const action = state.result[kind];
       try {
         await this.detectors.reset(index);
@@ -192,12 +358,10 @@ export class RelayFunctionalTestCoordinator {
       } catch {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
       }
-    };
-    if (this.config.mode === 'FAST_BATCH') await Promise.all(entries.map(execute));
-    else for (const entry of entries) await execute(entry);
+    }
   }
 
-  private async waitForReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+  private async waitForDiagnosticReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     const deadline = Date.now() + this.config.resetTimeoutMs;
     const stable = new Map<number, number>();
     while (Date.now() <= deadline) {
@@ -268,15 +432,24 @@ export class RelayFunctionalTestCoordinator {
     const work = new Map<number, UnitWorkState>(indexes.map((index) => [index, { result: emptyUnit(index), commandStartedAt: null }]));
     await this.readBaseline(work);
 
-    await this.sendBatchCommand(work, 'alarm');
-    await this.waitForAction(work, 'alarm');
-    await this.resetBatch(work, 'alarm');
-    await this.waitForReset(work, 'alarm');
+    if (this.config.mode === 'FAST_BATCH') {
+      // 生产默认：一次同时触发 Alarm + Fault，仅复位一次。
+      await this.sendCombinedBatchCommand(work);
+      await this.waitForCombinedAction(work);
+      await this.resetCombinedBatch(work);
+      await this.waitForCombinedReset(work);
+    } else {
+      // 诊断模式：逐功能分开测试，便于定位 Alarm/Fault 接反或互串。
+      await this.sendDiagnosticCommand(work, 'alarm');
+      await this.waitForDiagnosticAction(work, 'alarm');
+      await this.resetDiagnostic(work, 'alarm');
+      await this.waitForDiagnosticReset(work, 'alarm');
 
-    await this.sendBatchCommand(work, 'fault');
-    await this.waitForAction(work, 'fault');
-    await this.resetBatch(work, 'fault');
-    await this.waitForReset(work, 'fault');
+      await this.sendDiagnosticCommand(work, 'fault');
+      await this.waitForDiagnosticAction(work, 'fault');
+      await this.resetDiagnostic(work, 'fault');
+      await this.waitForDiagnosticReset(work, 'fault');
+    }
 
     const units = [...work.values()].map(({ result }) => {
       this.finalizeAction(result.alarm);
