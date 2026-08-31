@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, join } from 'node:path';
 import mqtt, { MqttClient } from 'mqtt';
 import { DEFAULT_MQTT_BROKER, type MQTTConfigLocal } from './config.js';
+import type { ProductionRunArchive } from './production-run-coordinator.js';
 import type { TestProgramArchive } from './test-program/test-program-types.js';
 import { ConnectionStatus, FlameDetectorState } from './types.js';
 
@@ -228,6 +229,83 @@ export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: 
   };
 }
 
+/**
+ * 正式生产记录上传载荷。与测试监听程序的 INSPECTION_RESULT 共用同一个
+ * inspection topic 和可靠 outbox，但 data_type/source 明确区分，避免云端把
+ * 只读测试监听归档与正式生产批次混为一谈。
+ */
+export function buildProductionInspectionPayload(
+  run: ProductionRunArchive,
+  deviceId: string,
+  timestamp = run.archivedAt || Date.now(),
+) {
+  const record = run.inspectionRecord;
+  const precheck = run.summary.productPrecheck;
+  const relay = precheck?.relayFunctionalTest ?? run.productContext?.relayFunctionalTest ?? null;
+  return {
+    header: {
+      device_id: deviceId,
+      timestamp,
+      data_type: 'PRODUCTION_INSPECTION_RECORD',
+      seq_no: seqNo(timestamp),
+    },
+    payload: {
+      source: 'FORMAL_PRODUCTION',
+      run_id: run.batchId,
+      batch_id: run.batchId,
+      verdict: record.conclusion === '合格' ? 'PASS' : 'FAIL',
+      grade: run.summary.finalVerdict.grade,
+      final_reason: run.summary.finalVerdict.reason ?? null,
+      product_model: record.productModel,
+      production_date: record.productionDate,
+      archived_at: run.archivedAt,
+      generated_at: record.generatedAt,
+      quantity: record.quantity,
+      inspector: record.inspector,
+      standard: record.standard,
+      form_number: record.formNumber,
+      form_version: record.formVersion,
+      conclusion: record.conclusion,
+      product_precheck_verdict: precheck?.verdict ?? null,
+      relay_functional_test_verdict: relay?.verdict ?? null,
+      detector_results: record.products.map((product) => ({
+        slot: product.slot,
+        product_code: product.productCode,
+        product_code_status: product.productCodeStatus,
+        verdict: product.verdict,
+        software_version: product.softwareVersion.value,
+        probe_count: product.productInfo.value.probeCount,
+        sensitivity_level: product.productInfo.value.sensitivityLevel,
+        amplitude_values: product.amplitude.values,
+        inspection_items: {
+          work_current: product.workCurrent,
+          fire_action: product.fireAction,
+          fault_action: product.faultAction,
+          led_display: product.ledDisplay,
+          amplitude: product.amplitude,
+          software_version: product.softwareVersion,
+          product_info: product.productInfo,
+          interference_resistance: product.interferenceResistance,
+          power_fluctuation: product.powerFluctuation,
+          high_temperature: product.highTemp,
+          low_temperature: product.lowTemp,
+        },
+      })),
+      evidence: {
+        plc_available: Boolean(run.summary.process),
+        detector_available: Boolean(run.flame),
+        product_precheck_available: Boolean(precheck),
+        product_code_allocation_status: precheck?.productCodeAllocation?.status
+          ?? run.productContext?.productCodeAllocation?.status
+          ?? null,
+        relay_functional_test_available: Boolean(relay),
+        final_verdict: run.summary.finalVerdict.verdict,
+        final_grade: run.summary.finalVerdict.grade,
+      },
+    },
+  };
+}
+
 export class MQTTPublisher {
   private config: MQTTConfigLocal;
   private client: MqttClient | null = null;
@@ -441,6 +519,12 @@ export class MQTTPublisher {
     const timestamp = run.archivedAt || Date.now();
     const payload = buildInspectionResultPayload(run, this.config.deviceId, timestamp);
     return this.publishReliable(`inspection:${run.runId}`, inspectionTopic(this.config), payload);
+  }
+
+  publishProductionInspectionResult(run: ProductionRunArchive): Promise<boolean> {
+    const timestamp = run.archivedAt || Date.now();
+    const payload = buildProductionInspectionPayload(run, this.config.deviceId, timestamp);
+    return this.publishReliable(`production:${run.batchId}`, inspectionTopic(this.config), payload);
   }
 
   publishEvent(code: string, level: 'INFO' | 'WARNING' | 'CRITICAL' | 'FATAL', msg: string): Promise<boolean> {
