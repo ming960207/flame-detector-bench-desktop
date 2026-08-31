@@ -20,7 +20,8 @@ export interface ProductCodeParts {
   serial: string;
 }
 
-export type ProductCodeGenerationStatus = 'GENERATED' | 'RULE_MISSING' | 'DISABLED';
+/** ERROR 表示编号基础设施异常；它与产品检测 PASS/FAIL 完全独立。 */
+export type ProductCodeGenerationStatus = 'GENERATED' | 'RULE_MISSING' | 'DISABLED' | 'ERROR';
 
 export interface ProductCodeGenerationResult {
   status: ProductCodeGenerationStatus;
