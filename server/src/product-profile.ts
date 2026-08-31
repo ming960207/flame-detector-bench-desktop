@@ -1,12 +1,23 @@
 import type { ChannelKey, WaveformAnalysisConfig } from './closure/field-waveform-analysis.js';
+import {
+  DEFAULT_PRODUCT_CODE_RULE,
+  normalizeProductCodeRule,
+  type ProductCodeRule,
+} from './product-code.js';
 
 export type ProductType = 'DUAL_WAVELENGTH' | 'THREE_WAVELENGTH' | 'FOUR_WAVELENGTH' | 'IMAGE_DETECTOR';
 export type ProductPrecheckVerdict = 'PASS' | 'FAIL' | 'PENDING';
 
 export interface ProductProfileConfig {
   label: string;
+  /** 具体产品型号，用于自动编号流水号按型号独立计数。 */
+  productModel: string;
   expectedSoftwareVersion: string;
   expectedProbeCount: number;
+  /** 具体型号是否执行真实火警/故障继电器功能测试。关闭时记录表按业务规则填“合格”，后台标 DEFAULT_PASS。 */
+  relayFunctionalTestEnabled: boolean;
+  /** 产品编号规则。规则缺失只影响编号生成，不得阻塞正式检测流程。 */
+  productCodeRule: ProductCodeRule;
 }
 
 export interface ProductDetectionConfig {
@@ -48,13 +59,55 @@ export const PRODUCT_TYPE_ORDER: readonly ProductType[] = [
   'IMAGE_DETECTOR',
 ] as const;
 
+function rule(productNameCode = ''): ProductCodeRule {
+  return {
+    ...DEFAULT_PRODUCT_CODE_RULE,
+    productNameCode,
+    softwareVersionCode: '01',
+    hardwareVersionCode: '01',
+    producerCode: '01',
+  };
+}
+
+/**
+ * 默认型号按现有 02/03/04/05 产品槽位预置；所有字段均可在配置中永久修改。
+ * 目前已知编码规则仅预置 02=4102、03=4103；04/05 保持空规则，且不会阻塞检测。
+ */
 export const DEFAULT_PRODUCT_DETECTION_CONFIG: ProductDetectionConfig = Object.freeze({
   selectedType: 'THREE_WAVELENGTH',
   profiles: {
-    DUAL_WAVELENGTH: { label: '双波长', expectedSoftwareVersion: '', expectedProbeCount: 2 },
-    THREE_WAVELENGTH: { label: '三波长', expectedSoftwareVersion: '', expectedProbeCount: 3 },
-    FOUR_WAVELENGTH: { label: '四波长', expectedSoftwareVersion: '', expectedProbeCount: 4 },
-    IMAGE_DETECTOR: { label: '图探型', expectedSoftwareVersion: '', expectedProbeCount: 3 },
+    DUAL_WAVELENGTH: {
+      label: '双波长',
+      productModel: 'GHT-1050-02',
+      expectedSoftwareVersion: '',
+      expectedProbeCount: 2,
+      relayFunctionalTestEnabled: false,
+      productCodeRule: rule('4102'),
+    },
+    THREE_WAVELENGTH: {
+      label: '三波长',
+      productModel: 'GHT-1050-03',
+      expectedSoftwareVersion: '',
+      expectedProbeCount: 3,
+      relayFunctionalTestEnabled: false,
+      productCodeRule: rule('4103'),
+    },
+    FOUR_WAVELENGTH: {
+      label: '四波长',
+      productModel: 'GHT-1050-04',
+      expectedSoftwareVersion: '',
+      expectedProbeCount: 4,
+      relayFunctionalTestEnabled: false,
+      productCodeRule: rule(''),
+    },
+    IMAGE_DETECTOR: {
+      label: '图探型',
+      productModel: 'GHT-1050-05',
+      expectedSoftwareVersion: '',
+      expectedProbeCount: 3,
+      relayFunctionalTestEnabled: false,
+      productCodeRule: rule(''),
+    },
   },
 });
 
@@ -64,6 +117,10 @@ function isProductType(value: unknown): value is ProductType {
 
 function cleanVersionInput(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 64) : '';
+}
+
+function cleanProductModel(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value.trim().slice(0, 64) || fallback : fallback;
 }
 
 export function canonicalSoftwareVersion(value: unknown): string {
@@ -112,8 +169,13 @@ export function normalizeProductDetectionConfig(
             : base.expectedProbeCount;
     profiles[type] = {
       label: base.label,
+      productModel: cleanProductModel(raw.productModel, base.productModel),
       expectedSoftwareVersion: cleanVersionInput(raw.expectedSoftwareVersion ?? base.expectedSoftwareVersion),
       expectedProbeCount: fixedProbeCount,
+      relayFunctionalTestEnabled: typeof raw.relayFunctionalTestEnabled === 'boolean'
+        ? raw.relayFunctionalTestEnabled
+        : base.relayFunctionalTestEnabled,
+      productCodeRule: normalizeProductCodeRule(raw.productCodeRule, base.productCodeRule),
     };
   }
 
