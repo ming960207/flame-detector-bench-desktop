@@ -28,6 +28,10 @@ import { ProductionRunCoordinator } from './production-run-coordinator.js';
 import { requireDesktopMutation } from './request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 
+export interface ProductAwareFieldStatusRuntime extends FieldStatusRuntime {
+  readonly productionRuns: ProductionRunCoordinator;
+}
+
 function relayInputDefinitions(relayConfig: RelayFunctionalTestConfig): PLCSignalDefinition[] {
   const definitions: PLCSignalDefinition[] = [];
   for (const mapping of relayConfig.mappings) {
@@ -49,7 +53,11 @@ function relayInputDefinitions(relayConfig: RelayFunctionalTestConfig): PLCSigna
   return definitions;
 }
 
-export async function startProductAwareFieldStatusServer(): Promise<FieldStatusRuntime> {
+function safeDownloadName(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, '_').slice(0, 100) || 'production-record';
+}
+
+export async function startProductAwareFieldStatusServer(): Promise<ProductAwareFieldStatusRuntime> {
   const savedPLCs = await loadPLCConfigs();
   const mergedPLCs = mergeWithDefaults(savedPLCs.length > 0 ? savedPLCs : config.plcs);
   config.plcs = [selectFieldPLCProcessObserver(mergedPLCs)];
@@ -91,10 +99,11 @@ export async function startProductAwareFieldStatusServer(): Promise<FieldStatusR
 
   runtime.app.get('/api/relay-functional-test-config', (_req, res) => {
     const indexes = detectors.enabledDetectorIndexes();
+    const missingMappings = relayFunctionalTestMissingMappings(relayConfig, indexes);
     res.json({
       config: relayConfig,
-      missingMappings: relayFunctionalTestMissingMappings(relayConfig, indexes),
-      ready: relayConfig.enabled && relayFunctionalTestMissingMappings(relayConfig, indexes).length === 0,
+      missingMappings,
+      ready: relayConfig.enabled && missingMappings.length === 0,
     });
   });
 
@@ -162,9 +171,24 @@ export async function startProductAwareFieldStatusServer(): Promise<FieldStatusR
     try {
       const html = await recordStore.loadHtml(req.params.batchId);
       if (!html) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
-      res.type('html').send(html);
+      return res.type('html').send(html);
     } catch (error) {
       return res.status(500).json({ code: 'PRODUCTION_RECORD_HTML_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.get('/api/production-records/:batchId/doc', async (req, res) => {
+    try {
+      const [html, record] = await Promise.all([
+        recordStore.loadHtml(req.params.batchId),
+        recordStore.load(req.params.batchId),
+      ]);
+      if (!html || !record) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
+      const filename = `${safeDownloadName(record.productModel)}_${safeDownloadName(record.batchId)}_生产检验记录.doc`;
+      res.setHeader('Content-Type', 'application/msword; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      return res.send(html);
+    } catch (error) {
+      return res.status(500).json({ code: 'PRODUCTION_RECORD_DOC_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
   });
   runtime.app.get('/api/production-records/:batchId', async (req, res) => {
@@ -175,6 +199,22 @@ export async function startProductAwareFieldStatusServer(): Promise<FieldStatusR
       return res.status(500).json({ code: 'PRODUCTION_RECORD_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
   });
+
+  // Product-code routes are views over the one formal allocation source owned by ProductAwareFlameDetectorService.
+  runtime.app.get('/api/product-code/current', (_req, res) => {
+    const summary = runtime.snapshot().summary;
+    return res.json({
+      batchId: summary.waveformAnalysis.batchId,
+      allocation: summary.productPrecheck?.productCodeAllocation ?? null,
+      busy: summary.productPrecheckBusy,
+      timestamp: Date.now(),
+    });
+  });
+  runtime.app.get('/api/product-code/batch/:batchId', (req, res) => {
+    const context = detectors.getBatchContext(req.params.batchId);
+    if (!context?.productCodeAllocation) return res.status(404).json({ code: 'PRODUCT_CODE_ALLOCATION_NOT_FOUND' });
+    return res.json({ allocation: context.productCodeAllocation });
+  });
   runtime.app.get('/api/product-batches/:batchId/context', (req, res) => {
     const context = detectors.getBatchContext(req.params.batchId);
     return context ? res.json(context) : res.status(404).json({ code: 'PRODUCT_BATCH_CONTEXT_NOT_FOUND' });
@@ -182,5 +222,5 @@ export async function startProductAwareFieldStatusServer(): Promise<FieldStatusR
 
   const port = await runtime.listen();
   console.log(`[现场状态] 已启动完整产品检测运行时：http://127.0.0.1:${port}`);
-  return runtime;
+  return Object.assign(runtime, { productionRuns });
 }
