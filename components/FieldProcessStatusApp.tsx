@@ -164,15 +164,26 @@ export function FieldProcessStatusApp() {
     };
   }, [applySummary, refresh]);
 
+  useEffect(() => {
+    if (!detailsOpen || detailTab !== 'product') return;
+    const timer = window.setTimeout(() => {
+      const collapsed = document.querySelector<HTMLButtonElement>(
+        '.wutos-detail-product section[aria-label="产品型号与检测配置"] > button[aria-expanded="false"]',
+      );
+      collapsed?.click();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [detailsOpen, detailTab]);
+
   return <>
-    <ProductModelDock
+    {!detailsOpen && <ProductModelDock
       config={productConfig}
       locked={productLocked}
       precheck={productPrecheck}
       busy={productPrecheckBusy}
       onUpdate={updateProductConfig}
       onOpenDetails={() => openDetails('product')}
-    />
+    />}
 
     <WutosDashboard
       status={status}
