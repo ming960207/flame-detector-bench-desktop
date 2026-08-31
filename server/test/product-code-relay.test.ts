@@ -64,6 +64,21 @@ test('monthly serial store allocates atomically by product model and resets by m
   assert.equal(persisted.counters['GHT-1050-02@202609'], 1);
 });
 
+test('formal batch allocation reserves six serials once and never reuses them after an abandoned batch', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flame-code-batch-'));
+  const store = new ProductCodeStore(join(dir, 'state.json'));
+  const rule = normalizeProductCodeRule({ productNameCode: '4102' });
+  const date = new Date(2026, 7, 31, 14, 0, 0);
+
+  const first = await store.allocateBatch('GHT-1050-02', rule, date, 6, 'formal-batch-1');
+  const duplicateEvent = await store.allocateBatch('GHT-1050-02', rule, date, 6, 'formal-batch-1');
+  const nextBatch = await store.allocateBatch('GHT-1050-02', rule, date, 6, 'formal-batch-2');
+
+  assert.deepEqual(first.items.map((item) => item.serial), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(duplicateEvent.items, first.items);
+  assert.deepEqual(nextBatch.items.map((item) => item.serial), [7, 8, 9, 10, 11, 12]);
+});
+
 test('relay simulation always writes A000/A001 as one FC10 two-register operation', async () => {
   const writes: Array<{ address: number; values: number[] }> = [];
   const fake = {
@@ -78,6 +93,8 @@ test('relay simulation always writes A000/A001 as one FC10 two-register operatio
 
   await setAlarmFaultSimulation(fake, true, false);
   await setAlarmFaultSimulation(fake, false, true);
+  // The combined state remains available only as a protocol/register diagnostic helper.
+  // Real hardware testing proved that its physical Fault relay does not actuate with Alarm.
   await setAlarmFaultSimulation(fake, true, true);
   assert.deepEqual(writes.slice(0, 3), [
     { address: 0xA000, values: [0x0000, 0x0000] },
