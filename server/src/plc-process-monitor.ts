@@ -71,8 +71,8 @@ export class PLCProcessMonitor extends EventEmitter {
   private connected = false;
   private stopped = false;
   private current: PLCProcessStatus | undefined;
-  private readonly extraInputs: PLCSignalDefinition[];
-  private readonly processTags: string[];
+  private extraInputs: PLCSignalDefinition[];
+  private processTags: string[];
 
   constructor(
     private readonly plc: PLCDeviceConfigLocal,
@@ -81,11 +81,27 @@ export class PLCProcessMonitor extends EventEmitter {
     super();
     if (plc.mode !== 'S7') throw new Error('PLC_PROCESS_STATUS_REQUIRES_S7_MODE');
     this.extraInputs = uniqueSignalDefinitions(extraInputs);
-    this.processTags = [...new Set([
+    this.processTags = this.buildProcessTags();
+    this.conn = new NodeS7({ silent: true });
+  }
+
+  private buildProcessTags(): string[] {
+    return [...new Set([
       ...PLC_PROCESS_TAGS,
       ...this.extraInputs.map((item) => item.address),
     ])];
-    this.conn = new NodeS7({ silent: true });
+  }
+
+  updateExtraInputs(extraInputs: readonly PLCSignalDefinition[]): void {
+    this.extraInputs = uniqueSignalDefinitions(extraInputs);
+    const nextTags = this.buildProcessTags();
+    const previous = new Set(this.processTags);
+    const additions = nextTags.filter((tag) => !previous.has(tag));
+    this.processTags = nextTags;
+    if (this.connected && additions.length > 0) {
+      this.conn.addItems(additions);
+      this.poll();
+    }
   }
 
   async start(): Promise<void> {
