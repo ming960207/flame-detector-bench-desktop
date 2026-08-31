@@ -14,16 +14,19 @@ export type RelayFunctionalTestPhase =
 
 export interface RelayFeedbackMapping {
   detectorIndex: number;
-  /** PLC process-status io.inputs 中对应的逻辑输入键；接入 EM DE16 后再绑定真实地址。 */
+  /** PLC process-status io.inputs 中的逻辑键。 */
   alarmInputKey: string;
   faultInputKey: string;
-  /** 正常态电平；动作态默认取反，可兼容 NO/NC 与故障继电器失电安全接法。 */
+  /** S7-200 SMART 实际输入地址，例如 I2.0。未接线前留空，不臆造地址。 */
+  alarmInputAddress: string;
+  faultInputAddress: string;
+  /** 正常态电平；动作态取反，兼容 NO/NC 与失电安全接法。 */
   alarmNormalLevel: boolean;
   faultNormalLevel: boolean;
 }
 
 export interface RelayFunctionalTestConfig {
-  /** 总开关；具体产品型号还需要 relayFunctionalTestEnabled=true 才实际执行。 */
+  /** 设备级总开关；具体产品型号还需要 relayFunctionalTestEnabled=true 才实际执行。 */
   enabled: boolean;
   mode: RelayFunctionalTestMode;
   feedbackTimeoutMs: number;
@@ -71,7 +74,7 @@ export interface RelayFunctionalTestReport {
 }
 
 export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = Object.freeze({
-  // 未接入 PLC 扩展 DI 前保持关闭；产品配置可提前勾选，现场完成映射后再开总开关。
+  // 未接入 PLC 扩展 DI 前保持关闭；现场完成 12 路映射后再打开总开关。
   enabled: false,
   mode: 'FAST_BATCH',
   feedbackTimeoutMs: 2000,
@@ -82,6 +85,8 @@ export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = O
     detectorIndex: index + 1,
     alarmInputKey: `detector${index + 1}AlarmRelay`,
     faultInputKey: `detector${index + 1}FaultRelay`,
+    alarmInputAddress: '',
+    faultInputAddress: '',
     alarmNormalLevel: false,
     faultNormalLevel: false,
   })),
@@ -90,6 +95,13 @@ export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = O
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+function cleanInputAddress(value: unknown, fallback = ''): string {
+  if (typeof value !== 'string') return fallback;
+  const address = value.trim().toUpperCase();
+  if (!address) return '';
+  return /^I\d+\.\d$/.test(address) ? address : fallback;
 }
 
 export function normalizeRelayFunctionalTestConfig(
@@ -110,6 +122,8 @@ export function normalizeRelayFunctionalTestConfig(
       detectorIndex,
       alarmInputKey: typeof raw.alarmInputKey === 'string' ? raw.alarmInputKey.trim() || base.alarmInputKey : base.alarmInputKey,
       faultInputKey: typeof raw.faultInputKey === 'string' ? raw.faultInputKey.trim() || base.faultInputKey : base.faultInputKey,
+      alarmInputAddress: cleanInputAddress(raw.alarmInputAddress, base.alarmInputAddress),
+      faultInputAddress: cleanInputAddress(raw.faultInputAddress, base.faultInputAddress),
       alarmNormalLevel: typeof raw.alarmNormalLevel === 'boolean' ? raw.alarmNormalLevel : base.alarmNormalLevel,
       faultNormalLevel: typeof raw.faultNormalLevel === 'boolean' ? raw.faultNormalLevel : base.faultNormalLevel,
     });
@@ -134,4 +148,24 @@ export function relayFeedbackMappingFor(
   detectorIndex: number,
 ): RelayFeedbackMapping | undefined {
   return config.mappings.find((mapping) => mapping.detectorIndex === detectorIndex);
+}
+
+export function relayFunctionalTestMissingMappings(
+  config: RelayFunctionalTestConfig,
+  detectorIndexes: number[],
+): string[] {
+  const missing: string[] = [];
+  for (const index of detectorIndexes) {
+    const mapping = relayFeedbackMappingFor(config, index);
+    if (!mapping?.alarmInputAddress) missing.push(`D${index}_ALARM_DI`);
+    if (!mapping?.faultInputAddress) missing.push(`D${index}_FAULT_DI`);
+  }
+  return missing;
+}
+
+export function relayFunctionalTestReady(
+  config: RelayFunctionalTestConfig,
+  detectorIndexes: number[],
+): boolean {
+  return config.enabled && relayFunctionalTestMissingMappings(config, detectorIndexes).length === 0;
 }
