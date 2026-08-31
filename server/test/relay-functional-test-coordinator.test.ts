@@ -95,25 +95,31 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
   assert.equal(events.some((event) => event.includes('alarm+fault')), false);
 });
 
-test('DIAGNOSTIC keeps alarm and fault as separate simulations', async () => {
-  let internal = { fire: false, fault: false };
-  const inputs: Record<string, boolean> = { d1Alarm: false, d1Fault: false };
+test('DIAGNOSTIC completes one detector before activating the next detector', async () => {
+  const internal = new Map<number, { fire: boolean; fault: boolean }>([
+    [1, { fire: false, fault: false }],
+    [2, { fire: false, fault: false }],
+  ]);
+  const inputs: Record<string, boolean> = {
+    d1Alarm: false, d1Fault: false,
+    d2Alarm: false, d2Fault: false,
+  };
   const events: string[] = [];
   const detectors: RelayDetectorPort = {
-    enabledDetectorIndexes: () => [1],
-    async simulate(_index, state) {
-      events.push(state.fire ? 'alarm' : state.fault ? 'fault' : 'normal');
-      internal = { ...state };
-      inputs.d1Alarm = state.fire;
-      inputs.d1Fault = state.fault;
+    enabledDetectorIndexes: () => [1, 2],
+    async simulate(index, state) {
+      events.push(`D${index}:${state.fire ? 'alarm' : state.fault ? 'fault' : 'normal'}`);
+      internal.set(index, { ...state });
+      inputs[`d${index}Alarm`] = state.fire;
+      inputs[`d${index}Fault`] = state.fault;
     },
-    async reset() {
-      events.push('reset');
-      internal = { fire: false, fault: false };
-      inputs.d1Alarm = false;
-      inputs.d1Fault = false;
+    async reset(index) {
+      events.push(`D${index}:reset`);
+      internal.set(index, { fire: false, fault: false });
+      inputs[`d${index}Alarm`] = false;
+      inputs[`d${index}Fault`] = false;
     },
-    async readLatched() { return { ...internal }; },
+    async readLatched(index) { return { ...(internal.get(index) ?? { fire: false, fault: false }) }; },
   };
   const config = normalizeRelayFunctionalTestConfig({
     enabled: true,
@@ -122,13 +128,16 @@ test('DIAGNOSTIC keeps alarm and fault as separate simulations', async () => {
     sampleIntervalMs: 50,
     feedbackTimeoutMs: 500,
     resetTimeoutMs: 500,
-    mappings: createMapping([1]),
+    mappings: createMapping([1, 2]),
   });
   const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
   const report = await coordinator.run('diagnostic-1');
 
   assert.equal(report.verdict, 'PASS');
-  assert.deepEqual(events, ['alarm', 'reset', 'fault', 'reset']);
+  assert.deepEqual(events, [
+    'D1:alarm', 'D1:reset', 'D1:fault', 'D1:reset',
+    'D2:alarm', 'D2:reset', 'D2:fault', 'D2:reset',
+  ]);
 });
 
 test('FAST_BATCH reports alarm contact failure without invalidating a passing fault phase', async () => {
