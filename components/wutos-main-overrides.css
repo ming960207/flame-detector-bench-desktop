@@ -107,24 +107,24 @@
 }
 
 .wutos-alarm-row > span:nth-child(2) {
-  display: flex;
+  display: block;
   min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wutos-alarm-row > span:nth-child(2) small {
-  display: block;
-  width: 100%;
-  margin-top: 1px;
-  overflow: hidden;
+  display: inline;
+  width: auto;
+  margin: 0 0 0 .55em;
+  overflow: visible;
   color: #6f9ab6;
   font-size: .72em;
   font-weight: 500;
-  line-height: 1;
-  text-overflow: ellipsis;
+  line-height: inherit;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -147,6 +147,10 @@
 }
 
 /* The existing Detail button becomes the single home for advanced pages. */
+.wutos-detail-overlay {
+  z-index: 200;
+}
+
 .wutos-detail-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -156,12 +160,15 @@
 }
 
 .wutos-detail-tabs button {
+  position: relative;
+  z-index: 1;
   padding: 7px 12px;
   color: #7fa9b4;
   border: 1px solid rgba(43, 114, 130, .62);
   background: #061722;
   font: 700 11px "Microsoft YaHei UI", sans-serif;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .wutos-detail-tabs button.is-active {
@@ -170,7 +177,7 @@
   background: #43dced;
 }
 
-.wutos-detail-content { padding: 14px 18px 18px; }
+.wutos-detail-content { position: relative; z-index: 1; padding: 14px 18px 18px; }
 .wutos-detail-content .detector-workbench { margin: 0; max-width: none; }
 
 .wutos-detail-product,
@@ -191,6 +198,10 @@
   max-height: none !important;
   margin: 0 !important;
   overflow: visible !important;
+}
+
+.wutos-detail-product > section[aria-label="产品型号与检测配置"] > button {
+  pointer-events: auto !important;
 }
 
 .wutos-detail-production > div:first-child {
