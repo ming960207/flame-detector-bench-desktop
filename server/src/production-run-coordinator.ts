@@ -136,7 +136,10 @@ export class ProductionRunCoordinator extends EventEmitter {
       this.saved.add(batchId);
       this.emit('archive', archive);
     } catch (error) {
-      this.emit('error', error);
+      // Do not emit Node's special `error` event: without a listener EventEmitter
+      // rethrows it and can terminate the unified backend. Archive failure is a
+      // recoverable production-record subsystem error, not a process-fatal error.
+      this.emit('archive_error', error);
       console.error('[生产检验记录] 批次归档失败:', error instanceof Error ? error.message : String(error));
     } finally {
       this.saving.delete(batchId);
