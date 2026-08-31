@@ -21,23 +21,30 @@ export interface InspectionStatusValue {
   reason?: string;
 }
 
+export interface InspectionMeasuredValue<T> extends InspectionStatusValue {
+  value: T;
+}
+
 export interface ProductionInspectionProductResult {
   slot: number;
   productCode: string | null;
+  productCodeStatus: 'GENERATED' | 'RULE_MISSING' | 'DISABLED';
   workCurrent: InspectionStatusValue;
   fireAction: InspectionStatusValue;
   faultAction: InspectionStatusValue;
   ledDisplay: InspectionStatusValue;
   amplitude: {
+    /** 按 P1..Pn 顺序记录本批噪声窗口真实绝对幅值。 */
     values: number[];
     status: InspectionItemStatus;
     source: 'AUTO';
+    reason?: string;
   };
-  softwareVersion: string | null;
-  productInfo: {
+  softwareVersion: InspectionMeasuredValue<string | null>;
+  productInfo: InspectionMeasuredValue<{
     probeCount: number | null;
     sensitivityLevel: number | string | null;
-  };
+  }>;
   interferenceResistance: InspectionStatusValue;
   powerFluctuation: InspectionStatusValue;
   highTemp: InspectionStatusValue;
@@ -46,6 +53,7 @@ export interface ProductionInspectionProductResult {
 }
 
 export interface ProductionInspectionRecord {
+  schemaVersion: 1;
   batchId: string;
   productModel: string;
   productionDate: number;
@@ -68,6 +76,13 @@ export function autoStatus(passed: boolean, reason?: string): InspectionStatusVa
     status: passed ? '合格' : '不合格',
     source: 'AUTO',
     ...(reason ? { reason } : {}),
+  };
+}
+
+export function measuredValue<T>(value: T, passed: boolean, reason?: string): InspectionMeasuredValue<T> {
+  return {
+    value,
+    ...autoStatus(passed, reason),
   };
 }
 
