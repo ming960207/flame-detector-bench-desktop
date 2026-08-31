@@ -16,7 +16,7 @@ function createMapping(indexes: number[]): RelayFeedbackMapping[] {
   }));
 }
 
-test('FAST_BATCH triggers alarm+fault together and resets only once per detector', async () => {
+test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel', async () => {
   const internal = new Map<number, { fire: boolean; fault: boolean }>([
     [1, { fire: false, fault: false }],
     [2, { fire: false, fault: false }],
@@ -62,9 +62,12 @@ test('FAST_BATCH triggers alarm+fault together and resets only once per detector
   assert.equal(report.verdict, 'PASS');
   assert.equal(report.units.length, 2);
   assert.ok(report.units.every((unit) => unit.alarm.verdict === 'PASS' && unit.fault.verdict === 'PASS'));
-  assert.deepEqual(events.slice(0, 2).sort(), ['simulate:1:alarm+fault', 'simulate:2:alarm+fault']);
+
+  assert.deepEqual(events.slice(0, 2).sort(), ['simulate:1:alarm', 'simulate:2:alarm']);
   assert.deepEqual(events.slice(2, 4).sort(), ['reset:1', 'reset:2']);
-  assert.equal(events.length, 4);
+  assert.deepEqual(events.slice(4, 6).sort(), ['simulate:1:fault', 'simulate:2:fault']);
+  assert.deepEqual(events.slice(6, 8).sort(), ['reset:1', 'reset:2']);
+  assert.equal(events.some((event) => event.includes('alarm+fault')), false);
 });
 
 test('DIAGNOSTIC keeps alarm and fault as separate simulations', async () => {
@@ -103,14 +106,14 @@ test('DIAGNOSTIC keeps alarm and fault as separate simulations', async () => {
   assert.deepEqual(events, ['alarm', 'reset', 'fault', 'reset']);
 });
 
-test('FAST_BATCH reports the specific relay that does not actuate', async () => {
+test('FAST_BATCH reports alarm contact failure without invalidating a passing fault phase', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { d1Alarm: false, d1Fault: false };
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       internal = { ...state };
-      inputs.d1Alarm = false; // 模拟 Alarm 实体触点未动作
+      inputs.d1Alarm = state.fire ? false : false; // 火警阶段模拟 Alarm 实体触点不动作
       inputs.d1Fault = state.fault;
     },
     async reset() {
@@ -136,4 +139,40 @@ test('FAST_BATCH reports the specific relay that does not actuate', async () => 
   assert.equal(report.units[0]?.alarm.verdict, 'FAIL');
   assert.equal(report.units[0]?.fault.verdict, 'PASS');
   assert.ok(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
+});
+
+test('combined alarm+fault simulation is never used by FAST_BATCH production flow', async () => {
+  let combinedCalls = 0;
+  let internal = { fire: false, fault: false };
+  const inputs: Record<string, boolean> = { d1Alarm: false, d1Fault: false };
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      if (state.fire && state.fault) combinedCalls += 1;
+      internal = { ...state };
+      inputs.d1Alarm = state.fire;
+      inputs.d1Fault = state.fault;
+    },
+    async reset() {
+      internal = { fire: false, fault: false };
+      inputs.d1Alarm = false;
+      inputs.d1Fault = false;
+    },
+    async readLatched() { return { ...internal }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mode: 'FAST_BATCH',
+    stableSamples: 1,
+    sampleIntervalMs: 50,
+    feedbackTimeoutMs: 500,
+    resetTimeoutMs: 500,
+    mappings: createMapping([1]),
+  });
+
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
+  const report = await coordinator.run('no-combined');
+
+  assert.equal(report.verdict, 'PASS');
+  assert.equal(combinedCalls, 0);
 });
