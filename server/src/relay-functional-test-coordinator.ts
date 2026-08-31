@@ -69,7 +69,8 @@ function sleep(ms: number): Promise<void> {
  * 但实体输出只响应火警，故障继电器不会同时动作。因此生产 FAST_BATCH 必须按功能分阶段：
  * 6 台并行火警 -> 验证 -> 6 台并行复位 -> 6 台并行故障 -> 验证 -> 6 台并行复位。
  *
- * FAST_BATCH 的“快”来自 6 台设备在每个阶段并行，而不是把 Alarm/Fault 合并成一次激励。
+ * DIAGNOSTIC 则必须真正逐槽位完成一整套火警/故障循环后再进入下一槽位，
+ * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
  */
 export class RelayFunctionalTestCoordinator {
   constructor(
@@ -114,8 +115,7 @@ export class RelayFunctionalTestCoordinator {
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
-    const entries = [...work.entries()];
-    const execute = async ([index, state]: [number, UnitWorkState]) => {
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
       state.commandStartedAt = Date.now();
       try {
@@ -126,11 +126,7 @@ export class RelayFunctionalTestCoordinator {
       } catch {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
       }
-    };
-
-    // 正常生产同一功能阶段六台并行；诊断模式顺序下发，便于接线定位。
-    if (this.config.mode === 'FAST_BATCH') await Promise.all(entries.map(execute));
-    else for (const entry of entries) await execute(entry);
+    }));
   }
 
   private async waitForAction(
@@ -211,8 +207,7 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
-    const entries = [...work.entries()];
-    const execute = async ([index, state]: [number, UnitWorkState]) => {
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
       try {
         await this.detectors.reset(index);
@@ -220,10 +215,7 @@ export class RelayFunctionalTestCoordinator {
       } catch {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
       }
-    };
-
-    if (this.config.mode === 'FAST_BATCH') await Promise.all(entries.map(execute));
-    else for (const entry of entries) await execute(entry);
+    }));
   }
 
   private async waitForReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
@@ -275,6 +267,28 @@ export class RelayFunctionalTestCoordinator {
     }
   }
 
+  private async runActionCycle(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    await this.sendCommand(work, kind);
+    await this.waitForAction(work, kind);
+    await this.resetBatch(work, kind);
+    await this.waitForReset(work, kind);
+  }
+
+  private async runFastBatch(work: Map<number, UnitWorkState>): Promise<void> {
+    await this.runActionCycle(work, 'alarm');
+    await this.runActionCycle(work, 'fault');
+  }
+
+  private async runDiagnostic(work: Map<number, UnitWorkState>): Promise<void> {
+    // One complete slot at a time. This is intentionally slower and is only for
+    // commissioning/maintenance where exact slot-to-DI wiring attribution matters.
+    for (const [index, state] of work.entries()) {
+      const single = new Map<number, UnitWorkState>([[index, state]]);
+      await this.runActionCycle(single, 'alarm');
+      await this.runActionCycle(single, 'fault');
+    }
+  }
+
   private finalizeAction(action: RelayActionResult): void {
     action.verdict = action.commandAccepted
       && action.internalStateReached
@@ -311,17 +325,8 @@ export class RelayFunctionalTestCoordinator {
     );
 
     await this.readBaseline(work);
-
-    // 必须分阶段。实机已经证明 fire+fault 同时写入时实体只响应火警。
-    await this.sendCommand(work, 'alarm');
-    await this.waitForAction(work, 'alarm');
-    await this.resetBatch(work, 'alarm');
-    await this.waitForReset(work, 'alarm');
-
-    await this.sendCommand(work, 'fault');
-    await this.waitForAction(work, 'fault');
-    await this.resetBatch(work, 'fault');
-    await this.waitForReset(work, 'fault');
+    if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
+    else await this.runFastBatch(work);
 
     const units = [...work.values()].map(({ result }) => {
       this.finalizeAction(result.alarm);
