@@ -4,6 +4,8 @@ import {
   normalizeProductCodeRule,
   type ProductCodeRule,
 } from './product-code.js';
+import type { ProductCodeAllocation } from './product-code-store.js';
+import type { RelayFunctionalTestReport } from './relay-functional-test.js';
 
 export type ProductType = 'DUAL_WAVELENGTH' | 'THREE_WAVELENGTH' | 'FOUR_WAVELENGTH' | 'IMAGE_DETECTOR';
 export type ProductPrecheckVerdict = 'PASS' | 'FAIL' | 'PENDING';
@@ -33,6 +35,8 @@ export interface ProductPrecheckUnitResult {
   actualSoftwareVersion: string | null;
   expectedProbeCount: number;
   actualProbeCount: number | null;
+  /** 预检阶段从 0x0000 读取；旧路径未读取时为空。 */
+  sensitivityLevel?: number | null;
   fireAlarm: boolean | null;
   fault: boolean | null;
   checkedAt: number;
@@ -44,8 +48,12 @@ export interface ProductPrecheckReport {
   batchId: string | null;
   productType: ProductType;
   productLabel: string;
+  productModel?: string;
   expectedSoftwareVersion: string;
   expectedProbeCount: number;
+  productionDate?: number;
+  productCodeAllocation?: ProductCodeAllocation | null;
+  relayFunctionalTest?: RelayFunctionalTestReport | null;
   startedAt: number;
   completedAt: number;
   verdict: ProductPrecheckVerdict;
