@@ -3,6 +3,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { FlameConfig, PLCDeviceConfigLocal } from './config.js';
 import type { ProductDetectionConfig } from './product-profile.js';
+import type { RelayFunctionalTestConfig } from './relay-functional-test.js';
+import type { ProductionInspectionRecordConfig } from './production-inspection-record.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +23,8 @@ export interface SystemConfigStore {
   doRelations?: unknown;
   mqttConfig?: unknown;
   productDetectionConfig?: ProductDetectionConfig;
+  relayFunctionalTestConfig?: RelayFunctionalTestConfig;
+  productionInspectionRecordConfig?: ProductionInspectionRecordConfig;
   lastUpdated: number;
 }
 
