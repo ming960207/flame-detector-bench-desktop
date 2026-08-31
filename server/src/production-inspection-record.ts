@@ -1,3 +1,5 @@
+import type { ProductCodeGenerationStatus } from './product-code.js';
+
 export type InspectionItemStatus = '合格' | '不合格';
 export type InspectionItemSource = 'AUTO' | 'DEFAULT_PASS';
 
@@ -28,7 +30,8 @@ export interface InspectionMeasuredValue<T> extends InspectionStatusValue {
 export interface ProductionInspectionProductResult {
   slot: number;
   productCode: string | null;
-  productCodeStatus: 'GENERATED' | 'RULE_MISSING' | 'DISABLED';
+  /** 编号状态只用于追溯，不参与产品合格/不合格判定。 */
+  productCodeStatus: ProductCodeGenerationStatus;
   workCurrent: InspectionStatusValue;
   fireAction: InspectionStatusValue;
   faultAction: InspectionStatusValue;
