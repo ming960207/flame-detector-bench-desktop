@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import type { FieldStatusSnapshot } from './closure/field-status-server.js';
@@ -40,7 +41,7 @@ function cloneRecordConfig(config: ProductionInspectionRecordConfig): Production
   return JSON.parse(JSON.stringify(config)) as ProductionInspectionRecordConfig;
 }
 
-export class ProductionRunCoordinator {
+export class ProductionRunCoordinator extends EventEmitter {
   private recordConfig: ProductionInspectionRecordConfig = DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG;
   private capturedRecordConfig: ProductionInspectionRecordConfig | null = null;
   private batchStartedAt: number | null = null;
@@ -53,7 +54,9 @@ export class ProductionRunCoordinator {
     private readonly detectors: ProductAwareFlameDetectorService,
     private readonly recordStore = new ProductionInspectionRecordStore(),
     private readonly rawDirectory = join(process.env.APP_DATA_DIR || process.cwd(), 'production-records', 'raw'),
-  ) {}
+  ) {
+    super();
+  }
 
   setRecordConfig(config: ProductionInspectionRecordConfig): void {
     this.recordConfig = normalizeProductionInspectionRecordConfig(config, this.recordConfig);
@@ -117,9 +120,7 @@ export class ProductionRunCoordinator {
         recordConfig: this.capturedRecordConfig ?? this.recordConfig,
         productionDate,
       });
-
-      await this.recordStore.save(record);
-      await this.saveRawArchive({
+      const archive: ProductionRunArchive = {
         schemaVersion: 1,
         batchId,
         archivedAt: Date.now(),
@@ -128,8 +129,15 @@ export class ProductionRunCoordinator {
         flame: snapshot.flame,
         productContext: context,
         inspectionRecord: record,
-      });
+      };
+
+      await this.recordStore.save(record);
+      await this.saveRawArchive(archive);
       this.saved.add(batchId);
+      this.emit('archive', archive);
+    } catch (error) {
+      this.emit('error', error);
+      console.error('[生产检验记录] 批次归档失败:', error instanceof Error ? error.message : String(error));
     } finally {
       this.saving.delete(batchId);
     }
