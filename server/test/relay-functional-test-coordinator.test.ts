@@ -3,6 +3,8 @@ import test from 'node:test';
 import { RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
 import {
   normalizeRelayFunctionalTestConfig,
+  relayFunctionalTestMissingMappings,
+  relayFunctionalTestReady,
   type RelayFeedbackMapping,
 } from '../src/relay-functional-test.js';
 
@@ -11,10 +13,33 @@ function createMapping(indexes: number[]): RelayFeedbackMapping[] {
     detectorIndex: index,
     alarmInputKey: `d${index}Alarm`,
     faultInputKey: `d${index}Fault`,
+    alarmInputAddress: `I2.${(index - 1) * 2}`,
+    faultInputAddress: `I2.${(index - 1) * 2 + 1}`,
     alarmNormalLevel: false,
     faultNormalLevel: false,
   }));
 }
+
+test('relay mapping readiness requires both physical DI addresses for every enabled detector', () => {
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mappings: [{
+      detectorIndex: 1,
+      alarmInputKey: 'd1Alarm', faultInputKey: 'd1Fault',
+      alarmInputAddress: 'I2.0', faultInputAddress: '',
+      alarmNormalLevel: false, faultNormalLevel: false,
+    }],
+  });
+  assert.deepEqual(relayFunctionalTestMissingMappings(config, [1]), ['D1_FAULT_DI']);
+  assert.equal(relayFunctionalTestReady(config, [1]), false);
+
+  const ready = normalizeRelayFunctionalTestConfig({
+    ...config,
+    mappings: [{ ...config.mappings[0], faultInputAddress: 'I2.1' }],
+  }, config);
+  assert.deepEqual(relayFunctionalTestMissingMappings(ready, [1]), []);
+  assert.equal(relayFunctionalTestReady(ready, [1]), true);
+});
 
 test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel', async () => {
   const internal = new Map<number, { fire: boolean; fault: boolean }>([
@@ -113,7 +138,7 @@ test('FAST_BATCH reports alarm contact failure without invalidating a passing fa
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       internal = { ...state };
-      inputs.d1Alarm = state.fire ? false : false; // 火警阶段模拟 Alarm 实体触点不动作
+      inputs.d1Alarm = false; // 火警阶段模拟 Alarm 实体触点不动作
       inputs.d1Fault = state.fault;
     },
     async reset() {
