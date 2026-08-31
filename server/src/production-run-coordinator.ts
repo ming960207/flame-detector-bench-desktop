@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { FieldStatusSnapshot } from './closure/field-status-server.js';
 import type { PLCProcessStatus } from './process-status.js';
 import type { ProductAwareFlameDetectorService } from './product-aware-flame-detector-service.js';
@@ -68,7 +68,22 @@ export class ProductionRunCoordinator {
     if (active && !this.wasActive) {
       this.batchStartedAt = status.timestamp;
       this.capturedRecordConfig = cloneRecordConfig(this.recordConfig);
-      this.detectors.noteFormalBatchStartedAt(status.timestamp);
+
+      // createFieldStatusRuntime registered its PLC listener before this coordinator,
+      // therefore on the same automatic-run rising edge the snapshot already carries
+      // the real FieldWaveformAnalysis batchId. Reserve six serials immediately here.
+      const snapshot = this.snapshot();
+      const batchId = snapshot.summary.waveformAnalysis.batchId;
+      if (batchId) {
+        void this.detectors.reserveFormalBatch(
+          snapshot.summary.productConfig,
+          batchId,
+          status.timestamp,
+        );
+      } else {
+        // Defensive fallback: precheck will allocate with this exact start timestamp.
+        this.detectors.noteFormalBatchStartedAt(status.timestamp);
+      }
     }
     this.wasActive = active;
 
