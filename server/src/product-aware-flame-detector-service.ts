@@ -79,6 +79,23 @@ function infrastructureFailureReport(
   };
 }
 
+function allocationError(
+  productModel: string,
+  productionDate: Date,
+  batchId: string | null,
+  error: unknown,
+): ProductCodeAllocation {
+  return {
+    batchId,
+    status: 'ERROR',
+    productModel,
+    monthKey: null,
+    productionDate: productionDate.getTime(),
+    items: Array.from({ length: 6 }, (_, offset) => ({ slot: offset + 1, serial: null, productCode: null })),
+    reason: `PRODUCT_CODE_ALLOCATION_FAILED:${error instanceof Error ? error.message : String(error)}`,
+  };
+}
+
 /**
  * Formal detector service extension.
  *
@@ -93,6 +110,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   private relayFeedback: RelayFeedbackSource = { readInputs: () => undefined };
   private pendingBatchStartedAt: number | null = null;
   private readonly batchContexts = new Map<string, ProductAwareBatchContext>();
+  /** batchId -> atomic six-slot reservation. The Promise itself is cached so a near-immediate precheck cannot allocate twice. */
+  private readonly productCodeReservations = new Map<string, Promise<ProductCodeAllocation>>();
 
   constructor(
     flameConfig: FlameConfig,
@@ -115,6 +134,34 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
 
   noteFormalBatchStartedAt(timestamp: number): void {
     if (Number.isFinite(timestamp) && timestamp > 0) this.pendingBatchStartedAt = timestamp;
+  }
+
+  /**
+   * Called on the PLC formal-run rising edge, after FieldWaveformAnalysis has created the real batchId.
+   * The six serials are therefore consumed at formal batch start, not later when position-1 precheck begins.
+   * Any numbering/storage problem is converted into status=ERROR and never blocks the physical inspection.
+   */
+  reserveFormalBatch(
+    productConfig: ProductDetectionConfig,
+    batchId: string,
+    startedAt: number,
+  ): Promise<ProductCodeAllocation> {
+    const normalizedBatchId = batchId.trim();
+    const existing = this.productCodeReservations.get(normalizedBatchId);
+    if (existing) return existing;
+
+    const profile = selectedProductProfile(productConfig);
+    const productionDate = new Date(startedAt);
+    this.noteFormalBatchStartedAt(startedAt);
+    const reservation = this.productCodeStore.allocateBatch(
+      profile.productModel,
+      profile.productCodeRule,
+      productionDate,
+      6,
+      normalizedBatchId,
+    ).catch((error) => allocationError(profile.productModel, productionDate, normalizedBatchId, error));
+    this.productCodeReservations.set(normalizedBatchId, reservation);
+    return reservation;
   }
 
   getBatchContext(batchId: string | null | undefined): ProductAwareBatchContext | null {
@@ -191,20 +238,28 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     return result;
   }
 
-  private async allocateProductCodes(
+  private async ensureProductCodeAllocation(
     productConfig: ProductDetectionConfig,
     batchId: string | null,
-    productionDate: Date,
+    fallbackProductionDate: Date,
   ): Promise<ProductCodeAllocation> {
     const profile = selectedProductProfile(productConfig);
-    // Formal business rule: one batch reserves all six slot serials atomically.
-    return this.productCodeStore.allocateBatch(
-      profile.productModel,
-      profile.productCodeRule,
-      productionDate,
-      6,
-      batchId,
-    );
+    if (batchId) {
+      const existing = this.productCodeReservations.get(batchId);
+      if (existing) return existing;
+      return this.reserveFormalBatch(productConfig, batchId, fallbackProductionDate.getTime());
+    }
+    try {
+      return await this.productCodeStore.allocateBatch(
+        profile.productModel,
+        profile.productCodeRule,
+        fallbackProductionDate,
+        6,
+        null,
+      );
+    } catch (error) {
+      return allocationError(profile.productModel, fallbackProductionDate, null, error);
+    }
   }
 
   private async runRelayFunctionalTest(
@@ -233,9 +288,10 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   ): Promise<ProductPrecheckReport> {
     await new Promise((resolve) => setTimeout(resolve, POSITION_ONE_CONTACT_SETTLE_MS));
 
-    const productionDate = new Date(this.pendingBatchStartedAt ?? Date.now());
+    const fallbackProductionDate = new Date(this.pendingBatchStartedAt ?? Date.now());
     const profile = selectedProductProfile(productConfig);
-    const allocation = await this.allocateProductCodes(productConfig, batchId, productionDate);
+    const allocation = await this.ensureProductCodeAllocation(productConfig, batchId, fallbackProductionDate);
+    const productionDate = new Date(allocation.productionDate || fallbackProductionDate.getTime());
     const contextKey = batchId ?? `precheck-${productionDate.getTime()}`;
 
     // Base runProductPrecheck normally starts waveform immediately at the end.
