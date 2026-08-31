@@ -9,15 +9,19 @@ import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/s
 import type { FlameDetectorConfig } from '../types';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
+import { ProductModelDock } from './ProductModelDock';
 import { ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
+import './wutos-main-overrides.css';
 
 const DESKTOP_RUNTIME = typeof window !== 'undefined' ? window.desktopRuntime : undefined;
 const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || import.meta.env.VITE_BACKEND_API_URL || 'http://' + window.location.hostname + ':3001';
 const WS = DESKTOP_RUNTIME?.backendWsUrl || import.meta.env.VITE_BACKEND_WS_URL || 'ws://' + window.location.hostname + ':3001';
 const WS_RECONNECT_DELAY_MS = 250;
+
+type DetailTab = 'device' | 'product' | 'production';
 
 interface FieldSummaryPayload {
   process?: PLCProcessStatus;
@@ -50,6 +54,7 @@ export function FieldProcessStatusApp() {
   const [channelOnline, setChannelOnline] = useState(false);
   const [notice, setNotice] = useState('PLC 未接入：工序监测处于待同步状态。');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<DetailTab>('device');
 
   const applySummary = useCallback((summary: FieldSummaryPayload) => {
     setStatus(summary.process ?? null);
@@ -101,6 +106,11 @@ export function FieldProcessStatusApp() {
   const handleRefresh = useCallback(() => {
     void refresh().catch(() => setNotice('PLC 未接入：工序监测处于待同步状态。'));
   }, [refresh]);
+
+  const openDetails = useCallback((tab: DetailTab = 'device') => {
+    setDetailTab(tab);
+    setDetailsOpen(true);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -155,15 +165,15 @@ export function FieldProcessStatusApp() {
   }, [applySummary, refresh]);
 
   return <>
-    <ProductTypeControl
+    <ProductModelDock
       config={productConfig}
       locked={productLocked}
       precheck={productPrecheck}
       busy={productPrecheckBusy}
-      detectorVerdict={detectorVerdict}
       onUpdate={updateProductConfig}
+      onOpenDetails={() => openDetails('product')}
     />
-    <ProductionConfigurationPanel backendHttpUrl={HTTP} locked={productLocked} />
+
     <WutosDashboard
       status={status}
       detectors={detectors}
@@ -175,19 +185,46 @@ export function FieldProcessStatusApp() {
       waveformDisplayMode={flameConfig?.waveformDisplayMode || 'normalized'}
       waveformMaxSamples={flameConfig?.waveformMaxSamples || 1000}
       onRefresh={handleRefresh}
-      onOpenDetails={() => setDetailsOpen(true)}
+      onOpenDetails={() => openDetails('device')}
     />
+
     {detailsOpen && <div className="wutos-detail-overlay" role="presentation">
       <section className="wutos-detail-shell" role="dialog" aria-modal="true" aria-labelledby="wutos-detail-title">
         <header>
           <div>
             <span className="section-kicker">FIELD DATA DETAIL</span>
-            <h2 id="wutos-detail-title">六路波形与通信详情</h2>
-            <p>保留现有只读波形、自检和通信配置逻辑；主屏展示产品类型、预检和正式检测摘要。</p>
+            <h2 id="wutos-detail-title">检测台详情与生产配置</h2>
+            <p>主屏仅保留操作员需要的实时状态；波形、产品详细配置、检验记录和生产配置统一在此查看。</p>
           </div>
           <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
         </header>
-        <FlameDetectorWorkbench state={detectors} config={flameConfig} analysis={waveformAnalysis} onRefresh={handleRefresh} />
+
+        <nav className="wutos-detail-tabs" aria-label="详情页面">
+          <button type="button" className={detailTab === 'device' ? 'is-active' : ''} onClick={() => setDetailTab('device')}>设备与波形</button>
+          <button type="button" className={detailTab === 'product' ? 'is-active' : ''} onClick={() => setDetailTab('product')}>产品详细配置</button>
+          <button type="button" className={detailTab === 'production' ? 'is-active' : ''} onClick={() => setDetailTab('production')}>检验记录 / 生产配置</button>
+        </nav>
+
+        <div className="wutos-detail-content">
+          {detailTab === 'device' && <FlameDetectorWorkbench state={detectors} config={flameConfig} analysis={waveformAnalysis} onRefresh={handleRefresh} />}
+
+          {detailTab === 'product' && <div className="wutos-detail-product">
+            <p className="wutos-detail-section-note">主页面只直接选择生产型号；版本基准、探头数、继电器测试和产品编号规则等低频配置集中在这里编辑。</p>
+            <ProductTypeControl
+              config={productConfig}
+              locked={productLocked}
+              precheck={productPrecheck}
+              busy={productPrecheckBusy}
+              detectorVerdict={detectorVerdict}
+              onUpdate={updateProductConfig}
+            />
+          </div>}
+
+          {detailTab === 'production' && <div className="wutos-detail-production">
+            <p className="wutos-detail-section-note">正式检验记录、历史批次、12 路继电器反馈 DI、检验员及表单参数均从本详情页进入；主页面不再额外悬浮按钮。</p>
+            <ProductionConfigurationPanel backendHttpUrl={HTTP} locked={productLocked} />
+          </div>}
+        </div>
       </section>
     </div>}
   </>;
