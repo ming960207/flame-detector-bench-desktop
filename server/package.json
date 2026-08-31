@@ -9,7 +9,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "test": "tsx --test test/*.test.ts",
-    "test:product": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts",
+    "test:product": "tsx --test test/*.test.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {
