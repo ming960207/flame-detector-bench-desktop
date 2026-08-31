@@ -2,6 +2,7 @@ import { config } from './config.js';
 import type { FieldStatusSummary } from './closure/field-status-server.js';
 import { MQTTPublisher, normalizeMQTTConfig } from './mqtt-publisher.js';
 import type { ProductAwareFieldStatusRuntime } from './product-aware-field-runtime.js';
+import type { ProductionRunArchive } from './production-run-coordinator.js';
 import { requireDesktopMutation } from './request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
@@ -82,10 +83,18 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: ProductAwareFi
   const onTestArchive = (archive: TestProgramArchive) => {
     if (!publisher.getStatus().enabled) return;
     void publisher.publishInspectionResult(archive).catch((error) => {
-      console.error('[统一后端] 检测结果 MQTT 上传异常:', error instanceof Error ? error.message : String(error));
+      console.error('[统一后端] 测试监听结果 MQTT 上传异常:', error instanceof Error ? error.message : String(error));
     });
   };
+  const onProductionArchive = (archive: ProductionRunArchive) => {
+    if (!publisher.getStatus().enabled) return;
+    void publisher.publishProductionInspectionResult(archive).catch((error) => {
+      console.error('[统一后端] 正式生产记录 MQTT 上传异常:', error instanceof Error ? error.message : String(error));
+    });
+  };
+
   testProgram.observer.on('archive', onTestArchive);
+  fieldRuntime.productionRuns.on('archive', onProductionArchive);
   testProgram.start();
   if (initialMQTT.mqttEnabled) publisher.connect();
 
@@ -171,6 +180,7 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: ProductAwareFi
       stopped = true;
       clearInterval(pollTimer);
       testProgram.observer.removeListener('archive', onTestArchive);
+      fieldRuntime.productionRuns.removeListener('archive', onProductionArchive);
       publisher.disconnect();
       await testProgram.close();
     },
