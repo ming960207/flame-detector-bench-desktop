@@ -8,8 +8,8 @@
     "dev": "tsx watch src/main.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
-    "test": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts",
-    "test:product": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts",
+    "test": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/production-inspection-record.test.ts",
+    "test:product": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/production-inspection-record.test.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {
