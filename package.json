@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:field": "node scripts/dev-field.mjs",
     "build": "vite build",
     "build:web": "vite build --mode desktop",
     "build:web:test": "vite build --mode test",
