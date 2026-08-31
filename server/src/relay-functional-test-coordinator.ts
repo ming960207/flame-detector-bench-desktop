@@ -1,0 +1,297 @@
+import {
+  relayFeedbackMappingFor,
+  relayInputIsActive,
+  type RelayActionResult,
+  type RelayFunctionalTestConfig,
+  type RelayFunctionalTestReport,
+  type RelayFunctionalTestUnitResult,
+} from './relay-functional-test.js';
+
+export interface RelayDetectorPort {
+  enabledDetectorIndexes(): number[];
+  simulate(detectorIndex: number, state: { fire: boolean; fault: boolean }): Promise<void>;
+  reset(detectorIndex: number): Promise<void>;
+  readLatched(detectorIndex: number): Promise<{ fire: boolean; fault: boolean }>;
+}
+
+export interface RelayFeedbackSource {
+  readInputs(): Record<string, boolean> | undefined;
+}
+
+interface UnitWorkState {
+  result: RelayFunctionalTestUnitResult;
+  commandStartedAt: number | null;
+}
+
+function emptyAction(): RelayActionResult {
+  return {
+    commandAccepted: false,
+    internalStateReached: false,
+    physicalStateReached: false,
+    oppositeRelayStayedNormal: true,
+    responseTimeMs: null,
+    resetAccepted: false,
+    internalRecovered: false,
+    physicalRecovered: false,
+    verdict: 'PENDING',
+    reasons: [],
+  };
+}
+
+function emptyUnit(index: number): RelayFunctionalTestUnitResult {
+  return {
+    detectorIndex: index,
+    enabled: true,
+    baseline: {
+      alarmInternal: null,
+      faultInternal: null,
+      alarmPhysical: null,
+      faultPhysical: null,
+    },
+    alarm: emptyAction(),
+    fault: emptyAction(),
+    verdict: 'PENDING',
+  };
+}
+
+function uniquePush(target: string[], value: string): void {
+  if (!target.includes(value)) target.push(value);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export class RelayFunctionalTestCoordinator {
+  constructor(
+    private readonly detectors: RelayDetectorPort,
+    private readonly feedback: RelayFeedbackSource,
+    private readonly config: RelayFunctionalTestConfig,
+  ) {}
+
+  private physicalState(index: number): { alarm: boolean | null; fault: boolean | null } {
+    const mapping = relayFeedbackMappingFor(this.config, index);
+    const inputs = this.feedback.readInputs();
+    if (!mapping || !inputs) return { alarm: null, fault: null };
+    return {
+      alarm: relayInputIsActive(inputs[mapping.alarmInputKey], mapping.alarmNormalLevel),
+      fault: relayInputIsActive(inputs[mapping.faultInputKey], mapping.faultNormalLevel),
+    };
+  }
+
+  private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
+      try {
+        const internal = await this.detectors.readLatched(index);
+        const physical = this.physicalState(index);
+        state.result.baseline = {
+          alarmInternal: internal.fire,
+          faultInternal: internal.fault,
+          alarmPhysical: physical.alarm,
+          faultPhysical: physical.fault,
+        };
+        if (internal.fire) uniquePush(state.result.alarm.reasons, 'ALARM_ACTIVE_AT_BASELINE');
+        if (internal.fault) uniquePush(state.result.fault.reasons, 'FAULT_ACTIVE_AT_BASELINE');
+        if (physical.alarm === true) uniquePush(state.result.alarm.reasons, 'ALARM_RELAY_ACTIVE_AT_BASELINE');
+        if (physical.fault === true) uniquePush(state.result.fault.reasons, 'FAULT_RELAY_ACTIVE_AT_BASELINE');
+      } catch {
+        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
+        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
+      }
+    }));
+  }
+
+  private async sendBatchCommand(
+    work: Map<number, UnitWorkState>,
+    kind: 'alarm' | 'fault',
+  ): Promise<void> {
+    const entries = [...work.entries()];
+    const execute = async ([index, state]: [number, UnitWorkState]) => {
+      const action = state.result[kind];
+      state.commandStartedAt = Date.now();
+      try {
+        await this.detectors.simulate(index, kind === 'alarm'
+          ? { fire: true, fault: false }
+          : { fire: false, fault: true });
+        action.commandAccepted = true;
+      } catch {
+        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
+      }
+    };
+
+    if (this.config.mode === 'FAST_BATCH') {
+      await Promise.all(entries.map(execute));
+    } else {
+      for (const entry of entries) await execute(entry);
+    }
+  }
+
+  private async waitForAction(
+    work: Map<number, UnitWorkState>,
+    kind: 'alarm' | 'fault',
+  ): Promise<void> {
+    const deadline = Date.now() + this.config.feedbackTimeoutMs;
+    const stable = new Map<number, number>();
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.entries()].map(async ([index, state]) => {
+        const action = state.result[kind];
+        if (!action.commandAccepted || action.internalStateReached && action.physicalStateReached && action.oppositeRelayStayedNormal && (stable.get(index) ?? 0) >= this.config.stableSamples) return;
+        try {
+          const internal = await this.detectors.readLatched(index);
+          const physical = this.physicalState(index);
+          const internalReached = kind === 'alarm'
+            ? internal.fire && !internal.fault
+            : !internal.fire && internal.fault;
+          const physicalReached = kind === 'alarm' ? physical.alarm === true : physical.fault === true;
+          const oppositeNormal = kind === 'alarm' ? physical.fault === false : physical.alarm === false;
+          action.internalStateReached ||= internalReached;
+          action.physicalStateReached ||= physicalReached;
+          action.oppositeRelayStayedNormal &&= oppositeNormal;
+          if (internalReached && physicalReached && oppositeNormal) {
+            const next = (stable.get(index) ?? 0) + 1;
+            stable.set(index, next);
+            if (next >= this.config.stableSamples && action.responseTimeMs === null) {
+              action.responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
+            }
+          } else {
+            stable.set(index, 0);
+          }
+        } catch {
+          stable.set(index, 0);
+        }
+      }));
+      const done = [...work.entries()].every(([index, state]) => {
+        const action = state.result[kind];
+        return !action.commandAccepted || (
+          action.internalStateReached
+          && action.physicalStateReached
+          && action.oppositeRelayStayedNormal
+          && (stable.get(index) ?? 0) >= this.config.stableSamples
+        );
+      });
+      if (done) break;
+      await sleep(this.config.sampleIntervalMs);
+    }
+
+    for (const state of work.values()) {
+      const action = state.result[kind];
+      if (!action.commandAccepted) continue;
+      if (!action.internalStateReached) uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_INTERNAL_STATE_NOT_SET' : 'FAULT_INTERNAL_STATE_NOT_SET');
+      if (!action.physicalStateReached) uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_NOT_ACTUATED' : 'FAULT_RELAY_NOT_ACTUATED');
+      if (!action.oppositeRelayStayedNormal) uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_TRIGGERED_FAULT_RELAY' : 'FAULT_TRIGGERED_ALARM_RELAY');
+    }
+  }
+
+  private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    const entries = [...work.entries()];
+    const execute = async ([index, state]: [number, UnitWorkState]) => {
+      const action = state.result[kind];
+      try {
+        await this.detectors.reset(index);
+        action.resetAccepted = true;
+      } catch {
+        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
+      }
+    };
+    if (this.config.mode === 'FAST_BATCH') await Promise.all(entries.map(execute));
+    else for (const entry of entries) await execute(entry);
+  }
+
+  private async waitForReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    const deadline = Date.now() + this.config.resetTimeoutMs;
+    const stable = new Map<number, number>();
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.entries()].map(async ([index, state]) => {
+        const action = state.result[kind];
+        if (!action.resetAccepted) return;
+        try {
+          const internal = await this.detectors.readLatched(index);
+          const physical = this.physicalState(index);
+          const internalRecovered = !internal.fire && !internal.fault;
+          const physicalRecovered = physical.alarm === false && physical.fault === false;
+          action.internalRecovered ||= internalRecovered;
+          action.physicalRecovered ||= physicalRecovered;
+          stable.set(index, internalRecovered && physicalRecovered ? (stable.get(index) ?? 0) + 1 : 0);
+        } catch {
+          stable.set(index, 0);
+        }
+      }));
+      const done = [...work.entries()].every(([index, state]) => {
+        const action = state.result[kind];
+        return !action.resetAccepted || (
+          action.internalRecovered
+          && action.physicalRecovered
+          && (stable.get(index) ?? 0) >= this.config.stableSamples
+        );
+      });
+      if (done) break;
+      await sleep(this.config.sampleIntervalMs);
+    }
+    for (const state of work.values()) {
+      const action = state.result[kind];
+      if (!action.resetAccepted) continue;
+      if (!action.internalRecovered) uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_INTERNAL_FAILED' : 'FAULT_RESET_INTERNAL_FAILED');
+      if (!action.physicalRecovered) uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_STUCK_AFTER_RESET' : 'FAULT_RELAY_STUCK_AFTER_RESET');
+    }
+  }
+
+  private finalizeAction(action: RelayActionResult): void {
+    action.verdict = action.commandAccepted
+      && action.internalStateReached
+      && action.physicalStateReached
+      && action.oppositeRelayStayedNormal
+      && action.resetAccepted
+      && action.internalRecovered
+      && action.physicalRecovered
+      && action.reasons.length === 0
+      ? 'PASS'
+      : 'FAIL';
+  }
+
+  async run(batchId: string | null = null): Promise<RelayFunctionalTestReport> {
+    const startedAt = Date.now();
+    const indexes = [...new Set(this.detectors.enabledDetectorIndexes())]
+      .filter((index) => Number.isInteger(index) && index >= 1 && index <= 6)
+      .sort((a, b) => a - b);
+    if (!this.config.enabled) {
+      return {
+        batchId,
+        mode: this.config.mode,
+        phase: 'COMPLETE',
+        startedAt,
+        completedAt: Date.now(),
+        verdict: 'SKIPPED',
+        units: indexes.map((index) => ({ ...emptyUnit(index), enabled: false, verdict: 'SKIPPED' })),
+      };
+    }
+
+    const work = new Map<number, UnitWorkState>(indexes.map((index) => [index, { result: emptyUnit(index), commandStartedAt: null }]));
+    await this.readBaseline(work);
+
+    await this.sendBatchCommand(work, 'alarm');
+    await this.waitForAction(work, 'alarm');
+    await this.resetBatch(work, 'alarm');
+    await this.waitForReset(work, 'alarm');
+
+    await this.sendBatchCommand(work, 'fault');
+    await this.waitForAction(work, 'fault');
+    await this.resetBatch(work, 'fault');
+    await this.waitForReset(work, 'fault');
+
+    const units = [...work.values()].map(({ result }) => {
+      this.finalizeAction(result.alarm);
+      this.finalizeAction(result.fault);
+      result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      return result;
+    });
+    return {
+      batchId,
+      mode: this.config.mode,
+      phase: 'COMPLETE',
+      startedAt,
+      completedAt: Date.now(),
+      verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
+      units,
+    };
+  }
+}
