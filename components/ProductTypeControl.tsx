@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Save, Settings2, ShieldCheck } from 'lucide-react';
+import { ChevronDown, ChevronUp, RotateCcw, Save, Settings2, ShieldCheck } from 'lucide-react';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import { productCodeRuleMissingFields } from '../server/src/product-code';
 import {
@@ -49,7 +49,7 @@ const RELAY_REASON_LABELS: Record<string, string> = {
   FAULT_INTERNAL_STATE_NOT_SET: '内部故障状态未成立',
   FAULT_RELAY_NOT_ACTUATED: '故障实体继电器未动作',
   FAULT_TRIGGERED_ALARM_RELAY: '故障阶段火警继电器误动作',
-  FAULT_RESET_COMMAND_FAILED: '故障阶段复位指令失败',
+  FAULT_RESET_COMMAND_FAILED: '故障模拟复位指令失败',
   FAULT_RESET_INTERNAL_FAILED: '故障内部状态未复位',
   FAULT_RELAY_STUCK_AFTER_RESET: '故障继电器复位后未恢复',
   RELAY_BASELINE_READ_FAILED: '继电器基线读取失败',
@@ -79,8 +79,11 @@ function probeLabel(key: string): string {
 }
 
 function productModel(config: ProductDetectionConfig | null, type: ProductType): string {
-  return config?.profiles?.[type]?.productModel?.trim()
-    || MODEL_FALLBACKS[type];
+  return config?.profiles?.[type]?.productModel?.trim() || MODEL_FALLBACKS[type];
+}
+
+function cloneConfig(config: ProductDetectionConfig): ProductDetectionConfig {
+  return JSON.parse(JSON.stringify(config)) as ProductDetectionConfig;
 }
 
 function allocationText(precheck: ProductPrecheckReport | null): { text: string; tone: 'muted' | 'pass' | 'warn' | 'fail' } {
@@ -96,8 +99,8 @@ function allocationText(precheck: ProductPrecheckReport | null): { text: string;
 }
 
 const palette = {
-  panelTop: 'rgba(8,37,55,.97)',
-  panelBottom: 'rgba(4,19,31,.97)',
+  panelTop: 'rgba(8,37,55,.98)',
+  panelBottom: 'rgba(4,19,31,.98)',
   border: 'rgba(28,207,225,.40)',
   borderSoft: 'rgba(43,114,130,.62)',
   text: '#ccecf5',
@@ -134,21 +137,23 @@ function toneColor(tone: 'muted' | 'pass' | 'warn' | 'fail'): string {
 
 export function ProductTypeControl({ config, locked, precheck, busy, detectorVerdict, onUpdate }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState<ProductDetectionConfig | null>(config);
+  const [draft, setDraft] = useState<ProductDetectionConfig | null>(config ? cloneConfig(config) : null);
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (config) setDraft(JSON.parse(JSON.stringify(config)) as ProductDetectionConfig);
+    if (config) setDraft(cloneConfig(config));
   }, [config]);
 
   const profile = useMemo(() => config ? selectedProductProfile(config) : null, [config]);
   const draftProfile = useMemo(() => draft ? selectedProductProfile(draft) : null, [draft]);
+  const dirty = useMemo(() => Boolean(config && draft && JSON.stringify(config) !== JSON.stringify(draft)), [config, draft]);
   const selectedModel = config ? productModel(config, config.selectedType) : '产品型号未加载';
   const failedUnits = precheck?.units.filter((unit) => unit.verdict === 'FAIL') ?? [];
   const noDataUnits = detectorVerdict?.units.filter((unit) => (unit.noDataProbes?.length ?? 0) > 0) ?? [];
-  const codeMissing = profile ? productCodeRuleMissingFields(profile.productCodeRule) : [];
+  const savedCodeMissing = profile ? productCodeRuleMissingFields(profile.productCodeRule) : [];
+  const draftCodeMissing = draftProfile ? productCodeRuleMissingFields(draftProfile.productCodeRule) : [];
   const allocation = allocationText(precheck);
   const relayReport = precheck?.relayFunctionalTest;
   const relayText = !profile?.relayFunctionalTestEnabled
@@ -161,15 +166,16 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
     : relayReport?.verdict === 'PASS' ? palette.pass : relayReport?.verdict === 'FAIL' ? palette.fail : palette.warn;
   const precheckTone = precheck?.verdict === 'FAIL' ? palette.fail : precheck?.verdict === 'PASS' ? palette.pass : palette.warn;
 
-  const switchProductModel = async (model: string) => {
-    if (!config || locked || switching) return;
-    const selectedType = PRODUCT_TYPE_ORDER.find((type) => productModel(config, type) === model);
-    if (!selectedType || selectedType === config.selectedType) return;
+  const switchProductModel = async (selectedType: ProductType) => {
+    if (!config || locked || switching || selectedType === config.selectedType) return;
+    if (dirty) {
+      setMessage('当前型号存在未保存修改，请先保存或撤销后再切换型号');
+      return;
+    }
     setSwitching(true);
     setMessage('');
     try {
       await onUpdate({ selectedType });
-      setDraft((current) => current ? { ...current, selectedType } : current);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -187,6 +193,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
         [type]: { ...draftProfile, ...patch },
       },
     });
+    setMessage('');
   };
 
   const updateDraftCode = (patch: Partial<NonNullable<typeof draftProfile>['productCodeRule']>) => {
@@ -194,8 +201,14 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
     updateDraftProfile({ productCodeRule: { ...draftProfile.productCodeRule, ...patch } });
   };
 
+  const resetDraft = () => {
+    if (!config) return;
+    setDraft(cloneConfig(config));
+    setMessage('已撤销未保存修改');
+  };
+
   const saveCurrentProfile = async () => {
-    if (!draft || locked || saving) return;
+    if (!draft || locked || saving || !dirty) return;
     setSaving(true);
     setMessage('');
     try {
@@ -214,9 +227,11 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       position: 'fixed',
       zIndex: 80,
       top: 100,
-      right: 28,
-      width: expanded ? 420 : 300,
-      maxWidth: 'calc(100vw - 32px)',
+      right: 'clamp(12px, 2vw, 28px)',
+      width: expanded ? 430 : 300,
+      maxWidth: 'calc(100vw - 24px)',
+      maxHeight: expanded ? 'calc(100vh - 124px)' : 'none',
+      overflowY: expanded ? 'auto' : 'visible',
       color: palette.text,
       border: `1px solid ${palette.border}`,
       background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`,
@@ -247,9 +262,10 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       <span style={{ minWidth: 0 }}>
         <span style={{ display: 'block', color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.15em' }}>PRODUCT MODEL</span>
         <strong style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: palette.title, fontSize: 15, letterSpacing: '.03em' }}>{selectedModel}</strong>
-        <span style={{ display: 'flex', gap: 10, marginTop: 5, color: palette.muted, fontSize: 10.5 }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 5, color: palette.muted, fontSize: 10.5 }}>
           <span style={{ color: locked ? palette.warn : palette.pass }}>{locked ? '流程已锁定' : '可选择型号'}</span>
           <span style={{ color: precheckTone }}>{statusText(precheck, busy)}</span>
+          {dirty && <span style={{ color: palette.warn }}>有未保存修改</span>}
         </span>
       </span>
       <span style={{ display: 'grid', placeItems: 'center', width: 31, height: 31, color: palette.cyan, border: `1px solid ${palette.borderSoft}`, background: '#071a25' }}>
@@ -260,37 +276,54 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
     {expanded && <div style={{ padding: '13px 14px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
         <div>
-          <div style={{ color: palette.title, fontWeight: 700, fontSize: 13 }}>产品型号</div>
-          <div style={{ marginTop: 2, color: palette.dim, fontSize: 10 }}>直接选择实际生产型号</div>
+          <div style={{ color: palette.title, fontWeight: 700, fontSize: 13 }}>生产产品型号</div>
+          <div style={{ marginTop: 2, color: palette.dim, fontSize: 10 }}>选择实际生产型号，内部产品类型不向操作员显示</div>
         </div>
         <Settings2 size={16} color={palette.cyan} />
       </div>
 
       <select
-        value={selectedModel}
+        value={config?.selectedType ?? 'THREE_WAVELENGTH'}
         disabled={!config || locked || switching}
-        onChange={(event) => void switchProductModel(event.target.value)}
+        onChange={(event) => void switchProductModel(event.target.value as ProductType)}
         style={{ ...fieldStyle, padding: '9px 10px', color: palette.title, fontSize: 13, fontWeight: 700 }}
       >
         {PRODUCT_TYPE_ORDER.map((type) => {
           const model = productModel(config, type);
           const label = config?.profiles?.[type]?.label?.trim();
-          return <option value={model} key={type}>{model}{label ? ` · ${label}` : ''}</option>;
+          return <option value={type} key={type}>{model}{label ? ` · ${label}` : ''}</option>;
         })}
       </select>
 
       {draftProfile && <>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 11 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 8, marginTop: 11 }}>
+          <label style={{ color: palette.muted, fontSize: 10.5 }}>
+            型号名称
+            <input
+              value={draftProfile.productModel}
+              disabled={locked}
+              placeholder={MODEL_FALLBACKS[draft?.selectedType ?? 'THREE_WAVELENGTH']}
+              onChange={(event) => updateDraftProfile({ productModel: event.target.value })}
+              style={{ ...fieldStyle, marginTop: 5, color: palette.title, fontWeight: 700 }}
+            />
+          </label>
           <label style={{ color: palette.muted, fontSize: 10.5 }}>
             软件版本基准
             <input
               value={draftProfile.expectedSoftwareVersion}
               disabled={locked}
-              placeholder="例如 01.02.03.04"
+              placeholder="例如 90.26.08.11"
               onChange={(event) => updateDraftProfile({ expectedSoftwareVersion: event.target.value })}
               style={{ ...fieldStyle, marginTop: 5 }}
             />
           </label>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 8, marginTop: 8 }}>
+          <div style={{ color: palette.muted, fontSize: 10.5 }}>
+            产品类别
+            <div style={{ ...fieldStyle, marginTop: 5, color: palette.dim, opacity: .75 }}>{draftProfile.label}</div>
+          </div>
           <label style={{ color: palette.muted, fontSize: 10.5 }}>
             探头数量
             <input
@@ -346,19 +379,19 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
               />
             </label>)}
           </div>
-          <div style={{ marginTop: 6, color: codeMissing.length ? palette.warn : palette.dim, fontSize: 9.5 }}>
-            {codeMissing.length ? '编号规则未完整配置；不影响正式检测。' : '流水号按产品型号独立，每月从 00001 重新开始。'}
+          <div style={{ marginTop: 6, color: draftCodeMissing.length ? palette.warn : palette.dim, fontSize: 9.5 }}>
+            {draftCodeMissing.length ? '当前草稿的编号规则未完整配置；仍允许保存，也不会阻断正式检测。' : '流水号按产品型号独立，每月从 00001 重新开始。'}
           </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 11, paddingTop: 10, borderTop: `1px solid ${palette.borderSoft}`, fontSize: 10.5 }}>
-          <span style={{ color: palette.muted }}>版本 <b style={{ color: palette.title }}>{profile?.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}</b></span>
-          <span style={{ color: palette.muted }}>探头 <b style={{ color: palette.title }}>{profile?.expectedProbeCount ?? '-'} 路</b></span>
-          <span style={{ color: palette.muted }}>继电器 <b style={{ color: relayTone }}>{relayText}</b></span>
-          <span style={{ color: palette.muted }}>编号 <b style={{ color: codeMissing.length ? palette.warn : palette.pass }}>{codeMissing.length ? '规则不完整' : '规则完整'}</b></span>
+          <span style={{ color: palette.muted }}>已保存版本 <b style={{ color: palette.title }}>{profile?.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}</b></span>
+          <span style={{ color: palette.muted }}>已保存探头 <b style={{ color: palette.title }}>{profile?.expectedProbeCount ?? '-'} 路</b></span>
+          <span style={{ color: palette.muted }}>继电器结果 <b style={{ color: relayTone }}>{relayText}</b></span>
+          <span style={{ color: palette.muted }}>编号规则 <b style={{ color: savedCodeMissing.length ? palette.warn : palette.pass }}>{savedCodeMissing.length ? '未完整配置' : '已配置'}</b></span>
         </div>
 
-        <div style={{ marginTop: 9, padding: '7px 8px', color: toneColor(allocation.tone), border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10 }}>产品编号：{allocation.text}</div>
+        <div style={{ marginTop: 9, padding: '7px 8px', color: toneColor(allocation.tone), border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10 }}>本批产品编号：{allocation.text}</div>
 
         {precheck && <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${palette.borderSoft}`, color: palette.muted, fontSize: 10 }}>
           <div style={{ color: precheckTone }}>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '预检通过' : '等待结果'}</div>
@@ -376,26 +409,33 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
         </div>}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 11 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: locked ? palette.warn : palette.dim, fontSize: 9.5 }}>
-            <ShieldCheck size={12} />{locked ? '流程运行中：当前仅可查看配置' : '修改后点击保存，配置将永久保存'}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: locked ? palette.warn : dirty ? palette.warn : palette.dim, fontSize: 9.5 }}>
+            <ShieldCheck size={12} />{locked ? '流程运行中：当前仅可查看配置' : dirty ? '存在未保存修改' : '当前配置已与后台同步'}
           </span>
-          <button
-            type="button"
-            disabled={locked || saving}
-            onClick={() => void saveCurrentProfile()}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 11px',
-              color: '#06202b', border: `1px solid ${palette.cyan}`, background: palette.cyan,
-              cursor: locked || saving ? 'not-allowed' : 'pointer', opacity: locked || saving ? .5 : 1,
-              font: 'inherit', fontSize: 10.5, fontWeight: 700,
-            }}
-          >
-            <Save size={13} />{saving ? '保存中…' : '保存配置'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {dirty && !locked && <button
+              type="button"
+              onClick={resetDraft}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 9px', color: palette.text, border: `1px solid ${palette.borderSoft}`, background: palette.field, cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}
+            ><RotateCcw size={12} />撤销</button>}
+            <button
+              type="button"
+              disabled={locked || saving || !dirty}
+              onClick={() => void saveCurrentProfile()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 11px',
+                color: '#06202b', border: `1px solid ${palette.cyan}`, background: palette.cyan,
+                cursor: locked || saving || !dirty ? 'not-allowed' : 'pointer', opacity: locked || saving || !dirty ? .45 : 1,
+                font: 'inherit', fontSize: 10.5, fontWeight: 700,
+              }}
+            >
+              <Save size={13} />{saving ? '保存中…' : '保存配置'}
+            </button>
+          </div>
         </div>
       </>}
 
-      {message && <div style={{ marginTop: 8, color: message === '配置已保存' ? palette.pass : palette.fail, fontSize: 10 }}>{message}</div>}
+      {message && <div style={{ marginTop: 8, color: message.includes('已保存') || message.includes('已撤销') ? palette.pass : palette.fail, fontSize: 10 }}>{message}</div>}
     </div>}
   </section>;
 }
