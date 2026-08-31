@@ -10,6 +10,7 @@ import type { FlameDetectorConfig } from '../types';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductTypeControl } from './ProductTypeControl';
+import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
 
@@ -162,6 +163,7 @@ export function FieldProcessStatusApp() {
       detectorVerdict={detectorVerdict}
       onUpdate={updateProductConfig}
     />
+    <ProductionConfigurationPanel backendHttpUrl={HTTP} locked={productLocked} />
     <WutosDashboard
       status={status}
       detectors={detectors}
