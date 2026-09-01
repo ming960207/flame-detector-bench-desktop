@@ -45,6 +45,7 @@ const RELAY_REASON_LABELS: Record<string, string> = {
   ALARM_RESET_COMMAND_FAILED: '火警阶段复位指令失败',
   ALARM_RESET_INTERNAL_FAILED: '火警内部状态未复位',
   ALARM_RELAY_STUCK_AFTER_RESET: '火警继电器复位后未恢复',
+  ALARM_RELAY_ACTIVE_AT_BASELINE: '测试开始前火警继电器已处于动作态',
   FAULT_COMMAND_FAILED: '故障模拟指令失败',
   FAULT_INTERNAL_STATE_NOT_SET: '内部故障状态未成立',
   FAULT_RELAY_NOT_ACTUATED: '故障实体继电器未动作',
@@ -52,6 +53,7 @@ const RELAY_REASON_LABELS: Record<string, string> = {
   FAULT_RESET_COMMAND_FAILED: '故障模拟复位指令失败',
   FAULT_RESET_INTERNAL_FAILED: '故障内部状态未复位',
   FAULT_RELAY_STUCK_AFTER_RESET: '故障继电器复位后未恢复',
+  FAULT_RELAY_ACTIVE_AT_BASELINE: '测试开始前故障继电器已处于动作态',
   RELAY_BASELINE_READ_FAILED: '继电器基线读取失败',
 };
 
@@ -63,14 +65,35 @@ function statusText(precheck: ProductPrecheckReport | null, busy: boolean): stri
 }
 
 function reasonText(reason: string): string {
-  if (reason.startsWith('RELAY:')) {
-    const raw = reason.slice('RELAY:'.length);
-    const stripped = raw.replace(/^ALARM:/, '').replace(/^FAULT:/, '');
+  const namespacedRelayReason = reason.startsWith('RELAY:');
+  const raw = namespacedRelayReason ? reason.slice('RELAY:'.length) : reason;
+  const phaseStripped = raw.replace(/^(ALARM|FAULT):/, '');
+  const isRelayReason = namespacedRelayReason
+    || phaseStripped.startsWith('ALARM_')
+    || phaseStripped.startsWith('FAULT_')
+    || phaseStripped.startsWith('DIO_')
+    || phaseStripped.startsWith('RELAY_');
+  if (isRelayReason) {
+    const stripped = phaseStripped;
     if (raw.includes('RELAY_TEST_GLOBAL_DISABLED')) return '型号要求继电器测试，但设备级总开关未启用';
-    if (raw.includes('RELAY_FEEDBACK_MAPPING_MISSING')) return '型号要求继电器测试，但 PLC DI 映射未完整配置';
-    return RELAY_REASON_LABELS[stripped] ?? raw;
+    if (raw.includes('DIO_NOT_CONFIGURED')) return '型号要求继电器测试，但 DIO Modbus TCP 参数未完整配置';
+    if (raw.includes('RELAY_FEEDBACK_MAPPING_MISSING')) return '型号要求继电器测试，但 DIO 反馈通道未完整配置';
+    if (raw.includes('_DI_OUT_OF_RANGE')) return 'DIO 反馈通道超出当前输入数量范围';
+    if (raw.startsWith('RELAY_FEEDBACK_READ_FAILED:')) return `DIO 反馈读取失败（${raw.slice('RELAY_FEEDBACK_READ_FAILED:'.length)}）`;
+    return RELAY_REASON_LABELS[stripped] ?? RELAY_REASON_LABELS[raw] ?? raw;
   }
   return PRECHECK_REASON_LABELS[reason] ?? reason;
+}
+
+function relayActionText(verdict: string): string {
+  if (verdict === 'PASS') return '通过';
+  if (verdict === 'FAIL') return '失败';
+  if (verdict === 'SKIPPED') return '跳过';
+  return '等待';
+}
+
+function relayActionReasons(action: { reasons: string[] }): string[] {
+  return [...new Set(action.reasons.map(reasonText))];
 }
 
 function probeLabel(key: string): string {
@@ -403,6 +426,22 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
         {precheck && <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${palette.borderSoft}`, color: palette.muted, fontSize: 10 }}>
           <div style={{ color: precheckTone }}>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '预检通过' : '等待结果'}</div>
           {relayReport && <div style={{ marginTop: 4, color: relayTone }}>继电器：{relayReport.mode} · {relayText}</div>}
+          {relayReport && <section style={{ marginTop: 10, paddingTop: 9, borderTop: `1px solid ${palette.borderSoft}` }} aria-label="继电器功能测试结果">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <b style={{ color: palette.title, fontSize: 11.5 }}>最近一次继电器测试结果</b>
+              <span style={{ color: relayTone, fontSize: 10.5 }}>{relayText}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6, marginTop: 7 }}>
+              {relayReport.units.map((unit) => {
+                const reasons = [...relayActionReasons(unit.alarm), ...relayActionReasons(unit.fault)];
+                return <div key={unit.detectorIndex} style={{ minWidth: 0, padding: '6px 7px', border: `1px solid ${unit.verdict === 'PASS' ? 'rgba(98,231,182,.32)' : 'rgba(242,119,105,.32)'}`, background: unit.verdict === 'PASS' ? 'rgba(10,54,48,.42)' : 'rgba(64,20,20,.32)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}><b style={{ color: palette.title, fontSize: 10.5 }}>D{unit.detectorIndex}</b><strong style={{ color: unit.verdict === 'PASS' ? palette.pass : palette.fail, fontSize: 10 }}>{relayActionText(unit.verdict)}</strong></div>
+                  <div style={{ marginTop: 4, color: palette.muted, fontSize: 9.5 }}>火警 {relayActionText(unit.alarm.verdict)} · 故障 {relayActionText(unit.fault.verdict)}</div>
+                  {reasons.length > 0 && <div style={{ marginTop: 4, color: palette.fail, fontSize: 9.5, lineHeight: 1.45 }}>{reasons.join('；')}</div>}
+                </div>;
+              })}
+            </div>
+          </section>}
           {failedUnits.length > 0 && <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
             {failedUnits.slice(0, 6).map((unit) => <div key={unit.index} style={{ padding: '5px 6px', color: '#ffaaa0', border: '1px solid rgba(242,119,105,.30)', background: 'rgba(64,20,20,.28)' }}>
               <b>D{unit.index}</b> · {unit.reasons.map(reasonText).join(' / ')}

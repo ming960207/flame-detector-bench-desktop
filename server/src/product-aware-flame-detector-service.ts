@@ -16,6 +16,7 @@ import { RelayFunctionalTestCoordinator, type RelayDetectorPort, type RelayFeedb
 import {
   DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG,
   normalizeRelayFunctionalTestConfig,
+  relayDioConfigReady,
   relayFunctionalTestMissingMappings,
   type RelayFunctionalTestConfig,
   type RelayFunctionalTestReport,
@@ -273,6 +274,7 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     const missingMappings = relayFunctionalTestMissingMappings(this.relayConfig, indexes);
     const infraReasons: string[] = [];
     if (!this.relayConfig.enabled) infraReasons.push('RELAY_TEST_GLOBAL_DISABLED');
+    if (!relayDioConfigReady(this.relayConfig.dio)) infraReasons.push('DIO_NOT_CONFIGURED');
     if (missingMappings.length > 0) infraReasons.push(`RELAY_FEEDBACK_MAPPING_MISSING:${missingMappings.join(',')}`);
     if (infraReasons.length > 0) {
       return infrastructureFailureReport(batchId, this.relayConfig.mode, indexes, infraReasons);

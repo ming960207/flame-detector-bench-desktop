@@ -11,10 +11,8 @@ import {
 function createMapping(indexes: number[]): RelayFeedbackMapping[] {
   return indexes.map((index) => ({
     detectorIndex: index,
-    alarmInputKey: `d${index}Alarm`,
-    faultInputKey: `d${index}Fault`,
-    alarmInputAddress: `I2.${(index - 1) * 2}`,
-    faultInputAddress: `I2.${(index - 1) * 2 + 1}`,
+    alarmInputAddress: `X${(index - 1) * 2 + 1}`,
+    faultInputAddress: `X${(index - 1) * 2 + 2}`,
     alarmNormalLevel: false,
     faultNormalLevel: false,
   }));
@@ -25,8 +23,7 @@ test('relay mapping readiness requires both physical DI addresses for every enab
     enabled: true,
     mappings: [{
       detectorIndex: 1,
-      alarmInputKey: 'd1Alarm', faultInputKey: 'd1Fault',
-      alarmInputAddress: 'I2.0', faultInputAddress: '',
+      alarmInputAddress: 'X1', faultInputAddress: '',
       alarmNormalLevel: false, faultNormalLevel: false,
     }],
   });
@@ -35,7 +32,8 @@ test('relay mapping readiness requires both physical DI addresses for every enab
 
   const ready = normalizeRelayFunctionalTestConfig({
     ...config,
-    mappings: [{ ...config.mappings[0], faultInputAddress: 'I2.1' }],
+    dio: { ...config.dio, host: '192.168.1.100' },
+    mappings: [{ ...config.mappings[0], faultInputAddress: 'X2' }],
   }, config);
   assert.deepEqual(relayFunctionalTestMissingMappings(ready, [1]), []);
   assert.equal(relayFunctionalTestReady(ready, [1]), true);
@@ -46,10 +44,7 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
     [1, { fire: false, fault: false }],
     [2, { fire: false, fault: false }],
   ]);
-  const inputs: Record<string, boolean> = {
-    d1Alarm: false, d1Fault: false,
-    d2Alarm: false, d2Fault: false,
-  };
+  const inputs: Record<string, boolean> = { X1: false, X2: false, X3: false, X4: false };
   const events: string[] = [];
 
   const detectors: RelayDetectorPort = {
@@ -58,14 +53,14 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
       const label = state.fire && state.fault ? 'alarm+fault' : state.fire ? 'alarm' : state.fault ? 'fault' : 'normal';
       events.push(`simulate:${index}:${label}`);
       internal.set(index, { ...state });
-      inputs[`d${index}Alarm`] = state.fire;
-      inputs[`d${index}Fault`] = state.fault;
+      inputs[`X${(index - 1) * 2 + 1}`] = state.fire;
+      inputs[`X${(index - 1) * 2 + 2}`] = state.fault;
     },
     async reset(index) {
       events.push(`reset:${index}`);
       internal.set(index, { fire: false, fault: false });
-      inputs[`d${index}Alarm`] = false;
-      inputs[`d${index}Fault`] = false;
+      inputs[`X${(index - 1) * 2 + 1}`] = false;
+      inputs[`X${(index - 1) * 2 + 2}`] = false;
     },
     async readLatched(index) {
       return { ...(internal.get(index) ?? { fire: false, fault: false }) };
@@ -100,24 +95,21 @@ test('DIAGNOSTIC completes one detector before activating the next detector', as
     [1, { fire: false, fault: false }],
     [2, { fire: false, fault: false }],
   ]);
-  const inputs: Record<string, boolean> = {
-    d1Alarm: false, d1Fault: false,
-    d2Alarm: false, d2Fault: false,
-  };
+  const inputs: Record<string, boolean> = { X1: false, X2: false, X3: false, X4: false };
   const events: string[] = [];
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1, 2],
     async simulate(index, state) {
       events.push(`D${index}:${state.fire ? 'alarm' : state.fault ? 'fault' : 'normal'}`);
       internal.set(index, { ...state });
-      inputs[`d${index}Alarm`] = state.fire;
-      inputs[`d${index}Fault`] = state.fault;
+      inputs[`X${(index - 1) * 2 + 1}`] = state.fire;
+      inputs[`X${(index - 1) * 2 + 2}`] = state.fault;
     },
     async reset(index) {
       events.push(`D${index}:reset`);
       internal.set(index, { fire: false, fault: false });
-      inputs[`d${index}Alarm`] = false;
-      inputs[`d${index}Fault`] = false;
+      inputs[`X${(index - 1) * 2 + 1}`] = false;
+      inputs[`X${(index - 1) * 2 + 2}`] = false;
     },
     async readLatched(index) { return { ...(internal.get(index) ?? { fire: false, fault: false }) }; },
   };
@@ -142,18 +134,18 @@ test('DIAGNOSTIC completes one detector before activating the next detector', as
 
 test('FAST_BATCH reports alarm contact failure without invalidating a passing fault phase', async () => {
   let internal = { fire: false, fault: false };
-  const inputs: Record<string, boolean> = { d1Alarm: false, d1Fault: false };
+  const inputs: Record<string, boolean> = { X1: false, X2: false };
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       internal = { ...state };
-      inputs.d1Alarm = false; // 火警阶段模拟 Alarm 实体触点不动作
-      inputs.d1Fault = state.fault;
+      inputs.X1 = false; // 火警阶段模拟 Alarm 实体触点不动作
+      inputs.X2 = state.fault;
     },
     async reset() {
       internal = { fire: false, fault: false };
-      inputs.d1Alarm = false;
-      inputs.d1Fault = false;
+      inputs.X1 = false;
+      inputs.X2 = false;
     },
     async readLatched() { return { ...internal }; },
   };
@@ -175,22 +167,49 @@ test('FAST_BATCH reports alarm contact failure without invalidating a passing fa
   assert.ok(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
 });
 
+test('DIO feedback read failures are reported as communication failures', async () => {
+  let internal = { fire: false, fault: false };
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) { internal = { ...state }; },
+    async reset() { internal = { fire: false, fault: false }; },
+    async readLatched() { return { ...internal }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    dio: { host: '192.168.1.100' },
+    stableSamples: 1,
+    sampleIntervalMs: 50,
+    feedbackTimeoutMs: 200,
+    resetTimeoutMs: 200,
+    mappings: createMapping([1]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, {
+    async readInputs() { throw Object.assign(new Error('socket closed'), { code: 'DIO_CONNECTION_FAILED' }); },
+  }, config);
+  const report = await coordinator.run('dio-fail');
+
+  assert.equal(report.verdict, 'FAIL');
+  assert.ok(report.units[0]?.alarm.reasons.includes('RELAY_FEEDBACK_READ_FAILED:DIO_CONNECTION_FAILED'));
+  assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'), false);
+});
+
 test('combined alarm+fault simulation is never used by FAST_BATCH production flow', async () => {
   let combinedCalls = 0;
   let internal = { fire: false, fault: false };
-  const inputs: Record<string, boolean> = { d1Alarm: false, d1Fault: false };
+  const inputs: Record<string, boolean> = { X1: false, X2: false };
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       if (state.fire && state.fault) combinedCalls += 1;
       internal = { ...state };
-      inputs.d1Alarm = state.fire;
-      inputs.d1Fault = state.fault;
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
     },
     async reset() {
       internal = { fire: false, fault: false };
-      inputs.d1Alarm = false;
-      inputs.d1Fault = false;
+      inputs.X1 = false;
+      inputs.X2 = false;
     },
     async readLatched() { return { ...internal }; },
   };

@@ -229,7 +229,7 @@ export function FieldProcessStatusApp() {
           </div>}
 
           {detailTab === 'production' && <div className="wutos-detail-production">
-            <p className="wutos-detail-section-note">正式检验记录、历史批次、12 路继电器反馈 DI、检验员及表单参数均从本详情页进入；主页面不再额外悬浮按钮。</p>
+            <p className="wutos-detail-section-note">正式检验记录、历史批次、12 路继电器反馈通道、检验员及表单参数均从本详情页进入；主页面不再额外悬浮按钮。</p>
             <ProductionConfigurationPanel backendHttpUrl={HTTP} locked={productLocked} />
           </div>}
         </div>

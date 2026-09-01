@@ -8,7 +8,6 @@ import {
 import { FileFieldTestResultLogger } from './closure/field-test-result-log.js';
 import { loadPLCConfigs, mergeWithDefaults } from './plc-config-store.js';
 import { PLCProcessMonitor } from './plc-process-monitor.js';
-import type { PLCSignalDefinition } from './plc-program-contract.js';
 import {
   DEFAULT_PRODUCT_DETECTION_CONFIG,
   normalizeProductDetectionConfig,
@@ -17,9 +16,10 @@ import { ProductAwareFlameDetectorService } from './product-aware-flame-detector
 import {
   DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG,
   normalizeRelayFunctionalTestConfig,
+  relayDioConfigReady,
   relayFunctionalTestMissingMappings,
-  type RelayFunctionalTestConfig,
 } from './relay-functional-test.js';
+import { DioModbusTcpInputSource, RelayFeedbackDioError } from './relay-feedback-dio.js';
 import {
   DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
   normalizeProductionInspectionRecordConfig,
@@ -30,27 +30,6 @@ import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from '.
 
 export interface ProductAwareFieldStatusRuntime extends FieldStatusRuntime {
   readonly productionRuns: ProductionRunCoordinator;
-}
-
-function relayInputDefinitions(relayConfig: RelayFunctionalTestConfig): PLCSignalDefinition[] {
-  const definitions: PLCSignalDefinition[] = [];
-  for (const mapping of relayConfig.mappings) {
-    if (mapping.alarmInputAddress) {
-      definitions.push({
-        key: mapping.alarmInputKey,
-        address: mapping.alarmInputAddress,
-        label: `探测器${mapping.detectorIndex}火警继电器反馈`,
-      });
-    }
-    if (mapping.faultInputAddress) {
-      definitions.push({
-        key: mapping.faultInputKey,
-        address: mapping.faultInputAddress,
-        label: `探测器${mapping.detectorIndex}故障继电器反馈`,
-      });
-    }
-  }
-  return definitions;
 }
 
 function safeDownloadName(value: string): string {
@@ -81,10 +60,11 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
   );
 
-  const source = new PLCProcessMonitor(config.plcs[0]!, relayInputDefinitions(relayConfig));
+  const source = new PLCProcessMonitor(config.plcs[0]!);
+  const relayFeedback = new DioModbusTcpInputSource(relayConfig.dio);
   const detectors = new ProductAwareFlameDetectorService(config.flame);
   detectors.setRelayFunctionalTestConfig(relayConfig);
-  detectors.setRelayFeedbackSource({ readInputs: () => source.getCurrent()?.io?.inputs });
+  detectors.setRelayFeedbackSource(relayFeedback);
 
   const runtime = createFieldStatusRuntime(
     source,
@@ -92,6 +72,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     new FileFieldTestResultLogger(),
     productConfig,
   );
+  const closeRuntime = runtime.close.bind(runtime);
 
   const productionRuns = new ProductionRunCoordinator(() => runtime.snapshot(), detectors);
   productionRuns.setRecordConfig(inspectionRecordConfig);
@@ -104,8 +85,10 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       relay: {
         config: relayConfig,
         missingMappings,
-        ready: relayConfig.enabled && missingMappings.length === 0,
+        ready: relayConfig.enabled && relayDioConfigReady(relayConfig.dio) && missingMappings.length === 0,
       },
+      dioReady: relayDioConfigReady(relayConfig.dio),
+      mappingReady: missingMappings.length === 0,
       recordConfig: inspectionRecordConfig,
     };
   };
@@ -134,11 +117,35 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       relayConfig = nextRelay;
       inspectionRecordConfig = nextRecord;
       detectors.setRelayFunctionalTestConfig(nextRelay);
-      source.updateExtraInputs(relayInputDefinitions(nextRelay));
+      await relayFeedback.updateConfig(nextRelay.dio);
       productionRuns.setRecordConfig(nextRecord);
       return res.json({ success: true, ...productionConfigPayload() });
     } catch (error) {
       return res.status(500).json({ code: 'PRODUCTION_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  runtime.app.post('/api/production-config/dio/test', requireDesktopMutation, async (req, res) => {
+    if (runtime.snapshot().summary.productSelectionLocked) {
+      return res.status(409).json({ code: 'PRODUCTION_CONFIG_LOCKED_DURING_PROCESS' });
+    }
+    const input = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body as Record<string, unknown>
+      : {};
+    const candidate = normalizeRelayFunctionalTestConfig({ dio: input.dio }, relayConfig).dio;
+    const probe = new DioModbusTcpInputSource(candidate);
+    try {
+      const result = await probe.testConnection();
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      const code = error instanceof RelayFeedbackDioError ? error.code : 'DIO_CONNECTION_FAILED';
+      return res.status(code === 'DIO_NOT_CONFIGURED' ? 400 : 503).json({
+        success: false,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      await probe.disconnect();
     }
   });
 
@@ -214,5 +221,11 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
 
   const port = await runtime.listen();
   console.log(`[现场状态] 已启动完整产品检测运行时：http://127.0.0.1:${port}`);
-  return Object.assign(runtime, { productionRuns });
+  return Object.assign(runtime, {
+    productionRuns,
+    async close(): Promise<void> {
+      await relayFeedback.disconnect();
+      await closeRuntime();
+    },
+  });
 }

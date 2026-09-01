@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, ExternalLink, FileText, RefreshCw, Save } from 'lucide-react';
-import type { RelayFunctionalTestConfig } from '../server/src/relay-functional-test';
+import type { RelayDioConfig, RelayFunctionalTestConfig } from '../server/src/relay-functional-test';
 import type { ProductionInspectionRecordConfig } from '../server/src/production-inspection-record';
 
 interface Props {
@@ -12,6 +12,8 @@ interface RelayPayload {
   config: RelayFunctionalTestConfig;
   missingMappings: string[];
   ready: boolean;
+  dioReady?: boolean;
+  mappingReady?: boolean;
 }
 
 interface ProductionConfigPayload {
@@ -66,9 +68,24 @@ function configuredInputCount(relay: RelayPayload | null): number {
   if (!relay) return 0;
   return relay.config.mappings.reduce((count, mapping) => (
     count
-    + (mapping.alarmInputAddress?.trim() ? 1 : 0)
-    + (mapping.faultInputAddress?.trim() ? 1 : 0)
+    + (isDioChannelAddress(mapping.alarmInputAddress) ? 1 : 0)
+    + (isDioChannelAddress(mapping.faultInputAddress) ? 1 : 0)
   ), 0);
+}
+
+function isDioChannelAddress(value: string | undefined): boolean {
+  const match = /^X(\d+)$/.exec(value?.trim().toUpperCase() || '');
+  if (!match) return false;
+  const channel = Number(match[1]);
+  return Number.isInteger(channel) && channel >= 1 && channel <= 64;
+}
+
+function dioErrorText(code: string | undefined): string {
+  if (code === 'DIO_NOT_CONFIGURED') return '请先填写 DIO 模块 IP 地址';
+  if (code === 'DIO_CONNECTION_FAILED') return 'DIO 模块连接失败，请检查 IP、端口和网络';
+  if (code === 'DIO_RESPONSE_INVALID') return 'DIO 模块返回数据格式不正确';
+  if (code === 'DIO_READ_FAILED') return 'DIO 输入读取失败';
+  return code || 'DIO 连接测试失败';
 }
 
 function recordTime(timestamp: number): string {
@@ -85,10 +102,15 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
   const [loading, setLoading] = useState(false);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dioTesting, setDioTesting] = useState(false);
   const [message, setMessage] = useState('');
 
   const inputCount = useMemo(() => configuredInputCount(relay), [relay]);
   const mappingsComplete = inputCount === 12;
+ const relayReady = relay?.ready === true;
+ const dioReady = relay?.dioReady === true;
+ const mappingReady = relay?.mappingReady === true || mappingsComplete;
+  const messageIsSuccess = message.includes('已保存') || message.includes('测试成功');
 
   const loadRecords = useCallback(async () => {
     setRecordsLoading(true);
@@ -146,6 +168,28 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
     }
   };
 
+  const testDioConnection = async () => {
+    if (!relay || controlDisabled || dioTesting) return;
+    setDioTesting(true);
+    setMessage('正在测试 DIO Modbus TCP 连接…');
+    try {
+      const response = await fetch(`${backendHttpUrl}/api/production-config/dio/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dio: relay.config.dio }),
+      });
+      const result = await response.json() as { success?: boolean; inputCount?: number; code?: string; error?: string };
+      if (!response.ok || !result.success) {
+        throw new Error(dioErrorText(result.code) + (result.error && result.error !== result.code ? `：${result.error}` : ''));
+      }
+      setMessage(`DIO 连接测试成功，已读取 ${result.inputCount ?? relay.config.dio.inputCount} 路输入`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDioTesting(false);
+    }
+  };
+
   const openRecord = (batchId: string) => {
     window.open(`${backendHttpUrl}/api/production-records/${encodeURIComponent(batchId)}/html`, '_blank', 'noopener,noreferrer');
   };
@@ -182,12 +226,38 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
           <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <div>
+                <b style={{ color: palette.title, fontSize: 13 }}>继电器反馈检测源</b>
+                <div style={{ color: palette.muted, fontSize: 10.5, marginTop: 3 }}>DIO 仅在继电器功能测试期间读取，不改变 PLC I/O 页面，也不做后台实时监视。</div>
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 10.5 }}>
+                <b style={{ color: dioReady && mappingReady ? palette.pass : palette.warn }}>{dioReady && mappingReady ? '参数与映射完整' : '待完成配置'}</b>
+                <div style={{ marginTop: 2, color: palette.dim }}>{relayReady ? 'Modbus TCP · 测试可用' : 'Modbus TCP'}</div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.35fr .7fr .55fr .8fr', gap: 8 }}>
+              <label style={labelStyle}>设备 IP<input disabled={controlDisabled} value={relay.config.dio.host} placeholder="例如 192.168.1.100" onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, host: e.target.value } } })} style={inputStyle} /></label>
+              <label style={labelStyle}>TCP 端口<input disabled={controlDisabled} type="number" min={1} max={65535} value={relay.config.dio.port} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, port: Number(e.target.value) } } })} style={inputStyle} /></label>
+              <label style={labelStyle}>Unit ID<input disabled={controlDisabled} type="number" min={1} max={255} value={relay.config.dio.unitId} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, unitId: Number(e.target.value) } } })} style={inputStyle} /></label>
+              <label style={labelStyle}>读取功能码<select disabled={controlDisabled} value={relay.config.dio.functionCode} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, functionCode: Number(e.target.value) as RelayDioConfig['functionCode'] } } })} style={inputStyle}><option value="4">04 · 输入寄存器</option><option value="2">02 · 离散输入</option></select></label>
+              <label style={labelStyle}>起始地址<input disabled={controlDisabled} type="number" min={0} max={65535} value={relay.config.dio.startAddress} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, startAddress: Number(e.target.value) } } })} style={inputStyle} /></label>
+              <label style={labelStyle}>输入数量<input disabled={controlDisabled} type="number" min={1} max={64} value={relay.config.dio.inputCount} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, inputCount: Number(e.target.value) } } })} style={inputStyle} /></label>
+              <label style={labelStyle}>请求超时 ms<input disabled={controlDisabled} type="number" min={200} max={5000} value={relay.config.dio.requestTimeoutMs} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, dio: { ...relay.config.dio, requestTimeoutMs: Number(e.target.value) } } })} style={inputStyle} /></label>
+              <div style={{ display: 'flex', alignItems: 'end', gap: 7 }}>
+                <button type="button" onClick={() => void testDioConnection()} disabled={controlDisabled || dioTesting} style={{ flex: 1, minHeight: 30, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: controlDisabled || dioTesting ? 'wait' : 'pointer', font: 'inherit', fontSize: 10.5 }}>{dioTesting ? '测试中…' : '测试连接'}</button>
+              </div>
+            </div>
+            <div style={{ marginTop: 9, color: palette.dim, fontSize: 10, lineHeight: 1.6 }}>协议地址从 0 开始；X1 对应协议地址 0x0000。继电器反馈输入只参与测试判定，通讯失败时测试直接判定失败。</div>
+          </section>
+
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <div>
                 <b style={{ color: palette.title, fontSize: 13 }}>继电器功能测试</b>
                 <div style={{ color: palette.muted, fontSize: 10.5, marginTop: 3 }}>FAST_BATCH：6 台并行火警 → 复位 → 6 台并行故障 → 复位；不会使用火警+故障联合激励。</div>
               </div>
               <div style={{ textAlign: 'right', fontSize: 10.5 }}>
-                <b style={{ color: mappingsComplete ? palette.pass : palette.warn }}>PLC DI {inputCount}/12</b>
-                <div style={{ marginTop: 2, color: relay.config.enabled ? (mappingsComplete ? palette.pass : palette.warn) : palette.dim }}>{relay.config.enabled ? (mappingsComplete ? '设备级测试已具备映射条件' : '总开关已开，但映射未完整') : '设备级总开关关闭'}</div>
+                <b style={{ color: relayReady ? palette.pass : palette.warn }}>DIO 反馈 {inputCount}/12</b>
+                <div style={{ marginTop: 2, color: relay.config.enabled ? (relayReady ? palette.pass : palette.warn) : palette.dim }}>{relay.config.enabled ? (relayReady ? '设备级测试已具备执行条件' : mappingsComplete ? '映射已完整，但 DIO 参数未完整' : '总开关已开，但映射未完整') : '设备级测试总开关关闭'}</div>
               </div>
             </div>
 
@@ -200,22 +270,22 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
               <label style={labelStyle}>采样间隔 ms<input disabled={controlDisabled} type="number" min={50} max={1000} value={relay.config.sampleIntervalMs} onChange={(e) => setRelay({ ...relay, config: { ...relay.config, sampleIntervalMs: Number(e.target.value) } })} style={inputStyle} /></label>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '.5fr 1fr .9fr 1fr .9fr', gap: 7, color: palette.muted, fontSize: 10.5, padding: '0 6px 6px' }}><b>槽位</b><b>Alarm DI</b><b>Alarm 正常态</b><b>Fault DI</b><b>Fault 正常态</b></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '.5fr 1fr .9fr 1fr .9fr', gap: 7, color: palette.muted, fontSize: 10.5, padding: '0 6px 6px' }}><b>槽位</b><b>Alarm 反馈通道</b><b>Alarm 正常态</b><b>Fault 反馈通道</b><b>Fault 正常态</b></div>
             {relay.config.mappings.map((mapping, row) => {
               const update = (patch: Partial<typeof mapping>) => {
                 const mappings = relay.config.mappings.map((item, index) => index === row ? { ...item, ...patch } : item);
                 setRelay({ ...relay, config: { ...relay.config, mappings } });
               };
-              const rowReady = Boolean(mapping.alarmInputAddress?.trim() && mapping.faultInputAddress?.trim());
+              const rowReady = isDioChannelAddress(mapping.alarmInputAddress) && isDioChannelAddress(mapping.faultInputAddress);
               return <div key={mapping.detectorIndex} style={{ display: 'grid', gridTemplateColumns: '.5fr 1fr .9fr 1fr .9fr', gap: 7, alignItems: 'center', marginBottom: 6, padding: '5px 6px', border: `1px solid ${rowReady ? 'rgba(98,231,182,.18)' : 'rgba(226,195,99,.16)'}`, background: 'rgba(6,23,34,.72)' }}>
                 <b style={{ color: rowReady ? palette.pass : palette.warn }}>D{mapping.detectorIndex}</b>
-                <input disabled={controlDisabled} value={mapping.alarmInputAddress} placeholder="未配置" onChange={(e) => update({ alarmInputAddress: e.target.value })} style={inputStyle} />
+                <input disabled={controlDisabled} value={mapping.alarmInputAddress} placeholder="如 X1" onChange={(e) => update({ alarmInputAddress: e.target.value })} style={inputStyle} />
                 <select disabled={controlDisabled} value={mapping.alarmNormalLevel ? '1' : '0'} onChange={(e) => update({ alarmNormalLevel: e.target.value === '1' })} style={inputStyle}><option value="0">0 · NO 常见</option><option value="1">1 · NC 常见</option></select>
-                <input disabled={controlDisabled} value={mapping.faultInputAddress} placeholder="未配置" onChange={(e) => update({ faultInputAddress: e.target.value })} style={inputStyle} />
+                <input disabled={controlDisabled} value={mapping.faultInputAddress} placeholder="如 X2" onChange={(e) => update({ faultInputAddress: e.target.value })} style={inputStyle} />
                 <select disabled={controlDisabled} value={mapping.faultNormalLevel ? '1' : '0'} onChange={(e) => update({ faultNormalLevel: e.target.value === '1' })} style={inputStyle}><option value="0">0 · NO 常见</option><option value="1">1 · NC 常见</option></select>
               </div>;
             })}
-            <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>EM DE16 的实际 I 地址未确定前保持空即可，软件不会猜地址。具体型号启用继电器测试后，12 路映射不完整会明确记录为继电器预检失败，绝不会误判为合格。</p>
+            <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>请输入 DIO 通道 X1～X64。具体型号启用继电器测试后，DIO 参数或 12 路反馈映射不完整会明确记录为继电器预检失败，绝不会误判为合格。</p>
           </section>
 
           <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
@@ -249,10 +319,10 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             </div>
           </section>
 
-          {message && <div style={{ padding: '8px 10px', border: `1px solid ${message.includes('已保存') ? 'rgba(98,231,182,.28)' : 'rgba(242,119,105,.28)'}`, color: message.includes('已保存') ? palette.pass : palette.fail, background: 'rgba(6,23,34,.72)', fontSize: 10.5 }}>{message}</div>}
+          {message && <div style={{ padding: '8px 10px', border: `1px solid ${messageIsSuccess ? 'rgba(98,231,182,.28)' : 'rgba(242,119,105,.28)'}`, color: messageIsSuccess ? palette.pass : palette.fail, background: 'rgba(6,23,34,.72)', fontSize: 10.5 }}>{message}</div>}
 
           <footer style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，历史记录仍可查看/导出。' : mappingsComplete ? '12 路 DI 已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路 DI 未填写。`}</span>
+            <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，历史记录仍可查看/导出。' : mappingsComplete ? '12 路反馈通道已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路反馈通道未填写。`}</span>
             <div style={{ display: 'flex', gap: 7 }}>
               <button type="button" onClick={() => void openLatestRecord()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={13} />最新记录</button>
               <button type="button" disabled={saving || locked || !relay || !recordConfig} onClick={() => void save()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.cyan}`, background: palette.cyan, color: '#06202b', padding: '7px 12px', cursor: saving || locked ? 'not-allowed' : 'pointer', opacity: saving || locked ? .5 : 1, font: 'inherit', fontSize: 10.5, fontWeight: 700 }}><Save size={13} />{saving ? '保存中…' : '保存并应用'}</button>
