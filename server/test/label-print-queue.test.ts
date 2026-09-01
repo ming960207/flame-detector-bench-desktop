@@ -102,7 +102,7 @@ test('missing product code becomes BLOCKED without consuming the printable queue
   assert.equal(secondPrintable?.slot, 3, '编号缺失 D2 必须被跳过且不能阻塞后续槽位');
 });
 
-test('print failure stays FAILED for manual retry and printed label can be explicitly reprinted', async () => {
+test('physical print failure pauses queue until explicit retry and printed label can be reprinted', async () => {
   const { file, store } = await fixture();
   const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, `CODE-${offset + 1}`, '合格'));
   await store.enqueueProductionRecord(record(products), detectorVerdict());
@@ -112,12 +112,16 @@ test('print failure stays FAILED for manual retry and printed label can be expli
   await store.markFailed(claimed!.id, 'worker-a', 'PAPER_OUT');
   let view = await store.list();
   assert.equal(view.jobs.find((job) => job.id === claimed!.id)?.status, 'FAILED');
-  assert.equal((await store.claimNext('worker-a'))?.slot, 2, 'FAILED 不应自动再次领取，避免不确定出纸后的重复标签');
+  assert.equal(await store.claimNext('worker-a'), null, 'D1 失败未处理时必须暂停 D2-D6，避免标签顺序错位');
 
   await store.retry(claimed!.id);
   const retried = await store.claimNext('worker-a');
   assert.equal(retried?.slot, 1);
   await store.markPrinted(retried!.id, 'worker-a');
+  const next = await store.claimNext('worker-a');
+  assert.equal(next?.slot, 2, 'D1 恢复后必须继续 D2');
+  await store.markPrinted(next!.id, 'worker-a');
+
   await store.retry(retried!.id);
   view = await store.list();
   const reprint = view.jobs.find((job) => job.id === retried!.id);
