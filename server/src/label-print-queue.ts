@@ -209,6 +209,16 @@ export class LabelPrintQueueStore {
     return this.mutate(async () => {
       const now = Date.now();
       const recovered = this.recoverExpiredLeases(now);
+
+      // A failed physical-print attempt is ambiguous: the paper may have come out
+      // even if the ACK was lost. Stop automatic progression here so D2 cannot be
+      // printed after an unresolved D1 failure and the operator cannot mis-stick
+      // the shifted paper sequence. Explicit retry/reprint clears the barrier.
+      if (this.state.jobs.some((item) => item.status === 'FAILED')) {
+        if (recovered) await this.save();
+        return null;
+      }
+
       const job = this.state.jobs
         .filter((item) => item.status === 'WAITING')
         .sort((a, b) => a.createdAt - b.createdAt || a.slot - b.slot)[0];
