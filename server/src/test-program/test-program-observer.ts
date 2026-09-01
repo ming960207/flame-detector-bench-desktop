@@ -13,10 +13,14 @@ import { TestProgramArchiveStore } from './test-program-archive.js';
 import { TestProgramTracker } from './test-program-tracker.js';
 import {
   clonePlan,
+  DEFAULT_TEST_PROGRAM_OBSERVER_RUNTIME_CONFIG,
   derivePlanFromPLCSteps,
   normalizePLCSteps,
   normalizeStagePlan,
+  normalizeTestProgramObserverRuntimeConfig,
   type TestProgramConfigPayload,
+  type TestProgramObserverDiagnostics,
+  type TestProgramObserverRuntimeConfig,
   type TestProgramPLCStep,
   type TestProgramPlanSource,
 } from './test-program-plan-config.js';
@@ -36,6 +40,7 @@ export interface TestProgramObserverOptions {
   pollIntervalMs?: number;
   reconnectIntervalMs?: number;
   completionFlushDelayMs?: number;
+  staleAfterMs?: number;
   archiveStore?: TestProgramArchiveStore;
   tracker?: TestProgramTracker;
 }
@@ -52,9 +57,13 @@ function sourceError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-interface SavedPlanConfig {
-  plan: TestProgramStageDefinition[];
-  updatedAt: number;
+interface SavedObserverConfig {
+  /** 旧版使用 updatedAt；新版保留兼容读取。 */
+  updatedAt?: number;
+  planUpdatedAt?: number;
+  plan?: TestProgramStageDefinition[];
+  runtime?: TestProgramObserverRuntimeConfig;
+  runtimeUpdatedAt?: number;
 }
 
 interface FormalSystemConfigResponse {
@@ -64,23 +73,31 @@ interface FormalSystemConfigResponse {
   } | null;
 }
 
-function readSavedPlan(file: string): SavedPlanConfig | null {
+function readSavedConfig(file: string): SavedObserverConfig | null {
   if (!existsSync(file)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<SavedPlanConfig>;
-    if (!Array.isArray(parsed.plan)) return null;
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<SavedObserverConfig>;
+    const plan = Array.isArray(parsed.plan) ? normalizeStagePlan(parsed.plan) : undefined;
     return {
-      plan: normalizeStagePlan(parsed.plan),
-      updatedAt: Number.isFinite(Number(parsed.updatedAt)) ? Number(parsed.updatedAt) : Date.now(),
+      ...(plan ? { plan } : {}),
+      planUpdatedAt: Number.isFinite(Number(parsed.planUpdatedAt ?? parsed.updatedAt))
+        ? Number(parsed.planUpdatedAt ?? parsed.updatedAt)
+        : undefined,
+      runtime: parsed.runtime && typeof parsed.runtime === 'object'
+        ? normalizeTestProgramObserverRuntimeConfig(parsed.runtime)
+        : undefined,
+      runtimeUpdatedAt: Number.isFinite(Number(parsed.runtimeUpdatedAt))
+        ? Number(parsed.runtimeUpdatedAt)
+        : undefined,
     };
   } catch {
     return null;
   }
 }
 
-function writeSavedPlan(file: string, plan: readonly TestProgramStageDefinition[], updatedAt: number): void {
+function writeSavedConfig(file: string, config: SavedObserverConfig): void {
   const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(temporary, `${JSON.stringify({ plan: clonePlan(plan), updatedAt }, null, 2)}\n`, 'utf8');
+  writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
   renameSync(temporary, file);
 }
 
@@ -94,9 +111,10 @@ export class TestProgramObserver extends EventEmitter {
   readonly formalBackendWsUrl: string;
   readonly archiveStore: TestProgramArchiveStore;
   readonly tracker: TestProgramTracker;
-  private readonly pollIntervalMs: number;
-  private readonly reconnectIntervalMs: number;
-  private readonly completionFlushDelayMs: number;
+  private pollIntervalMs: number;
+  private reconnectIntervalMs: number;
+  private completionFlushDelayMs: number;
+  private staleAfterMs: number;
   private readonly planConfigFile: string;
   private pollTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -107,6 +125,7 @@ export class TestProgramObserver extends EventEmitter {
   private pollConnected = false;
   private planSource: TestProgramPlanSource = 'DEFAULT';
   private planUpdatedAt: number | null = null;
+  private runtimeUpdatedAt: number | null = null;
   private plcSteps: TestProgramPLCStep[] = [];
   private plcConfigUpdatedAt: number | null = null;
   private plcConfigFetchedAt = 0;
@@ -116,20 +135,31 @@ export class TestProgramObserver extends EventEmitter {
     super();
     this.formalBackendUrl = trimUrl(options.formalBackendUrl ?? process.env.FORMAL_BACKEND_URL ?? 'http://127.0.0.1:3003');
     this.formalBackendWsUrl = trimUrl(options.formalBackendWsUrl ?? process.env.FORMAL_BACKEND_WS_URL ?? wsUrlFromHttp(this.formalBackendUrl));
-    this.pollIntervalMs = Math.max(250, Math.floor(options.pollIntervalMs ?? (Number(process.env.TEST_PROGRAM_POLL_INTERVAL_MS) || 1_000)));
-    this.reconnectIntervalMs = Math.max(250, Math.floor(options.reconnectIntervalMs ?? 1_000));
-    this.completionFlushDelayMs = Math.max(50, Math.floor(options.completionFlushDelayMs ?? 350));
     this.archiveStore = options.archiveStore ?? new TestProgramArchiveStore();
     this.planConfigFile = join(this.archiveStore.directory, 'test-program-config.json');
-    const savedPlan = readSavedPlan(this.planConfigFile);
+
+    const optionRuntime = normalizeTestProgramObserverRuntimeConfig({
+      pollIntervalMs: options.pollIntervalMs ?? (Number(process.env.TEST_PROGRAM_POLL_INTERVAL_MS) || undefined),
+      reconnectIntervalMs: options.reconnectIntervalMs ?? (Number(process.env.TEST_PROGRAM_RECONNECT_INTERVAL_MS) || undefined),
+      completionFlushDelayMs: options.completionFlushDelayMs ?? (Number(process.env.TEST_PROGRAM_COMPLETION_FLUSH_DELAY_MS) || undefined),
+      staleAfterMs: options.staleAfterMs ?? (Number(process.env.TEST_PROGRAM_STALE_AFTER_MS) || undefined),
+    }, DEFAULT_TEST_PROGRAM_OBSERVER_RUNTIME_CONFIG);
+    const saved = readSavedConfig(this.planConfigFile);
+    const runtime = normalizeTestProgramObserverRuntimeConfig(saved?.runtime, optionRuntime);
+    this.pollIntervalMs = runtime.pollIntervalMs;
+    this.reconnectIntervalMs = runtime.reconnectIntervalMs;
+    this.completionFlushDelayMs = runtime.completionFlushDelayMs;
+    this.staleAfterMs = runtime.staleAfterMs;
+    this.runtimeUpdatedAt = saved?.runtimeUpdatedAt ?? null;
+
     this.tracker = options.tracker ?? new TestProgramTracker({
       formalBackendUrl: this.formalBackendUrl,
-      plan: savedPlan?.plan ?? DEFAULT_TEST_PROGRAM_STAGE_PLAN,
+      plan: saved?.plan ?? DEFAULT_TEST_PROGRAM_STAGE_PLAN,
     });
-    if (options.tracker && savedPlan) this.tracker.setPlan(savedPlan.plan);
-    if (savedPlan) {
+    if (options.tracker && saved?.plan) this.tracker.setPlan(saved.plan);
+    if (saved?.plan) {
       this.planSource = 'LOCAL_OVERRIDE';
-      this.planUpdatedAt = savedPlan.updatedAt;
+      this.planUpdatedAt = saved.planUpdatedAt ?? null;
     }
     this.tracker.on('run_finalized', (run: TestProgramRun) => this.archiveRun(run));
   }
@@ -141,8 +171,8 @@ export class TestProgramObserver extends EventEmitter {
     this.connectWebSocket();
     void this.refreshPLCConfiguration(true);
     void this.pollFormalBackend();
-    this.pollTimer = setInterval(() => { void this.pollFormalBackend(); }, this.pollIntervalMs);
-    this.pollTimer.unref?.();
+    this.armPollTimer();
+    this.emitSnapshot();
   }
 
   async stop(): Promise<void> {
@@ -161,10 +191,50 @@ export class TestProgramObserver extends EventEmitter {
     if (websocket) {
       try { websocket.close(); } catch { /* already closed */ }
     }
+    this.emitSnapshot();
   }
 
   snapshot(): TestProgramSnapshot {
     return this.tracker.snapshot();
+  }
+
+  runtimeConfig(): TestProgramObserverRuntimeConfig {
+    return {
+      pollIntervalMs: this.pollIntervalMs,
+      reconnectIntervalMs: this.reconnectIntervalMs,
+      completionFlushDelayMs: this.completionFlushDelayMs,
+      staleAfterMs: this.staleAfterMs,
+    };
+  }
+
+  diagnostics(): TestProgramObserverDiagnostics {
+    const source = this.tracker.snapshot().source;
+    const lastActivityCandidates = [source.lastSeenAt, source.lastPollAt]
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+    const lastActivityAt = lastActivityCandidates.length > 0 ? Math.max(...lastActivityCandidates) : null;
+    const lastActivityAgeMs = lastActivityAt === null ? null : Math.max(0, Date.now() - lastActivityAt);
+    const sourceConnected = Boolean(source.connected && (this.wsConnected || this.pollConnected));
+    const stale = !this.started
+      || !sourceConnected
+      || lastActivityAgeMs === null
+      || lastActivityAgeMs > this.staleAfterMs;
+    const activeChannel = this.wsConnected && this.pollConnected
+      ? 'WEBSOCKET_AND_POLL'
+      : this.wsConnected
+        ? 'WEBSOCKET_PRIMARY'
+        : this.pollConnected
+          ? 'HTTP_POLL_FALLBACK'
+          : 'DISCONNECTED';
+    return {
+      started: this.started,
+      wsConnected: this.wsConnected,
+      pollConnected: this.pollConnected,
+      sourceConnected,
+      activeChannel,
+      lastActivityAt,
+      lastActivityAgeMs,
+      stale,
+    };
   }
 
   configuration(): TestProgramConfigPayload {
@@ -176,19 +246,60 @@ export class TestProgramObserver extends EventEmitter {
       planUpdatedAt: this.planUpdatedAt,
       plcSteps: this.plcSteps.map((step) => ({ ...step })),
       plcConfigUpdatedAt: this.plcConfigUpdatedAt,
-      note: 'PLC 步骤仅作只读参考；保存的规划只影响测试观察器下一轮归档，不向正式程序写入。',
+      runtime: this.runtimeConfig(),
+      diagnostics: this.diagnostics(),
+      note: '监听器与正式 FieldRuntime 同进程启动；WebSocket 为主、HTTP 轮询为兜底。配置只影响只读监听/归档，不向 PLC 或探测器发送控制命令。',
     };
   }
 
   updatePlan(rawPlan: unknown): TestProgramConfigPayload {
     const plan = normalizeStagePlan(rawPlan);
     const updatedAt = Date.now();
-    writeSavedPlan(this.planConfigFile, plan, updatedAt);
     this.tracker.setPlan(plan);
     this.planSource = 'LOCAL_OVERRIDE';
     this.planUpdatedAt = updatedAt;
+    this.persistConfiguration();
     this.emitSnapshot();
     return this.configuration();
+  }
+
+  updateRuntimeConfig(rawRuntime: unknown): TestProgramConfigPayload {
+    const next = normalizeTestProgramObserverRuntimeConfig(rawRuntime, this.runtimeConfig());
+    const pollChanged = next.pollIntervalMs !== this.pollIntervalMs;
+    const reconnectChanged = next.reconnectIntervalMs !== this.reconnectIntervalMs;
+    this.pollIntervalMs = next.pollIntervalMs;
+    this.reconnectIntervalMs = next.reconnectIntervalMs;
+    this.completionFlushDelayMs = next.completionFlushDelayMs;
+    this.staleAfterMs = next.staleAfterMs;
+    this.runtimeUpdatedAt = Date.now();
+    this.persistConfiguration();
+
+    if (this.started && pollChanged) this.armPollTimer();
+    if (this.started && reconnectChanged && this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.scheduleReconnect();
+    }
+    this.emitSnapshot();
+    return this.configuration();
+  }
+
+  private persistConfiguration(): void {
+    const plan = this.planSource === 'LOCAL_OVERRIDE' ? clonePlan(this.tracker.snapshot().plan) : undefined;
+    writeSavedConfig(this.planConfigFile, {
+      ...(plan ? { plan } : {}),
+      ...(this.planUpdatedAt !== null ? { planUpdatedAt: this.planUpdatedAt } : {}),
+      runtime: this.runtimeConfig(),
+      ...(this.runtimeUpdatedAt !== null ? { runtimeUpdatedAt: this.runtimeUpdatedAt } : {}),
+    });
+  }
+
+  private armPollTimer(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    if (!this.started) return;
+    this.pollTimer = setInterval(() => { void this.pollFormalBackend(); }, this.pollIntervalMs);
+    this.pollTimer.unref?.();
   }
 
   private async refreshPLCConfiguration(force = false): Promise<void> {
