@@ -123,14 +123,14 @@ timeout /t 5 /nobreak >nul
 :: 6. Start Frontend
 :: ========================================
 echo [START] Frontend (local Vite)...
-start "Frontend - Field Runtime" cmd /k "cd /d ""%~dp0"" && set ""VITE_RUNTIME_MODE=field"" && set ""VITE_BACKEND_API_URL=http://127.0.0.1:3003"" && set ""VITE_BACKEND_WS_URL=ws://127.0.0.1:3003"" && npm run dev"
+start "Frontend - Field Runtime" cmd /k "cd /d ""%~dp0"" && set ""VITE_RUNTIME_MODE=field"" && set ""VITE_BACKEND_API_URL=http://127.0.0.1:3001"" && set ""VITE_BACKEND_WS_URL=ws://127.0.0.1:3001"" && npm run dev"
 
 echo.
 echo ========================================
 echo   Services started successfully!
 echo.
 echo   Frontend : http://127.0.0.1:3002
-echo   Backend  : http://127.0.0.1:3003
+echo   Backend  : http://127.0.0.1:3001
 echo   Mode     : field (PLC and detector acquisition enabled)
 echo ========================================
 echo.
