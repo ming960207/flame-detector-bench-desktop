@@ -14,6 +14,34 @@ export interface TestProgramPLCStep {
   totalDurationMs: number | null;
 }
 
+export interface TestProgramObserverRuntimeConfig {
+  /** HTTP 兜底轮询周期。WebSocket 正常时仍用于摘要/健康校验。 */
+  pollIntervalMs: number;
+  /** WebSocket 断开后的重连间隔。 */
+  reconnectIntervalMs: number;
+  /** PLC 完成事件后等待正式结果收尾的延迟。 */
+  completionFlushDelayMs: number;
+  /** 超过该时长既没有 WS 数据也没有成功轮询时，健康状态判为 stale。 */
+  staleAfterMs: number;
+}
+
+export type TestProgramObserverChannel =
+  | 'WEBSOCKET_AND_POLL'
+  | 'WEBSOCKET_PRIMARY'
+  | 'HTTP_POLL_FALLBACK'
+  | 'DISCONNECTED';
+
+export interface TestProgramObserverDiagnostics {
+  started: boolean;
+  wsConnected: boolean;
+  pollConnected: boolean;
+  sourceConnected: boolean;
+  activeChannel: TestProgramObserverChannel;
+  lastActivityAt: number | null;
+  lastActivityAgeMs: number | null;
+  stale: boolean;
+}
+
 export interface TestProgramConfigPayload {
   mode: 'test-program-readonly-observer';
   source: string;
@@ -22,8 +50,17 @@ export interface TestProgramConfigPayload {
   planUpdatedAt: number | null;
   plcSteps: TestProgramPLCStep[];
   plcConfigUpdatedAt: number | null;
+  runtime: TestProgramObserverRuntimeConfig;
+  diagnostics: TestProgramObserverDiagnostics;
   note: string;
 }
+
+export const DEFAULT_TEST_PROGRAM_OBSERVER_RUNTIME_CONFIG: Readonly<TestProgramObserverRuntimeConfig> = Object.freeze({
+  pollIntervalMs: 1_000,
+  reconnectIntervalMs: 1_000,
+  completionFlushDelayMs: 350,
+  staleAfterMs: 5_000,
+});
 
 const MAX_STAGE_DURATION_MS = 24 * 60 * 60 * 1_000;
 
@@ -39,6 +76,32 @@ function secondsToMs(value: unknown): number | null {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+export function normalizeTestProgramObserverRuntimeConfig(
+  input: unknown,
+  fallback: TestProgramObserverRuntimeConfig = DEFAULT_TEST_PROGRAM_OBSERVER_RUNTIME_CONFIG,
+): TestProgramObserverRuntimeConfig {
+  const source = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const pollIntervalMs = boundedInteger(source.pollIntervalMs, fallback.pollIntervalMs, 250, 10_000);
+  const reconnectIntervalMs = boundedInteger(source.reconnectIntervalMs, fallback.reconnectIntervalMs, 250, 30_000);
+  const completionFlushDelayMs = boundedInteger(source.completionFlushDelayMs, fallback.completionFlushDelayMs, 50, 5_000);
+  const requestedStaleAfterMs = boundedInteger(source.staleAfterMs, fallback.staleAfterMs, 1_000, 120_000);
+  return {
+    pollIntervalMs,
+    reconnectIntervalMs,
+    completionFlushDelayMs,
+    // 至少覆盖两个 HTTP 周期，避免正常轮询抖动被误报为监听失联。
+    staleAfterMs: Math.max(requestedStaleAfterMs, (pollIntervalMs * 2) + 250),
+  };
 }
 
 export function normalizePLCSteps(rawSteps: unknown): TestProgramPLCStep[] {
