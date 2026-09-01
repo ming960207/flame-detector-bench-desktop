@@ -11,6 +11,8 @@ import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
+import { LabelPrinterPanel } from './LabelPrinterPanel';
+import { labelPrinterRuntime } from './label-printer-runtime';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
 import './wutos-main-overrides.css';
@@ -75,8 +77,6 @@ export function FieldProcessStatusApp() {
     const summary = await response.json() as FieldSummaryPayload;
     applySummary(summary);
 
-    // Keep configuration loading independent from summary shape so a stale
-    // backend build cannot leave the configuration page looking empty.
     const productResponse = await fetch(HTTP + '/api/product-config');
     if (productResponse.ok) {
       const productPayload = await productResponse.json() as {
@@ -126,6 +126,13 @@ export function FieldProcessStatusApp() {
   const openDetails = useCallback((tab: DetailTab = 'device') => {
     setDetailTab(tab);
     setDetailsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    // Printing is a background production function. It starts with the field UI,
+    // not with the details panel, so a completed batch can print while the
+    // operator remains on the main dashboard.
+    labelPrinterRuntime.start(HTTP);
   }, []);
 
   useEffect(() => {
@@ -229,8 +236,9 @@ export function FieldProcessStatusApp() {
           </div>}
 
           {detailTab === 'production' && <div className="wutos-detail-production">
-            <p className="wutos-detail-section-note">正式检验记录、历史批次、12 路继电器反馈通道、检验员及表单参数均从本详情页进入；主页面不再额外悬浮按钮。</p>
+            <p className="wutos-detail-section-note">正式检验记录、继电器反馈、标签打印及生产参数统一在此维护。</p>
             <ProductionConfigurationPanel backendHttpUrl={HTTP} locked={productLocked} />
+            <LabelPrinterPanel backendHttpUrl={HTTP} />
           </div>}
         </div>
       </section>
