@@ -291,7 +291,7 @@
     "linkages": []
   },
   "mqttConfig": {
-    "mqttEnabled": true,
+    "mqttEnabled": false,
     "brokerUrl": "ws://115.190.63.111:8083/mqtt",
     "topic": "dt/up/SH_F1/LINE_A1/flame_detector_bench/status",
     "clientId": "flame_detector_bench_client",

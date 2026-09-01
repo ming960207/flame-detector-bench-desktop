@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "dev:field": "node scripts/dev-field.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "test": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/production-inspection-record.test.ts test/production-mqtt.test.ts",
