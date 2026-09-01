@@ -90,7 +90,7 @@ test('completed batch creates D1-D6 jobs in slot order with A/B/NG and keeps NG 
 
 test('missing product code becomes BLOCKED without consuming the printable queue', async () => {
   const { store } = await fixture();
-  const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, offset === 2 ? null : `CODE-${offset + 1}`, '合格'));
+  const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, offset === 1 ? null : `CODE-${offset + 1}`, '合格'));
   const created = await store.enqueueProductionRecord(record(products), detectorVerdict());
   assert.equal(created[1]?.status, 'BLOCKED');
   assert.equal(created[1]?.lastError, 'PRODUCT_CODE_NOT_GENERATED');
