@@ -113,14 +113,6 @@ class JingchenTransport {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
-  get printerSelected(): boolean {
-    return Boolean(this.selectedPrinter);
-  }
-
-  get selected(): { name: string; port: number } | null {
-    return this.selectedPrinter ? { ...this.selectedPrinter } : null;
-  }
-
   private rejectPending(error: Error): void {
     for (const pending of this.pending.values()) {
       window.clearTimeout(pending.timer);
@@ -142,7 +134,6 @@ class JingchenTransport {
       const message = JSON.parse(text) as JcAck;
       const apiName = String(message.apiName || '');
       if (!apiName) return;
-
       const pending = this.pending.get(apiName);
       if (pending) {
         const isCommitProgress = apiName === 'commitJob' && message.resultAck?.info !== 'commitJobApi Success!';
@@ -153,7 +144,6 @@ class JingchenTransport {
           else pending.reject(new Error(String(message.resultAck?.info || `${apiName} failed`)));
         }
       }
-
       if (apiName === 'commitJob') {
         for (const listener of this.jobListeners) {
           try { listener(message); } catch (error) { console.error('[标签打印] 任务监听器异常:', error); }
@@ -268,13 +258,8 @@ class JingchenTransport {
     this.selectedPrinter = { name, port };
   }
 
-  addJobListener(listener: (message: JcAck) => void): void {
-    this.jobListeners.add(listener);
-  }
-
-  removeJobListener(listener: (message: JcAck) => void): void {
-    this.jobListeners.delete(listener);
-  }
+  addJobListener(listener: (message: JcAck) => void): void { this.jobListeners.add(listener); }
+  removeJobListener(listener: (message: JcAck) => void): void { this.jobListeners.delete(listener); }
 
   async startJob(config: LocalLabelPrinterConfig): Promise<void> {
     await this.request('startJob', {
@@ -287,27 +272,14 @@ class JingchenTransport {
 
   async initBoard(): Promise<void> {
     await this.request('InitDrawingBoard', {
-      width: 60,
-      height: 40,
-      rotate: 0,
-      path: 'ZT001.ttf',
-      verticalShift: 0,
-      HorizontalShift: 0,
+      width: 60, height: 40, rotate: 0, path: 'ZT001.ttf', verticalShift: 0, HorizontalShift: 0,
     });
   }
 
   async text(value: string, box: { x: number; y: number; width: number; height: number; fontSize: number }, options: { bold?: boolean; align?: number } = {}): Promise<void> {
     await this.request('DrawLableText', {
-      ...box,
-      rotate: 0,
-      value,
-      fontFamily: '',
-      textAlignHorizontal: options.align ?? 0,
-      textAlignVertical: 0,
-      letterSpacing: 0,
-      lineSpacing: 1,
-      lineMode: 6,
-      fontStyle: [options.bold ? 1 : 0, 0, 0, 0],
+      ...box, rotate: 0, value, fontFamily: '', textAlignHorizontal: options.align ?? 0, textAlignVertical: 0,
+      letterSpacing: 0, lineSpacing: 1, lineMode: 6, fontStyle: [options.bold ? 1 : 0, 0, 0, 0],
     });
   }
 
@@ -316,32 +288,15 @@ class JingchenTransport {
   }
 
   async qr(value: string): Promise<void> {
-    await this.request('DrawLableQrCode', {
-      x: 2.4,
-      y: 10.2,
-      width: 20,
-      height: 20,
-      rotate: 0,
-      value,
-      codeType: 31,
-      correctLevel: 2,
-    });
+    await this.request('DrawLableQrCode', { x: 2.4, y: 10.2, width: 20, height: 20, rotate: 0, value, codeType: 31, correctLevel: 2 });
   }
 
   async commit(): Promise<void> {
-    await this.request('commitJob', {
-      printData: null,
-      printerImageProcessingInfo: { printQuantity: 1 },
-    }, 15_000);
+    await this.request('commitJob', { printData: null, printerImageProcessingInfo: { printQuantity: 1 } }, 15_000);
   }
 
-  async endJob(): Promise<void> {
-    await this.request('endJob');
-  }
-
-  async cancelJob(): Promise<void> {
-    try { await this.request('stopPrint'); } catch { /* best effort */ }
-  }
+  async endJob(): Promise<void> { await this.request('endJob'); }
+  async cancelJob(): Promise<void> { try { await this.request('stopPrint'); } catch { /* best effort */ } }
 }
 
 class LabelPrinterRuntime {
@@ -351,24 +306,14 @@ class LabelPrinterRuntime {
   private subscribers = new Set<() => void>();
   private busy = false;
   private lastRecoveryAt = 0;
-  private previousReady = false;
   private workerId = `label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   private state: LabelPrinterRuntimeState = {
-    health: 'idle',
-    detail: '等待初始化标签打印服务',
-    printers: [],
-    config: loadConfig(),
-    jobs: [],
+    health: 'idle', detail: '等待初始化标签打印服务', printers: [], config: loadConfig(), jobs: [],
     summary: { waiting: 0, printing: 0, printed: 0, failed: 0, blocked: 0, total: 0 },
-    currentJobId: null,
-    lastPrintedJobId: null,
+    currentJobId: null, lastPrintedJobId: null,
   };
 
-  subscribe = (listener: () => void): (() => void) => {
-    this.subscribers.add(listener);
-    return () => this.subscribers.delete(listener);
-  };
-
+  subscribe = (listener: () => void): (() => void) => { this.subscribers.add(listener); return () => this.subscribers.delete(listener); };
   getSnapshot = (): LabelPrinterRuntimeState => this.state;
 
   private emit(patch: Partial<LabelPrinterRuntimeState>): void {
@@ -378,9 +323,7 @@ class LabelPrinterRuntime {
 
   private async post(path: string, body: Record<string, unknown> = {}): Promise<any> {
     const response = await fetch(`${this.backendHttpUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || payload.code || `HTTP ${response.status}`);
@@ -411,46 +354,31 @@ class LabelPrinterRuntime {
       const saved = printers.find((printer) => printer.name === config.printerName);
       const target = saved ?? (!config.printerName && printers.length === 1 ? printers[0] : undefined);
       if (!target) {
-        this.previousReady = false;
-        this.emit({
-          health: 'printer-offline',
-          detail: printers.length === 0 ? '未检测到 USB 精臣标签打印机' : '请选择标签打印机',
-        });
+        this.emit({ health: 'printer-offline', detail: printers.length === 0 ? '未检测到 USB 精臣标签打印机' : '请选择标签打印机' });
         return;
       }
       await this.transport.selectUsbPrinter(target.name, target.port);
       if (target.name !== config.printerName || target.port !== config.printerPort) {
         this.updateConfig({ printerName: target.name, printerPort: target.port });
       }
-      const recovered = !this.previousReady;
-      this.previousReady = true;
       this.emit({ health: 'ready', detail: `标签机已就绪：${target.name}` });
-      if (recovered && this.state.summary.failed > 0) await this.retryFailedJobs();
     } catch (error) {
-      this.previousReady = false;
       this.emit({ health: 'service-offline', detail: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  async scanPrinters(): Promise<void> {
-    this.lastRecoveryAt = 0;
-    await this.initializePrinter();
-  }
+  async scanPrinters(): Promise<void> { this.lastRecoveryAt = 0; await this.initializePrinter(); }
 
   async connectPrinter(name: string): Promise<void> {
     const target = this.state.printers.find((printer) => printer.name === name);
     if (!target) throw new Error('所选打印机不在当前 USB 列表中');
     await this.transport.selectUsbPrinter(target.name, target.port);
     this.updateConfig({ printerName: target.name, printerPort: target.port });
-    this.previousReady = true;
     this.emit({ health: 'ready', detail: `标签机已就绪：${target.name}` });
   }
 
   updateConfig(patch: Partial<LocalLabelPrinterConfig>): void {
-    const config: LocalLabelPrinterConfig = {
-      ...this.state.config,
-      ...patch,
-    };
+    const config: LocalLabelPrinterConfig = { ...this.state.config, ...patch };
     config.density = Math.max(1, Math.min(15, Number(config.density) || 3));
     config.labelType = [1, 2, 3, 4, 5, 6, 10].includes(Number(config.labelType)) ? Number(config.labelType) : 1;
     config.printMode = [1, 2].includes(Number(config.printMode)) ? Number(config.printMode) : 1;
@@ -466,14 +394,6 @@ class LabelPrinterRuntime {
     this.emit({ jobs: payload.jobs || [], summary: payload.summary || this.state.summary });
   }
 
-  private async retryFailedJobs(): Promise<void> {
-    const failed = this.state.jobs.filter((job) => job.status === 'FAILED').sort((a, b) => a.createdAt - b.createdAt);
-    for (const job of failed) {
-      try { await this.post(`/api/label-print/jobs/${encodeURIComponent(job.id)}/retry`); } catch { /* leave failed */ }
-    }
-    if (failed.length > 0) await this.refreshQueue();
-  }
-
   async retryJob(id: string): Promise<void> {
     await this.post(`/api/label-print/jobs/${encodeURIComponent(id)}/retry`);
     await this.refreshQueue();
@@ -485,23 +405,13 @@ class LabelPrinterRuntime {
     return new Promise<void>((resolve, reject) => {
       let finished = false;
       let timeout: number | null = null;
-      const cleanup = () => {
-        this.transport.removeJobListener(listener);
-        if (timeout !== null) window.clearTimeout(timeout);
-      };
+      const cleanup = () => { this.transport.removeJobListener(listener); if (timeout !== null) window.clearTimeout(timeout); };
       const fail = async (error: unknown) => {
         if (finished) return;
-        finished = true;
-        cleanup();
-        await this.transport.cancelJob();
+        finished = true; cleanup(); await this.transport.cancelJob();
         reject(error instanceof Error ? error : new Error(String(error)));
       };
-      const succeed = () => {
-        if (finished) return;
-        finished = true;
-        cleanup();
-        resolve();
-      };
+      const succeed = () => { if (finished) return; finished = true; cleanup(); resolve(); };
       const listener = (message: JcAck) => {
         if (message.apiName !== 'commitJob') return;
         if (message.resultAck?.info === 'commitJob ok!' && !submitted) {
@@ -511,30 +421,21 @@ class LabelPrinterRuntime {
               await this.transport.initBoard();
               await this.transport.text(job.isolation ? '不合格品 / 点型红外火焰探测器' : job.productName,
                 { x: 2, y: 1.3, width: 42, height: 4.2, fontSize: job.isolation ? 2.25 : 2.65 }, { bold: true });
-              await this.transport.text(`D${job.slot}`,
-                { x: 46, y: 1.0, width: 12, height: 5.2, fontSize: 3.4 }, { bold: true, align: 1 });
-              await this.transport.text(`型号：${job.productModel}`,
-                { x: 2, y: 5.5, width: 42, height: 3, fontSize: 1.65 }, { bold: true });
+              await this.transport.text(`D${job.slot}`, { x: 46, y: 1.0, width: 12, height: 5.2, fontSize: 3.4 }, { bold: true, align: 1 });
+              await this.transport.text(`型号：${job.productModel}`, { x: 2, y: 5.5, width: 42, height: 3, fontSize: 1.65 }, { bold: true });
               await this.transport.line(2, 9, 56);
               await this.transport.qr(job.qrContent!);
-              await this.transport.text('产品编号',
-                { x: 24.5, y: 10.0, width: 33, height: 3.1, fontSize: 1.75 }, { bold: true });
-              await this.transport.text(job.productCode!,
-                { x: 24.5, y: 13.1, width: 33, height: 3.8, fontSize: 2.05 }, { bold: true });
-              await this.transport.text(`结果：${job.verdict}`,
-                { x: 24.5, y: 17.5, width: 33, height: 4.5, fontSize: 2.75 }, { bold: true });
-              await this.transport.text(`日期：${localDate(job.productionDate)}`,
-                { x: 24.5, y: 22.3, width: 33, height: 3.4, fontSize: 1.85 });
+              await this.transport.text('产品编号', { x: 24.5, y: 10.0, width: 33, height: 3.1, fontSize: 1.75 }, { bold: true });
+              await this.transport.text(job.productCode!, { x: 24.5, y: 13.1, width: 33, height: 3.8, fontSize: 2.05 }, { bold: true });
+              await this.transport.text(`结果：${job.verdict}`, { x: 24.5, y: 17.5, width: 33, height: 4.5, fontSize: 2.75 }, { bold: true });
+              await this.transport.text(`日期：${localDate(job.productionDate)}`, { x: 24.5, y: 22.3, width: 33, height: 3.4, fontSize: 1.85 });
               await this.transport.text(`噪声：${job.noiseValues.map((value, index) => `P${index + 1} ${value}`).join('  ')}`,
                 { x: 24.5, y: 26.1, width: 33, height: 3.3, fontSize: 1.65 }, { bold: true });
               await this.transport.line(2, 32, 56);
               await this.transport.text(job.isolation ? 'NG · 请隔离处理' : '二维码内容：产品编号',
-                { x: 2, y: 33.0, width: 56, height: 3.4, fontSize: job.isolation ? 2.25 : 1.35 },
-                { align: 1, bold: job.isolation });
+                { x: 2, y: 33.0, width: 56, height: 3.4, fontSize: job.isolation ? 2.25 : 1.35 }, { align: 1, bold: job.isolation });
               await this.transport.commit();
-            } catch (error) {
-              await fail(error);
-            }
+            } catch (error) { await fail(error); }
           })();
           return;
         }
@@ -563,20 +464,12 @@ class LabelPrinterRuntime {
       this.emit({ health: 'printing', detail: `正在打印 D${claimed.slot} · ${claimed.verdict}`, currentJobId: claimed.id });
       await this.drawAndPrint(claimed);
       await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/printed`, { workerId: this.workerId });
-      this.emit({
-        health: 'ready',
-        detail: `标签机已就绪：${this.state.config.printerName || '已连接设备'}`,
-        currentJobId: null,
-        lastPrintedJobId: claimed.id,
-      });
+      this.emit({ health: 'ready', detail: `标签机已就绪：${this.state.config.printerName || '已连接设备'}`, currentJobId: null, lastPrintedJobId: claimed.id });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (claimed) {
-        try {
-          await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/failed`, { workerId: this.workerId, error: message });
-        } catch { /* preserve original print error */ }
+        try { await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/failed`, { workerId: this.workerId, error: message }); } catch { /* preserve original */ }
       }
-      this.previousReady = false;
       this.emit({ health: 'error', detail: message, currentJobId: null });
     } finally {
       this.busy = false;
