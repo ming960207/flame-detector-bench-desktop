@@ -34,20 +34,32 @@ export function mountTestProgramRoutes(app: Express, options: EmbeddedTestProgra
   observer.on('archive', onArchive);
   observer.on('source_error', onSourceError);
 
-  app.get('/api/test-program/health', (_req, res) => res.json({
-    status: 'ok',
-    mode: 'embedded-readonly-observer',
-    source: observer.snapshot().source,
-    timestamp: Date.now(),
-  }));
+  app.get('/api/test-program/health', (_req, res) => {
+    const diagnostics = observer.diagnostics();
+    const configuration = observer.configuration();
+    res.json({
+      status: diagnostics.started && diagnostics.sourceConnected && !diagnostics.stale ? 'ok' : 'degraded',
+      mode: 'embedded-readonly-observer',
+      source: observer.snapshot().source,
+      runtime: configuration.runtime,
+      diagnostics,
+      timestamp: Date.now(),
+    });
+  });
   app.get('/api/test-program/snapshot', (_req, res) => res.json(observer.snapshot()));
   app.get('/api/test-program/config', (_req, res) => res.json(observer.configuration()));
   app.put('/api/test-program/config', requireDesktopMutation, (req, res) => {
     try {
-      res.json(observer.updatePlan(req.body?.plan));
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body as Record<string, unknown>
+        : {};
+      let payload = observer.configuration();
+      if (Object.prototype.hasOwnProperty.call(body, 'runtime')) payload = observer.updateRuntimeConfig(body.runtime);
+      if (Object.prototype.hasOwnProperty.call(body, 'plan')) payload = observer.updatePlan(body.plan);
+      res.json(payload);
     } catch (error) {
       res.status(400).json({
-        code: 'TEST_PROGRAM_PLAN_INVALID',
+        code: 'TEST_PROGRAM_CONFIG_INVALID',
         error: error instanceof Error ? error.message : String(error),
       });
     }
