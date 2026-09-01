@@ -79,6 +79,7 @@ function clone<T>(value: T): T {
 }
 
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (value === null || value === undefined || value === '') return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(parsed)));
