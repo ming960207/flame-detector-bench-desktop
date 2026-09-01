@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, ExternalLink, FileText, RefreshCw, Save, Settings2, X } from 'lucide-react';
+import { Download, ExternalLink, FileText, RefreshCw, Save } from 'lucide-react';
 import type { RelayFunctionalTestConfig } from '../server/src/relay-functional-test';
 import type { ProductionInspectionRecordConfig } from '../server/src/production-inspection-record';
 
@@ -12,6 +12,11 @@ interface RelayPayload {
   config: RelayFunctionalTestConfig;
   missingMappings: string[];
   ready: boolean;
+}
+
+interface ProductionConfigPayload {
+  relay: RelayPayload;
+  recordConfig: ProductionInspectionRecordConfig;
 }
 
 interface ProductionRecordSummary {
@@ -74,7 +79,6 @@ function recordTime(timestamp: number): string {
 }
 
 export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) {
-  const [open, setOpen] = useState(false);
   const [relay, setRelay] = useState<RelayPayload | null>(null);
   const [recordConfig, setRecordConfig] = useState<ProductionInspectionRecordConfig | null>(null);
   const [records, setRecords] = useState<ProductionRecordSummary[]>([]);
@@ -104,16 +108,11 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
     setLoading(true);
     setMessage('');
     try {
-      const [relayResponse, recordResponse] = await Promise.all([
-        fetch(`${backendHttpUrl}/api/relay-functional-test-config`),
-        fetch(`${backendHttpUrl}/api/production-inspection-config`),
-      ]);
-      if (!relayResponse.ok) throw new Error(`继电器配置读取失败 (${relayResponse.status})`);
-      if (!recordResponse.ok) throw new Error(`检验记录配置读取失败 (${recordResponse.status})`);
-      const relayPayload = await relayResponse.json() as RelayPayload;
-      const recordPayload = await recordResponse.json() as { config: ProductionInspectionRecordConfig };
-      setRelay(relayPayload);
-      setRecordConfig(recordPayload.config);
+      const response = await fetch(`${backendHttpUrl}/api/production-config`);
+      if (!response.ok) throw new Error(`生产配置读取失败 (${response.status})`);
+      const payload = await response.json() as ProductionConfigPayload;
+      setRelay(payload.relay);
+      setRecordConfig(payload.recordConfig);
       void loadRecords();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -122,27 +121,23 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
     }
   }, [backendHttpUrl, loadRecords]);
 
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  useEffect(() => { void load(); }, [load]);
 
   const save = async () => {
     if (!relay || !recordConfig || locked) return;
     setSaving(true);
     setMessage('');
     try {
-      const relayResponse = await fetch(`${backendHttpUrl}/api/relay-functional-test-config`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relay.config),
+      const response = await fetch(`${backendHttpUrl}/api/production-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relayConfig: relay.config, recordConfig }),
       });
-      const relayResult = await relayResponse.json() as RelayPayload & { success?: boolean; code?: string; error?: string };
-      if (!relayResponse.ok || !relayResult.success) throw new Error(relayResult.error || relayResult.code || '继电器配置保存失败');
+      const result = await response.json() as ProductionConfigPayload & { success?: boolean; code?: string; error?: string };
+      if (!response.ok || !result.success || !result.relay || !result.recordConfig) throw new Error(result.error || result.code || '生产配置保存失败');
 
-      const recordResponse = await fetch(`${backendHttpUrl}/api/production-inspection-config`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recordConfig),
-      });
-      const recordResult = await recordResponse.json() as { success?: boolean; config?: ProductionInspectionRecordConfig; code?: string; error?: string };
-      if (!recordResponse.ok || !recordResult.success || !recordResult.config) throw new Error(recordResult.error || recordResult.code || '检验记录配置保存失败');
-
-      setRelay({ config: relayResult.config, missingMappings: relayResult.missingMappings, ready: relayResult.ready });
-      setRecordConfig(recordResult.config);
+      setRelay(result.relay);
+      setRecordConfig(result.recordConfig);
       setMessage('配置已保存并立即应用');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -163,21 +158,13 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
       const record = await response.json() as { batchId: string };
       openRecord(record.batchId);
     } catch (error) {
-      setOpen(true);
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
   const controlDisabled = locked || loading || !relay;
 
-  return <>
-    <div style={{ position: 'fixed', right: 28, bottom: 24, zIndex: 85, display: 'flex', gap: 7 }}>
-      <button type="button" onClick={() => setOpen(true)} title="查看生产检验记录与生产配置" style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: 'rgba(6,27,43,.96)', color: palette.text, padding: '7px 10px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={14} />检验记录</button>
-      <button type="button" onClick={() => setOpen(true)} title={locked ? '流程运行中可查看，禁止修改' : '继电器 DI 与生产记录配置'} style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: 'rgba(6,27,43,.96)', color: locked ? palette.warn : palette.text, padding: '7px 10px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><Settings2 size={14} />生产配置{locked ? ' · 只读' : ''}</button>
-    </div>
-
-    {open && <div style={{ position: 'fixed', inset: 0, zIndex: 230, padding: 16, background: 'rgba(2,8,16,.84)', display: 'grid', placeItems: 'center' }} role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="production-config-title" style={{ width: 'min(1120px, 100%)', maxHeight: '92vh', overflow: 'auto', border: `1px solid ${palette.border}`, background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`, color: palette.text, boxShadow: '0 24px 80px rgba(0,0,0,.48), inset 0 0 24px rgba(32,204,229,.05)' }}>
+  return <section className="production-config-panel" aria-labelledby="production-config-title" style={{ width: '100%', border: `1px solid ${palette.border}`, background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`, color: palette.text, boxShadow: 'inset 0 0 24px rgba(32,204,229,.05)' }}>
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '16px 18px', borderBottom: `1px solid ${palette.borderSoft}` }}>
           <div>
             <small style={{ color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.16em' }}>PRODUCTION CONFIG</small>
@@ -186,7 +173,6 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
           </div>
           <div style={{ display: 'flex', gap: 7 }}>
             <button type="button" onClick={() => void load()} disabled={loading} title="重新读取后台配置与记录" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: loading ? 'wait' : 'pointer', opacity: loading ? .5 : 1 }}><RefreshCw size={14} /></button>
-            <button type="button" onClick={() => setOpen(false)} aria-label="关闭" style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, cursor: 'pointer' }}><X size={15} /></button>
           </div>
         </header>
 
@@ -269,7 +255,6 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，历史记录仍可查看/导出。' : mappingsComplete ? '12 路 DI 已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路 DI 未填写。`}</span>
             <div style={{ display: 'flex', gap: 7 }}>
               <button type="button" onClick={() => void openLatestRecord()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={13} />最新记录</button>
-              <button type="button" onClick={() => setOpen(false)} style={{ border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}>关闭</button>
               <button type="button" disabled={saving || locked || !relay || !recordConfig} onClick={() => void save()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.cyan}`, background: palette.cyan, color: '#06202b', padding: '7px 12px', cursor: saving || locked ? 'not-allowed' : 'pointer', opacity: saving || locked ? .5 : 1, font: 'inherit', fontSize: 10.5, fontWeight: 700 }}><Save size={13} />{saving ? '保存中…' : '保存并应用'}</button>
             </div>
           </footer>
@@ -279,7 +264,5 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
           <div style={{ color: palette.fail, fontSize: 12 }}>{message || '生产配置未能完整加载'}</div>
           <button type="button" onClick={() => void load()} style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer' }}><RefreshCw size={13} />重试</button>
         </div>}
-      </section>
-    </div>}
-  </>;
+      </section>;
 }

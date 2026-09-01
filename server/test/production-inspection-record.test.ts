@@ -123,7 +123,7 @@ function precheck(relayEnabled = false) {
 }
 
 test('record keeps code status separate from detector verdict and defaults five non-measured items to pass', () => {
-  const productConfig = normalizeProductDetectionConfig(DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
   const record = buildProductionInspectionRecord({
     batchId: 'batch-1',
     productConfig,
@@ -148,7 +148,8 @@ test('record keeps code status separate from detector verdict and defaults five 
 
 test('enabled relay test gates the slot verdict independently', () => {
   const productConfig = normalizeProductDetectionConfig({
-    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
+      ...DEFAULT_PRODUCT_DETECTION_CONFIG,
+      selectedType: 'THREE_WAVELENGTH',
     profiles: {
       ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
       THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },

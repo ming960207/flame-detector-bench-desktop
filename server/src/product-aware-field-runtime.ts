@@ -97,56 +97,48 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   productionRuns.setRecordConfig(inspectionRecordConfig);
   source.on('status', (status) => productionRuns.observeStatus(status));
 
-  runtime.app.get('/api/relay-functional-test-config', (_req, res) => {
+  const productionConfigPayload = () => {
     const indexes = detectors.enabledDetectorIndexes();
     const missingMappings = relayFunctionalTestMissingMappings(relayConfig, indexes);
-    res.json({
-      config: relayConfig,
-      missingMappings,
-      ready: relayConfig.enabled && missingMappings.length === 0,
-    });
-  });
-
-  runtime.app.put('/api/relay-functional-test-config', requireDesktopMutation, async (req, res) => {
-    if (runtime.snapshot().summary.productSelectionLocked) {
-      return res.status(409).json({ code: 'RELAY_CONFIG_LOCKED_DURING_PROCESS' });
-    }
-    try {
-      const next = normalizeRelayFunctionalTestConfig(req.body, relayConfig);
-      relayConfig = next;
-      detectors.setRelayFunctionalTestConfig(next);
-      source.updateExtraInputs(relayInputDefinitions(next));
-      const store = await loadSystemConfig() ?? createDefaultSystemConfig();
-      await saveSystemConfig({ ...store, relayFunctionalTestConfig: next, lastUpdated: Date.now() });
-      const indexes = detectors.enabledDetectorIndexes();
-      const missingMappings = relayFunctionalTestMissingMappings(next, indexes);
-      return res.json({
-        success: true,
-        config: next,
+    return {
+      relay: {
+        config: relayConfig,
         missingMappings,
-        ready: next.enabled && missingMappings.length === 0,
-      });
-    } catch (error) {
-      return res.status(500).json({ code: 'RELAY_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
-    }
+        ready: relayConfig.enabled && missingMappings.length === 0,
+      },
+      recordConfig: inspectionRecordConfig,
+    };
+  };
+
+  runtime.app.get('/api/production-config', (_req, res) => {
+    res.json(productionConfigPayload());
   });
 
-  runtime.app.get('/api/production-inspection-config', (_req, res) => {
-    res.json({ config: inspectionRecordConfig });
-  });
-
-  runtime.app.put('/api/production-inspection-config', requireDesktopMutation, async (req, res) => {
+  runtime.app.put('/api/production-config', requireDesktopMutation, async (req, res) => {
     if (runtime.snapshot().summary.productSelectionLocked) {
-      return res.status(409).json({ code: 'INSPECTION_RECORD_CONFIG_LOCKED_DURING_PROCESS' });
+      return res.status(409).json({ code: 'PRODUCTION_CONFIG_LOCKED_DURING_PROCESS' });
     }
     try {
-      inspectionRecordConfig = normalizeProductionInspectionRecordConfig(req.body, inspectionRecordConfig);
-      productionRuns.setRecordConfig(inspectionRecordConfig);
+      const input = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body as Record<string, unknown>
+        : {};
+      const nextRelay = normalizeRelayFunctionalTestConfig(input.relayConfig, relayConfig);
+      const nextRecord = normalizeProductionInspectionRecordConfig(input.recordConfig, inspectionRecordConfig);
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
-      await saveSystemConfig({ ...store, productionInspectionRecordConfig: inspectionRecordConfig, lastUpdated: Date.now() });
-      return res.json({ success: true, config: inspectionRecordConfig });
+      await saveSystemConfig({
+        ...store,
+        relayFunctionalTestConfig: nextRelay,
+        productionInspectionRecordConfig: nextRecord,
+        lastUpdated: Date.now(),
+      });
+      relayConfig = nextRelay;
+      inspectionRecordConfig = nextRecord;
+      detectors.setRelayFunctionalTestConfig(nextRelay);
+      source.updateExtraInputs(relayInputDefinitions(nextRelay));
+      productionRuns.setRecordConfig(nextRecord);
+      return res.json({ success: true, ...productionConfigPayload() });
     } catch (error) {
-      return res.status(500).json({ code: 'INSPECTION_RECORD_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
+      return res.status(500).json({ code: 'PRODUCTION_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
   });
 

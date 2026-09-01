@@ -708,6 +708,7 @@ export interface WutosDashboardProps {
   finalVerdict: FieldFinalVerdict | null;
   channelOnline: boolean;
   notice: string;
+  resultTitleMeta?: ReactNode;
   onRefresh: () => void;
   onOpenDetails?: () => void;
   waveformDisplayMode?: WaveformDisplayMode;
@@ -722,6 +723,7 @@ export function WutosDashboard({
   finalVerdict,
   channelOnline,
   notice,
+  resultTitleMeta,
   onRefresh,
   onOpenDetails,
   waveformDisplayMode = 'normalized',
@@ -814,6 +816,7 @@ export function WutosDashboard({
 
         <Panel
           title="检测结果"
+          titleMeta={resultTitleMeta}
           className="wutos-panel--result"
         >
           <div className="wutos-detector-grid">

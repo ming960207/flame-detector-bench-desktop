@@ -1,11 +1,11 @@
 import type { ChannelKey, WaveformAnalysisConfig } from './closure/field-waveform-analysis.js';
 import {
-  DEFAULT_PRODUCT_CODE_RULE,
   normalizeProductCodeRule,
   type ProductCodeRule,
 } from './product-code.js';
 import type { ProductCodeAllocation } from './product-code-store.js';
 import type { RelayFunctionalTestReport } from './relay-functional-test.js';
+import profileDefaults from '../product-profiles.json' assert { type: 'json' };
 
 export type ProductType = 'DUAL_WAVELENGTH' | 'THREE_WAVELENGTH' | 'FOUR_WAVELENGTH' | 'IMAGE_DETECTOR';
 export type ProductPrecheckVerdict = 'PASS' | 'FAIL' | 'PENDING';
@@ -67,57 +67,14 @@ export const PRODUCT_TYPE_ORDER: readonly ProductType[] = [
   'IMAGE_DETECTOR',
 ] as const;
 
-function rule(productNameCode = ''): ProductCodeRule {
-  return {
-    ...DEFAULT_PRODUCT_CODE_RULE,
-    productNameCode,
-    softwareVersionCode: '01',
-    hardwareVersionCode: '01',
-    producerCode: '01',
-  };
-}
-
 /**
- * 默认型号按现有 02/03/04/05 产品槽位预置；所有字段均可在配置中永久修改。
- * 目前已知编码规则仅预置 02=4102、03=4103；04/05 保持空规则，且不会阻塞检测。
+ * Product/model/probe mappings are data, not code. Edit server/product-profiles.json
+ * for a deployment-specific mapping; persisted system-config values can still
+ * override these values through the configuration UI.
  */
-export const DEFAULT_PRODUCT_DETECTION_CONFIG: ProductDetectionConfig = Object.freeze({
-  selectedType: 'THREE_WAVELENGTH',
-  profiles: {
-    DUAL_WAVELENGTH: {
-      label: '双波长',
-      productModel: 'GHT-1050-02',
-      expectedSoftwareVersion: '',
-      expectedProbeCount: 2,
-      relayFunctionalTestEnabled: false,
-      productCodeRule: rule('4102'),
-    },
-    THREE_WAVELENGTH: {
-      label: '三波长',
-      productModel: 'GHT-1050-03',
-      expectedSoftwareVersion: '',
-      expectedProbeCount: 3,
-      relayFunctionalTestEnabled: false,
-      productCodeRule: rule('4103'),
-    },
-    FOUR_WAVELENGTH: {
-      label: '四波长',
-      productModel: 'GHT-1050-04',
-      expectedSoftwareVersion: '',
-      expectedProbeCount: 4,
-      relayFunctionalTestEnabled: false,
-      productCodeRule: rule(''),
-    },
-    IMAGE_DETECTOR: {
-      label: '图探型',
-      productModel: 'GHT-1050-05',
-      expectedSoftwareVersion: '',
-      expectedProbeCount: 3,
-      relayFunctionalTestEnabled: false,
-      productCodeRule: rule(''),
-    },
-  },
-});
+export const DEFAULT_PRODUCT_DETECTION_CONFIG: ProductDetectionConfig = Object.freeze(
+  profileDefaults as ProductDetectionConfig,
+);
 
 function isProductType(value: unknown): value is ProductType {
   return PRODUCT_TYPE_ORDER.includes(value as ProductType);
@@ -169,12 +126,9 @@ export function normalizeProductDetectionConfig(
       ? profilesSource[type] as Record<string, unknown>
       : {};
     const requestedProbeCount = Number(raw.expectedProbeCount);
-    const fixedProbeCount = type === 'DUAL_WAVELENGTH' ? 2
-      : type === 'THREE_WAVELENGTH' ? 3
-        : type === 'FOUR_WAVELENGTH' ? 4
-          : Number.isInteger(requestedProbeCount) && requestedProbeCount >= 1 && requestedProbeCount <= 4
-            ? requestedProbeCount
-            : base.expectedProbeCount;
+    const fixedProbeCount = Number.isInteger(requestedProbeCount) && requestedProbeCount >= 1 && requestedProbeCount <= 4
+      ? requestedProbeCount
+      : base.expectedProbeCount;
     profiles[type] = {
       label: base.label,
       productModel: cleanProductModel(raw.productModel, base.productModel),

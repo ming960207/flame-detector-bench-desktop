@@ -97,6 +97,8 @@ npm run verify:field-readiness:strict
 
 现场页面实时显示 PLC 工序、六台探测器通信与自动合格判定：每台必须在线、无故障、光源就绪、同步正常且检测到火警，六台同时满足时本批显示“合格”。连接缺失或信号尚未出现会显示“待检测”，不会误判合格；故障会直接显示“不合格”。新增探测器工作台支持串口/TCP、地址、三/四波长协议选择、原始/归一化波形和七步只读自动检测；现场默认通过 TCP 连接 `192.168.16.253`，六台探测器端口依次为 `31001`、`32001`、`33001`、`34001`、`35001`、`36001`。配置会保存到 `server/system-config.json` 并在重启后恢复。上位机在该模式不写入 PLC 的 Q/M 区。
 
+产品型号下拉显示 `GHT-1050-02`、`GHT-1050-03`、`GHT-1050-04`、`GHT-1050-05`，默认选择 `GHT-1050-02`。型号与期望探头数量的映射由 [`server/product-profiles.json`](server/product-profiles.json) 配置，不能通过修改前端枚举改变；现场页面对配置的修改会持久化到运行时 `system-config.json`。
+
 现场接入前，必须完成最新 PLC 在线上传/CRC、将 AWL 导入并编译到 `项目 1.smart`、将 HMI 资产导入可编辑原工程并核对变量权限、电气 I/O 对照、硬件安全回路，以及受控 FAT/SAT。修改前的完整外部工程备份位于 `D:\code\PLC\backups\SMART200-FLAME-before-controlled-fix-20260724-070454`，已逐文件 SHA-256 比对。当前门禁状态以 `config/field-deployment-status.json` 为准。
 
 离线审计文件位于 `server/data/offline-closure-audit.v2.jsonl`，仅保存在本机且被 Git 忽略。每条记录带前序 SHA-256 与自身 SHA-256，读取、查询和导出前都会验证整条链；测试过程中可按项目的数据保留制度归档或清理，禁止作为现场合格认证的替代证据。

@@ -1,0 +1,61 @@
+{
+  "selectedType": "DUAL_WAVELENGTH",
+  "profiles": {
+    "DUAL_WAVELENGTH": {
+      "label": "双波长",
+      "productModel": "GHT-1050-02",
+      "expectedSoftwareVersion": "",
+      "expectedProbeCount": 2,
+      "relayFunctionalTestEnabled": false,
+      "productCodeRule": {
+        "enabled": true,
+        "productNameCode": "4102",
+        "softwareVersionCode": "01",
+        "hardwareVersionCode": "01",
+        "producerCode": "01"
+      }
+    },
+    "THREE_WAVELENGTH": {
+      "label": "三波长",
+      "productModel": "GHT-1050-03",
+      "expectedSoftwareVersion": "",
+      "expectedProbeCount": 3,
+      "relayFunctionalTestEnabled": false,
+      "productCodeRule": {
+        "enabled": true,
+        "productNameCode": "4103",
+        "softwareVersionCode": "01",
+        "hardwareVersionCode": "01",
+        "producerCode": "01"
+      }
+    },
+    "FOUR_WAVELENGTH": {
+      "label": "四波长",
+      "productModel": "GHT-1050-04",
+      "expectedSoftwareVersion": "",
+      "expectedProbeCount": 4,
+      "relayFunctionalTestEnabled": false,
+      "productCodeRule": {
+        "enabled": true,
+        "productNameCode": "",
+        "softwareVersionCode": "01",
+        "hardwareVersionCode": "01",
+        "producerCode": "01"
+      }
+    },
+    "IMAGE_DETECTOR": {
+      "label": "图探型",
+      "productModel": "GHT-1050-05",
+      "expectedSoftwareVersion": "",
+      "expectedProbeCount": 3,
+      "relayFunctionalTestEnabled": false,
+      "productCodeRule": {
+        "enabled": true,
+        "productNameCode": "",
+        "softwareVersionCode": "01",
+        "hardwareVersionCode": "01",
+        "producerCode": "01"
+      }
+    }
+  }
+}

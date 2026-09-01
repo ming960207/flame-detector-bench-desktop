@@ -9,8 +9,7 @@ import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/s
 import type { FlameDetectorConfig } from '../types';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
-import { ProductModelDock } from './ProductModelDock';
-import { ProductTypeControl } from './ProductTypeControl';
+import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
@@ -164,27 +163,7 @@ export function FieldProcessStatusApp() {
     };
   }, [applySummary, refresh]);
 
-  useEffect(() => {
-    if (!detailsOpen || detailTab !== 'product') return;
-    const timer = window.setTimeout(() => {
-      const collapsed = document.querySelector<HTMLButtonElement>(
-        '.wutos-detail-product section[aria-label="产品型号与检测配置"] > button[aria-expanded="false"]',
-      );
-      collapsed?.click();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [detailsOpen, detailTab]);
-
   return <>
-    {!detailsOpen && <ProductModelDock
-      config={productConfig}
-      locked={productLocked}
-      precheck={productPrecheck}
-      busy={productPrecheckBusy}
-      onUpdate={updateProductConfig}
-      onOpenDetails={() => openDetails('product')}
-    />}
-
     <WutosDashboard
       status={status}
       detectors={detectors}
@@ -195,6 +174,7 @@ export function FieldProcessStatusApp() {
       notice={notice}
       waveformDisplayMode={flameConfig?.waveformDisplayMode || 'normalized'}
       waveformMaxSamples={flameConfig?.waveformMaxSamples || 1000}
+      resultTitleMeta={<ProductModelSelector config={productConfig} locked={productLocked} busy={productPrecheckBusy} onUpdate={updateProductConfig} />}
       onRefresh={handleRefresh}
       onOpenDetails={() => openDetails('device')}
     />

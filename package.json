@@ -49,6 +49,7 @@
       "server/dist/**/*",
       "server/node_modules/**/*",
       "server/package.json",
+      "server/product-profiles.json",
       "server/system-config.json",
       "server/plc-configs.json"
     ],

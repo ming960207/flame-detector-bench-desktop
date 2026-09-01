@@ -201,7 +201,7 @@ test('software version comparison ignores separators and 0x prefix', () => {
   assert.equal(softwareVersionMatches('01.02.03.04', '01020305'), false);
 });
 
-test('product normalization fixes dual/triple/quad probe counts', () => {
+test('product normalization accepts configured probe counts', () => {
   const config = normalizeProductDetectionConfig({
     selectedType: 'FOUR_WAVELENGTH',
     profiles: {
@@ -211,10 +211,34 @@ test('product normalization fixes dual/triple/quad probe counts', () => {
       IMAGE_DETECTOR: { expectedProbeCount: 4 },
     },
   });
-  assert.equal(config.profiles.DUAL_WAVELENGTH.expectedProbeCount, 2);
-  assert.equal(config.profiles.THREE_WAVELENGTH.expectedProbeCount, 3);
-  assert.equal(config.profiles.FOUR_WAVELENGTH.expectedProbeCount, 4);
+  assert.equal(config.profiles.DUAL_WAVELENGTH.expectedProbeCount, 4);
+  assert.equal(config.profiles.THREE_WAVELENGTH.expectedProbeCount, 1);
+  assert.equal(config.profiles.FOUR_WAVELENGTH.expectedProbeCount, 2);
   assert.equal(config.profiles.IMAGE_DETECTOR.expectedProbeCount, 4);
+});
+
+test('product model defaults come from the profile configuration and default to GHT-1050-02', () => {
+  assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.selectedType, 'DUAL_WAVELENGTH');
+  assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.productModel, 'GHT-1050-02');
+  assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.expectedProbeCount, 2);
+});
+
+test('configured probe counts are honored for every product type', () => {
+  const config = normalizeProductDetectionConfig({
+    selectedType: 'FOUR_WAVELENGTH',
+    profiles: {
+      DUAL_WAVELENGTH: { productModel: 'CUSTOM-02', expectedProbeCount: 1 },
+      THREE_WAVELENGTH: { productModel: 'CUSTOM-03', expectedProbeCount: 4 },
+      FOUR_WAVELENGTH: { productModel: 'CUSTOM-04', expectedProbeCount: 2 },
+      IMAGE_DETECTOR: { productModel: 'CUSTOM-05', expectedProbeCount: 1 },
+    },
+  }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+
+  assert.equal(config.profiles.DUAL_WAVELENGTH.productModel, 'CUSTOM-02');
+  assert.equal(config.profiles.DUAL_WAVELENGTH.expectedProbeCount, 1);
+  assert.equal(config.profiles.THREE_WAVELENGTH.expectedProbeCount, 4);
+  assert.equal(config.profiles.FOUR_WAVELENGTH.expectedProbeCount, 2);
+  assert.equal(config.profiles.IMAGE_DETECTOR.expectedProbeCount, 1);
 });
 
 test('dual wavelength uses P1/P2 for noise, trend and ratio', () => {

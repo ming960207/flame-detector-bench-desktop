@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, Save, Settings2, ShieldCheck } from 'lucide-react';
+import { RotateCcw, Save, Settings2, ShieldCheck } from 'lucide-react';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import { productCodeRuleMissingFields } from '../server/src/product-code';
 import {
@@ -20,12 +20,12 @@ interface Props {
   onUpdate: (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => Promise<void>;
 }
 
-const MODEL_FALLBACKS: Record<ProductType, string> = {
-  DUAL_WAVELENGTH: 'GHT-1050-02',
-  THREE_WAVELENGTH: 'GHT-1050-03',
-  FOUR_WAVELENGTH: 'GHT-1050-04',
-  IMAGE_DETECTOR: 'GHT-1050-05',
-};
+export interface ProductModelSelectorProps {
+  config: ProductDetectionConfig | null;
+  locked: boolean;
+  busy: boolean;
+  onUpdate: (patch: Partial<ProductDetectionConfig>) => Promise<void>;
+}
 
 const PRECHECK_REASON_LABELS: Record<string, string> = {
   SOFTWARE_VERSION_NOT_CONFIGURED: '未配置版本基准',
@@ -79,7 +79,7 @@ function probeLabel(key: string): string {
 }
 
 function productModel(config: ProductDetectionConfig | null, type: ProductType): string {
-  return config?.profiles?.[type]?.productModel?.trim() || MODEL_FALLBACKS[type];
+  return config?.profiles?.[type]?.productModel?.trim() || '型号未配置';
 }
 
 function cloneConfig(config: ProductDetectionConfig): ProductDetectionConfig {
@@ -135,8 +135,42 @@ function toneColor(tone: 'muted' | 'pass' | 'warn' | 'fail'): string {
   return palette.muted;
 }
 
+export function ProductModelSelector({ config, locked, busy, onUpdate }: ProductModelSelectorProps) {
+  const [switching, setSwitching] = useState(false);
+  const [error, setError] = useState('');
+  const selectedModel = config ? productModel(config, config.selectedType) : '配置未加载';
+
+  const switchProductModel = async (selectedType: ProductType) => {
+    if (!config || locked || busy || switching || selectedType === config.selectedType) return;
+    setSwitching(true);
+    setError('');
+    try {
+      await onUpdate({ selectedType });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  return <span className="wutos-result-model-control" title={error || (locked ? '流程运行中型号已锁定' : '选择本批次生产型号')}>
+    <span className="wutos-result-model-control__label">产品型号</span>
+    <select
+      aria-label="当前产品型号"
+      value={config?.selectedType ?? ''}
+      disabled={!config || locked || busy || switching}
+      onChange={(event) => void switchProductModel(event.target.value as ProductType)}
+    >
+      {!config && <option value="">{selectedModel}</option>}
+      {config && PRODUCT_TYPE_ORDER.map((type) => <option value={type} key={type}>{productModel(config, type)} · {config.profiles[type]?.label ?? '类别未配置'}</option>)}
+    </select>
+    <span className={`wutos-result-model-control__state ${error ? 'is-error' : locked ? 'is-locked' : busy || switching ? 'is-busy' : ''}`}>
+      {error ? '保存失败' : locked ? '已锁定' : busy || switching ? '保存中' : config ? '已同步' : '未连接'}
+    </span>
+  </span>;
+}
+
 export function ProductTypeControl({ config, locked, precheck, busy, detectorVerdict, onUpdate }: Props) {
-  const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<ProductDetectionConfig | null>(config ? cloneConfig(config) : null);
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -149,7 +183,6 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
   const profile = useMemo(() => config ? selectedProductProfile(config) : null, [config]);
   const draftProfile = useMemo(() => draft ? selectedProductProfile(draft) : null, [draft]);
   const dirty = useMemo(() => Boolean(config && draft && JSON.stringify(config) !== JSON.stringify(draft)), [config, draft]);
-  const selectedModel = config ? productModel(config, config.selectedType) : '产品型号未加载';
   const failedUnits = precheck?.units.filter((unit) => unit.verdict === 'FAIL') ?? [];
   const noDataUnits = detectorVerdict?.units.filter((unit) => (unit.noDataProbes?.length ?? 0) > 0) ?? [];
   const savedCodeMissing = profile ? productCodeRuleMissingFields(profile.productCodeRule) : [];
@@ -224,56 +257,29 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
   return <section
     aria-label="产品型号与检测配置"
     style={{
-      position: 'fixed',
-      zIndex: 80,
-      top: 100,
-      right: 'clamp(12px, 2vw, 28px)',
-      width: expanded ? 430 : 300,
-      maxWidth: 'calc(100vw - 24px)',
-      maxHeight: expanded ? 'calc(100vh - 124px)' : 'none',
-      overflowY: expanded ? 'auto' : 'visible',
+      width: '100%',
+      maxWidth: 'none',
       color: palette.text,
       border: `1px solid ${palette.border}`,
       background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`,
-      boxShadow: 'inset 0 0 18px rgba(32,204,229,.07), 0 10px 30px rgba(0,0,0,.24)',
+      boxShadow: 'inset 0 0 18px rgba(32,204,229,.07)',
       fontFamily: '"Microsoft YaHei UI", "Noto Sans SC", sans-serif',
-      transition: 'width .18s ease',
     }}
   >
-    <button
-      type="button"
-      onClick={() => setExpanded((value) => !value)}
-      aria-expanded={expanded}
-      style={{
-        width: '100%',
-        display: 'grid',
-        gridTemplateColumns: '1fr auto',
-        alignItems: 'center',
-        gap: 12,
-        padding: '12px 14px',
-        textAlign: 'left',
-        color: palette.text,
-        border: 0,
-        borderBottom: expanded ? `1px solid ${palette.borderSoft}` : 0,
-        background: 'transparent',
-        cursor: 'pointer',
-      }}
-    >
-      <span style={{ minWidth: 0 }}>
-        <span style={{ display: 'block', color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.15em' }}>PRODUCT MODEL</span>
-        <strong style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: palette.title, fontSize: 15, letterSpacing: '.03em' }}>{selectedModel}</strong>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderBottom: `1px solid ${palette.borderSoft}` }}>
+      <div style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.15em' }}>PRODUCT CONFIGURATION</span>
+        <strong style={{ display: 'block', marginTop: 4, color: palette.title, fontSize: 15 }}>产品型号与检测配置</strong>
         <span style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 5, color: palette.muted, fontSize: 10.5 }}>
-          <span style={{ color: locked ? palette.warn : palette.pass }}>{locked ? '流程已锁定' : '可选择型号'}</span>
+          <span style={{ color: locked ? palette.warn : palette.pass }}>{locked ? '流程已锁定' : '可编辑配置'}</span>
           <span style={{ color: precheckTone }}>{statusText(precheck, busy)}</span>
           {dirty && <span style={{ color: palette.warn }}>有未保存修改</span>}
         </span>
-      </span>
-      <span style={{ display: 'grid', placeItems: 'center', width: 31, height: 31, color: palette.cyan, border: `1px solid ${palette.borderSoft}`, background: '#071a25' }}>
-        {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-      </span>
-    </button>
+      </div>
+      <Settings2 size={17} color={palette.cyan} aria-hidden="true" />
+    </div>
 
-    {expanded && <div style={{ padding: '13px 14px 14px' }}>
+    <div style={{ padding: '13px 14px 14px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
         <div>
           <div style={{ color: palette.title, fontWeight: 700, fontSize: 13 }}>生产产品型号</div>
@@ -283,15 +289,16 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       </div>
 
       <select
-        value={config?.selectedType ?? 'THREE_WAVELENGTH'}
+        value={config?.selectedType ?? ''}
         disabled={!config || locked || switching}
         onChange={(event) => void switchProductModel(event.target.value as ProductType)}
         style={{ ...fieldStyle, padding: '9px 10px', color: palette.title, fontSize: 13, fontWeight: 700 }}
       >
-        {PRODUCT_TYPE_ORDER.map((type) => {
+        {!config && <option value="">产品配置未加载</option>}
+        {config && PRODUCT_TYPE_ORDER.map((type) => {
           const model = productModel(config, type);
-          const label = config?.profiles?.[type]?.label?.trim();
-          return <option value={type} key={type}>{model}{label ? ` · ${label}` : ''}</option>;
+          const label = config.profiles?.[type]?.label?.trim() || '类别未配置';
+          return <option value={type} key={type}>{model} · {label}</option>;
         })}
       </select>
 
@@ -302,7 +309,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
             <input
               value={draftProfile.productModel}
               disabled={locked}
-              placeholder={MODEL_FALLBACKS[draft?.selectedType ?? 'THREE_WAVELENGTH']}
+              placeholder="配置文件中的产品型号"
               onChange={(event) => updateDraftProfile({ productModel: event.target.value })}
               style={{ ...fieldStyle, marginTop: 5, color: palette.title, fontWeight: 700 }}
             />
@@ -331,9 +338,9 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
               min={1}
               max={4}
               value={draftProfile.expectedProbeCount}
-              disabled={locked || draft?.selectedType !== 'IMAGE_DETECTOR'}
+              disabled={locked}
               onChange={(event) => updateDraftProfile({ expectedProbeCount: Number(event.target.value) })}
-              style={{ ...fieldStyle, marginTop: 5, opacity: draft?.selectedType === 'IMAGE_DETECTOR' ? 1 : .65 }}
+              style={{ ...fieldStyle, marginTop: 5 }}
             />
           </label>
         </div>
@@ -436,6 +443,6 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       </>}
 
       {message && <div style={{ marginTop: 8, color: message.includes('已保存') || message.includes('已撤销') ? palette.pass : palette.fail, fontSize: 10 }}>{message}</div>}
-    </div>}
+    </div>
   </section>;
 }

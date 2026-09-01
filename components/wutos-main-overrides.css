@@ -1,90 +1,5 @@
 /* Main production screen refinements. Loaded after the legacy dashboard CSS. */
 
-.wutos-product-model-dock {
-  position: fixed;
-  z-index: 72;
-  top: clamp(48px, 6.1vh, 60px);
-  left: 50%;
-  display: flex;
-  width: min(390px, 38vw);
-  min-width: 300px;
-  height: 31px;
-  align-items: center;
-  gap: 7px;
-  padding: 3px 7px;
-  transform: translateX(-50%);
-  color: #ccecf5;
-  border: 1px solid rgba(44, 165, 255, .58);
-  background: linear-gradient(90deg, rgba(3, 25, 52, .90), rgba(5, 50, 77, .94), rgba(3, 25, 52, .90));
-  box-shadow: 0 0 12px rgba(0, 139, 255, .22), inset 0 0 10px rgba(62, 242, 255, .06);
-  font-family: "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
-}
-
-.wutos-product-model-dock__icon {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: #3ef2ff;
-  border: 1px solid rgba(62, 242, 255, .42);
-  background: rgba(5, 43, 78, .76);
-}
-
-.wutos-product-model-dock__icon svg { width: 13px; height: 13px; }
-.wutos-product-model-dock__label { flex: 0 0 auto; color: #78aac9; font-size: 10px; font-weight: 700; }
-
-.wutos-product-model-dock__select-wrap {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-}
-
-.wutos-product-model-dock select {
-  width: 100%;
-  min-width: 0;
-  height: 23px;
-  padding: 0 23px 0 7px;
-  overflow: hidden;
-  color: #eff9ff;
-  border: 1px solid rgba(43, 114, 130, .72);
-  outline: 0;
-  appearance: none;
-  background: #061722;
-  font: 800 11px/1 "Consolas", "Microsoft YaHei UI", sans-serif;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.wutos-product-model-dock select:disabled { color: #9ab3bf; cursor: not-allowed; opacity: .8; }
-.wutos-product-model-dock__select-wrap > svg { position: absolute; right: 6px; width: 12px; height: 12px; color: #43dced; pointer-events: none; }
-
-.wutos-product-model-dock__state {
-  flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-.wutos-product-model-dock__state.is-pass { color: #62e7b6; }
-.wutos-product-model-dock__state.is-warn { color: #e2c363; }
-.wutos-product-model-dock__state.is-fail { color: #f27769; }
-.wutos-product-model-dock__state.is-muted { color: #7898a6; }
-
-.wutos-product-model-dock > button {
-  flex: 0 0 auto;
-  height: 23px;
-  padding: 0 7px;
-  color: #9ed9ed;
-  border: 1px solid rgba(43, 114, 130, .72);
-  background: #071a25;
-  font: 700 9px "Microsoft YaHei UI", sans-serif;
-  cursor: pointer;
-}
-.wutos-product-model-dock > button:hover { color: #fff; border-color: #3ef2ff; }
-.wutos-product-model-dock > small { display: none; }
-
 /* The real alarm area gets priority over decorative/result space. */
 .wutos-panel--alarm {
   top: 9.2%;
@@ -95,6 +10,46 @@
   top: 28%;
   height: 51.1%;
 }
+
+.wutos-result-model-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: .45em;
+  padding: .28em .45em;
+  color: #8eb9c4;
+  border: 1px solid rgba(43, 114, 130, .72);
+  background: rgba(6, 23, 34, .86);
+  font-size: clamp(5px, .62cqw, 10px);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+.wutos-result-model-control__label { flex: 0 0 auto; color: #6f9ab6; }
+
+.wutos-result-model-control select {
+  min-width: 0;
+  max-width: 17em;
+  padding: .18em 1.2em .18em .35em;
+  overflow: hidden;
+  color: #eff9ff;
+  border: 1px solid rgba(43, 114, 130, .72);
+  outline: 0;
+  background: #061722;
+  font: inherit;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.wutos-result-model-control select:disabled { color: #9ab3bf; cursor: not-allowed; opacity: .75; }
+.wutos-result-model-control__state { flex: 0 0 auto; color: #62e7b6; font-size: .88em; }
+.wutos-result-model-control__state.is-busy { color: #e2c363; }
+.wutos-result-model-control__state.is-locked,
+.wutos-result-model-control__state.is-error { color: #f27769; }
 
 .wutos-alarm-table {
   inset: 13% 7% 6%;
@@ -200,21 +155,6 @@
   overflow: visible !important;
 }
 
-.wutos-detail-product > section[aria-label="产品型号与检测配置"] > button {
-  pointer-events: auto !important;
-}
-
-.wutos-detail-production > div:first-child {
-  position: static !important;
-  right: auto !important;
-  bottom: auto !important;
-  z-index: auto !important;
-  justify-content: flex-start !important;
-  margin: 0 0 10px !important;
-}
-
-.wutos-detail-production > div:nth-child(2) { z-index: 360 !important; }
-
 .wutos-detail-section-note {
   margin: 0 0 10px;
   color: #7fa9b4;
@@ -223,14 +163,10 @@
 }
 
 @media (max-height: 760px) {
-  .wutos-product-model-dock { top: 45px; height: 28px; }
-  .wutos-product-model-dock__icon { width: 20px; height: 20px; }
-  .wutos-product-model-dock select,
-  .wutos-product-model-dock > button { height: 21px; }
+  .wutos-result-model-control { font-size: clamp(5px, .56cqw, 9px); }
 }
 
 @media (max-width: 1100px) {
-  .wutos-product-model-dock { width: 320px; min-width: 260px; }
-  .wutos-product-model-dock__label { display: none; }
-  .wutos-product-model-dock__state { display: none; }
+  .wutos-result-model-control__label,
+  .wutos-result-model-control__state { display: none; }
 }
