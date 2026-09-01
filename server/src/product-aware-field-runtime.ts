@@ -25,15 +25,21 @@ import {
   normalizeProductionInspectionRecordConfig,
 } from './production-inspection-record.js';
 import { ProductionRunCoordinator } from './production-run-coordinator.js';
+import { LabelPrintQueueStore } from './label-print-queue.js';
 import { requireDesktopMutation } from './request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
 
 export interface ProductAwareFieldStatusRuntime extends FieldStatusRuntime {
   readonly productionRuns: ProductionRunCoordinator;
+  readonly labelPrintQueue: LabelPrintQueueStore;
 }
 
 function safeDownloadName(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '_').slice(0, 100) || 'production-record';
+}
+
+function requestText(value: unknown, max = 128): string {
+  return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
 export async function startProductAwareFieldStatusServer(): Promise<ProductAwareFieldStatusRuntime> {
@@ -75,8 +81,20 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   const closeRuntime = runtime.close.bind(runtime);
 
   const productionRuns = new ProductionRunCoordinator(() => runtime.snapshot(), detectors);
+  const labelPrintQueue = new LabelPrintQueueStore();
   productionRuns.setRecordConfig(inspectionRecordConfig);
   source.on('status', (status) => productionRuns.observeStatus(status));
+  productionRuns.on('archive', (archive) => {
+    void labelPrintQueue.enqueueProductionRecord(archive.inspectionRecord, archive.summary.detectorVerdict)
+      .then((jobs) => {
+        if (jobs.length > 0) {
+          console.log(`[标签打印] 批次 ${archive.batchId} 已生成 ${jobs.length} 个标签任务（D1→D6）。`);
+        }
+      })
+      .catch((error) => {
+        console.error('[标签打印] 生成批次标签任务失败:', error instanceof Error ? error.message : String(error));
+      });
+  });
 
   const productionConfigPayload = () => {
     const indexes = detectors.enabledDetectorIndexes();
@@ -90,6 +108,14 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       dioReady: relayDioConfigReady(relayConfig.dio),
       mappingReady: missingMappings.length === 0,
       recordConfig: inspectionRecordConfig,
+      labelPrinting: {
+        template: 'FLAME_DETECTOR_60X40_HORIZONTAL',
+        productName: '点型红外火焰探测器',
+        qrMode: 'PRODUCT_CODE',
+        copiesPerProduct: 1,
+        passBehavior: 'PRODUCT_LABEL',
+        failBehavior: 'NG_ISOLATION_LABEL',
+      },
     };
   };
 
@@ -199,6 +225,56 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     }
   });
 
+  runtime.app.get('/api/label-print/jobs', async (req, res) => {
+    try {
+      const limit = Number(req.query.limit) || 60;
+      return res.json(await labelPrintQueue.list(limit));
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_QUEUE_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.post('/api/label-print/claim', requireDesktopMutation, async (req, res) => {
+    try {
+      const workerId = requestText((req.body as Record<string, unknown> | undefined)?.workerId, 96);
+      if (!workerId) return res.status(400).json({ code: 'LABEL_PRINT_WORKER_REQUIRED' });
+      const job = await labelPrintQueue.claimNext(workerId);
+      return res.json({ job });
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_CLAIM_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.post('/api/label-print/jobs/:id/printed', requireDesktopMutation, async (req, res) => {
+    try {
+      const workerId = requestText((req.body as Record<string, unknown> | undefined)?.workerId, 96);
+      if (!workerId) return res.status(400).json({ code: 'LABEL_PRINT_WORKER_REQUIRED' });
+      const job = await labelPrintQueue.markPrinted(req.params.id, workerId);
+      return job ? res.json({ success: true, job }) : res.status(404).json({ code: 'LABEL_PRINT_JOB_NOT_FOUND' });
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_COMPLETE_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.post('/api/label-print/jobs/:id/failed', requireDesktopMutation, async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body as Record<string, unknown>
+        : {};
+      const workerId = requestText(body.workerId, 96);
+      if (!workerId) return res.status(400).json({ code: 'LABEL_PRINT_WORKER_REQUIRED' });
+      const job = await labelPrintQueue.markFailed(req.params.id, workerId, requestText(body.error, 500) || 'PRINT_FAILED');
+      return job ? res.json({ success: true, job }) : res.status(404).json({ code: 'LABEL_PRINT_JOB_NOT_FOUND' });
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_FAIL_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.post('/api/label-print/jobs/:id/retry', requireDesktopMutation, async (req, res) => {
+    try {
+      const job = await labelPrintQueue.retry(req.params.id);
+      return job ? res.json({ success: true, job }) : res.status(404).json({ code: 'LABEL_PRINT_JOB_NOT_FOUND' });
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_RETRY_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // Product-code routes are views over the one formal allocation source owned by ProductAwareFlameDetectorService.
   runtime.app.get('/api/product-code/current', (_req, res) => {
     const summary = runtime.snapshot().summary;
@@ -223,6 +299,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   console.log(`[现场状态] 已启动完整产品检测运行时：http://127.0.0.1:${port}`);
   return Object.assign(runtime, {
     productionRuns,
+    labelPrintQueue,
     async close(): Promise<void> {
       await relayFeedback.disconnect();
       await closeRuntime();
