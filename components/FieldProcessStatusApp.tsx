@@ -12,6 +12,7 @@ import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
 import { LabelPrinterPanel } from './LabelPrinterPanel';
+import { TestObserverPanel } from './TestObserverPanel';
 import { labelPrinterRuntime } from './label-printer-runtime';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
@@ -25,7 +26,7 @@ const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP
 const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
 
-type DetailTab = 'device' | 'product' | 'production';
+type DetailTab = 'device' | 'product' | 'production' | 'observer';
 
 interface FieldSummaryPayload {
   process?: PLCProcessStatus;
@@ -209,19 +210,25 @@ export function FieldProcessStatusApp() {
           <div>
             <span className="section-kicker">FIELD DATA DETAIL</span>
             <h2 id="wutos-detail-title">检测台详情与生产配置</h2>
-            <p>主屏仅保留操作员需要的实时状态；波形、产品详细配置、检验记录和生产配置统一在此查看。</p>
+            <p>主屏仅保留操作员需要的实时状态；波形、产品配置、测试监听、检验记录和生产配置统一在此查看。</p>
           </div>
           <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
         </header>
 
         <nav className="wutos-detail-tabs" aria-label="详情页面">
           <button type="button" className={detailTab === 'device' ? 'is-active' : ''} onClick={() => setDetailTab('device')}>设备与波形</button>
+          <button type="button" className={detailTab === 'observer' ? 'is-active' : ''} onClick={() => setDetailTab('observer')}>测试监听</button>
           <button type="button" className={detailTab === 'product' ? 'is-active' : ''} onClick={() => setDetailTab('product')}>产品详细配置</button>
           <button type="button" className={detailTab === 'production' ? 'is-active' : ''} onClick={() => setDetailTab('production')}>检验记录 / 生产配置</button>
         </nav>
 
         <div className="wutos-detail-content">
           {detailTab === 'device' && <FlameDetectorWorkbench state={detectors} config={flameConfig} analysis={waveformAnalysis} onRefresh={handleRefresh} />}
+
+          {detailTab === 'observer' && <div className="wutos-detail-production">
+            <p className="wutos-detail-section-note">测试监听器与正式 FieldRuntime 同步启动并保持只读；WebSocket 实时监听，HTTP 轮询自动兜底。这里显示真实监听健康度、当前监听数据、归档和监听参数。</p>
+            <TestObserverPanel backendHttpUrl={HTTP} backendWsUrl={WS} />
+          </div>}
 
           {detailTab === 'product' && <div className="wutos-detail-product">
             <p className="wutos-detail-section-note">主页面只直接选择生产型号；版本基准、探头数、继电器测试和产品编号规则等低频配置集中在这里编辑。</p>
