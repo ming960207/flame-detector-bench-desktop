@@ -13,7 +13,9 @@ import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '..
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 
 const DESKTOP_RUNTIME = typeof window !== 'undefined' ? window.desktopRuntime : undefined;
-const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || import.meta.env.VITE_BACKEND_API_URL || `http://${window.location.hostname}:3001`;
+const FIELD_DEV_HTTP = `http://${window.location.hostname}:3001`;
+const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
+const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
 const AUTO_TEST_STEP_KEYS = ['connection', 'params', 'status', 'realtime', 'mirror', 'report'] as const;
 
 interface FlameTestReport {

@@ -16,8 +16,11 @@ import './field-process-status.css';
 import './wutos-main-overrides.css';
 
 const DESKTOP_RUNTIME = typeof window !== 'undefined' ? window.desktopRuntime : undefined;
-const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || import.meta.env.VITE_BACKEND_API_URL || 'http://' + window.location.hostname + ':3001';
-const WS = DESKTOP_RUNTIME?.backendWsUrl || import.meta.env.VITE_BACKEND_WS_URL || 'ws://' + window.location.hostname + ':3001';
+const FIELD_DEV_HTTP = 'http://' + window.location.hostname + ':3001';
+const FIELD_DEV_WS = 'ws://' + window.location.hostname + ':3001';
+const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
+const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
+const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
 
 type DetailTab = 'device' | 'product' | 'production';
@@ -71,6 +74,20 @@ export function FieldProcessStatusApp() {
     if (!response.ok) throw new Error('PLC 工序服务未启动');
     const summary = await response.json() as FieldSummaryPayload;
     applySummary(summary);
+
+    // Keep configuration loading independent from summary shape so a stale
+    // backend build cannot leave the configuration page looking empty.
+    const productResponse = await fetch(HTTP + '/api/product-config');
+    if (productResponse.ok) {
+      const productPayload = await productResponse.json() as {
+        config?: ProductDetectionConfig;
+        locked?: boolean;
+        precheck?: ProductPrecheckReport | null;
+      };
+      if (productPayload.config) setProductConfig(productPayload.config);
+      if (typeof productPayload.locked === 'boolean') setProductLocked(productPayload.locked);
+      if ('precheck' in productPayload) setProductPrecheck(productPayload.precheck ?? null);
+    }
 
     const deviceResponse = await fetch(HTTP + '/api/flame/devices');
     if (deviceResponse.ok) setDetectors(await deviceResponse.json() as FlameDetectorState);
