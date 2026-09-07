@@ -1,45 +1,49 @@
 @echo off
 setlocal EnableDelayedExpansion
+chcp 65001 >nul
 
-title Flame Detector Test Bench - Field Runtime
+cd /d "%~dp0"
+title Flame Detector Test Bench - Source Runtime
 
 echo ========================================
-echo   Flame Detector Test Bench - Field Runtime
+echo   Flame Detector Test Bench - Source Runtime
 echo ========================================
+echo.
+echo This launcher now uses the SAME Electron runtime/logging path as the packaged app.
+echo.
+echo Project : %CD%
+echo Log dir : %CD%\logs
+echo Latest  : %CD%\logs\latest.log
 echo.
 
 :: ========================================
-:: 1. Check Node.js
+:: 1. Check Node.js / npm
 :: ========================================
 where node >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Node.js not found!
-    echo         Please install from https://nodejs.org
+    echo         Please install Node.js 22 x64.
     echo.
     pause
     exit /b 1
 )
 
-for /f "tokens=*" %%v in ('node -v 2^>nul') do set NODE_VER=%%v
-echo [OK] Node.js: %NODE_VER%
-
-:: ========================================
-:: 2. Check npm
-:: ========================================
 where npm >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] npm not found! Please reinstall Node.js.
     pause
     exit /b 1
 )
+
+for /f "tokens=*" %%v in ('node -v 2^>nul') do set NODE_VER=%%v
+echo [OK] Node.js: %NODE_VER%
 echo [OK] npm is available
 echo.
 
 :: ========================================
-:: 3. Frontend dependencies
+:: 2. Frontend dependencies
 :: ========================================
 echo [CHECK] Frontend dependencies...
-
 set NEED_FRONTEND_INSTALL=0
 
 if not exist "node_modules" (
@@ -48,18 +52,18 @@ if not exist "node_modules" (
 ) else (
     if not exist "node_modules\vite" (
         set NEED_FRONTEND_INSTALL=1
-        echo [INFO] vite package missing, reinstalling...
+        echo [INFO] vite package missing
+    )
+    if not exist "node_modules\electron" (
+        set NEED_FRONTEND_INSTALL=1
+        echo [INFO] electron package missing
     )
 )
 
 if !NEED_FRONTEND_INSTALL! == 1 (
     echo [INSTALL] Installing frontend dependencies...
     call npm install
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Frontend install failed! Check network or run: npm install
-        pause
-        exit /b 1
-    )
+    if %ERRORLEVEL% neq 0 goto :error
     echo [OK] Frontend dependencies installed
 ) else (
     echo [OK] Frontend dependencies ready
@@ -67,10 +71,9 @@ if !NEED_FRONTEND_INSTALL! == 1 (
 echo.
 
 :: ========================================
-:: 4. Backend dependencies
+:: 3. Backend dependencies
 :: ========================================
 echo [CHECK] Backend dependencies...
-
 set NEED_SERVER_INSTALL=0
 
 if not exist "server\node_modules" (
@@ -79,62 +82,93 @@ if not exist "server\node_modules" (
 ) else (
     if not exist "server\node_modules\tsx" (
         set NEED_SERVER_INSTALL=1
-        echo [INFO] tsx missing, reinstalling server deps...
-    ) else (
-        if not exist "server\node_modules\express" (
-            set NEED_SERVER_INSTALL=1
-            echo [INFO] express missing, reinstalling server deps...
-        )
+        echo [INFO] tsx package missing
+    )
+    if not exist "server\node_modules\express" (
+        set NEED_SERVER_INSTALL=1
+        echo [INFO] express package missing
     )
 )
 
 if !NEED_SERVER_INSTALL! == 1 (
     echo [INSTALL] Installing backend dependencies...
-    pushd server
-    call npm install
-    if %ERRORLEVEL% neq 0 (
-        popd
-        echo [ERROR] Backend install failed! Check network or run: npm install in server/
-        pause
-        exit /b 1
-    )
-    popd
+    call npm install --prefix server
+    if %ERRORLEVEL% neq 0 goto :error
     echo [OK] Backend dependencies installed
 ) else (
     echo [OK] Backend dependencies ready
 )
-
-echo.
-echo ========================================
-echo   All checks passed. Starting services...
-echo ========================================
 echo.
 
 :: ========================================
-:: 5. Start Backend
+:: 4. Validate Electron main process
 :: ========================================
-echo [START] Backend (field runtime; PLC and detector acquisition enabled)...
-start "Backend - Field Runtime" cmd /k "cd /d ""%~dp0server"" && npm run dev:field"
+echo [CHECK] Electron main process syntax...
+node --check desktop\main.cjs
+if %ERRORLEVEL% neq 0 goto :error
+echo [OK] Electron main process syntax valid
+echo.
 
-echo [WAIT] Waiting 5s for backend to initialize...
-timeout /t 5 /nobreak >nul
+:: ========================================
+:: 5. Build source exactly for Electron runtime
+:: ========================================
+echo [BUILD] Unified backend...
+call npm run build:server
+if %ERRORLEVEL% neq 0 goto :error
 
-:: ========================================
-:: 6. Start Frontend
-:: ========================================
-echo [START] Frontend (local Vite)...
-start "Frontend - Field Runtime" cmd /k "cd /d ""%~dp0"" && set ""VITE_RUNTIME_MODE=field"" && set ""VITE_BACKEND_API_URL=http://127.0.0.1:3001"" && set ""VITE_BACKEND_WS_URL=ws://127.0.0.1:3001"" && npm run dev"
+echo.
+echo [BUILD] Desktop web frontend...
+call npm run build:web
+if %ERRORLEVEL% neq 0 goto :error
 
 echo.
 echo ========================================
-echo   Services started successfully!
-echo.
-echo   Frontend : http://127.0.0.1:3002
-echo   Backend  : http://127.0.0.1:3001
-echo   Mode     : field (PLC and detector acquisition enabled)
+echo   Starting Electron source runtime...
 echo ========================================
 echo.
-echo This window can be closed safely.
-echo To stop services, close the Backend / Frontend windows.
+echo Runtime logging is shared with packaged app:
+echo   %CD%\logs\latest.log
+echo   %CD%\logs\flame-detector-^<timestamp^>-pid^<pid^>.log
 echo.
-pause >nul
+echo Captured scopes include:
+echo   BOOT / BACKEND / STDOUT / STDERR / PROCESS
+
+echo   RENDERER / NETWORK / WaveformDiag[WS] / WaveformDiag[UI]
+echo.
+echo NOTE: latest.log is recreated on each launch.
+echo       Preserve the session log if multiple runs are needed.
+echo.
+
+:: IMPORTANT:
+:: npm run desktop -> electron . -> desktop/main.cjs
+:: This is the same main-process logging implementation used by the packaged app.
+call npm run desktop
+set APP_EXIT=%ERRORLEVEL%
+
+echo.
+echo ========================================
+echo   Electron runtime exited: %APP_EXIT%
+echo ========================================
+echo Latest log:
+echo   %CD%\logs\latest.log
+echo.
+
+if not "%APP_EXIT%"=="0" (
+    echo [WARN] Runtime exited with non-zero code. Check latest.log first.
+)
+
+pause
+exit /b %APP_EXIT%
+
+:error
+echo.
+echo ========================================
+echo   Build/start preparation failed
+
+echo ========================================
+echo Please review the console output above.
+echo If Electron started before the failure, also check:
+echo   %CD%\logs\latest.log
+echo.
+pause
+exit /b 1
