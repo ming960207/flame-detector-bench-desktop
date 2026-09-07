@@ -1,6 +1,10 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Printer, RefreshCw, RotateCcw } from 'lucide-react';
-import { labelPrinterRuntime, type ProductLabelPrintJob } from './label-printer-runtime';
+import { Printer, RefreshCw, RotateCcw, Usb, Wifi } from 'lucide-react';
+import {
+  labelPrinterRuntime,
+  type PrinterConnectionType,
+  type ProductLabelPrintJob,
+} from './label-printer-runtime';
 
 interface Props {
   backendHttpUrl: string;
@@ -84,6 +88,9 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
   };
 
   const recent = state.jobs.slice(0, 18);
+  const usbPrinters = state.printers.filter((printer) => printer.connectionType === 'usb');
+  const wifiPrinters = state.printers.filter((printer) => printer.connectionType === 'wifi');
+  const isWifi = state.config.connectionType === 'wifi';
 
   return <section style={{
     marginTop: 14,
@@ -103,6 +110,10 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
         <Printer size={16} color={colors.cyan} />
         <strong style={{ color: colors.title, fontSize: 13 }}>产品标签自动打印</strong>
         <span style={{ fontSize: 11, color: healthColor(state.health) }}>{healthText(state.health)}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: colors.muted }}>
+          {isWifi ? <Wifi size={12} /> : <Usb size={12} />}
+          {isWifi ? 'WiFi / 局域网' : 'USB'}
+        </span>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: colors.text, cursor: 'pointer' }}>
         <input
@@ -115,32 +126,114 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
     </header>
 
     <div style={{ padding: 13, display: 'grid', gap: 12 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(210px, 1.6fr) auto repeat(3, minmax(90px, .55fr))', gap: 8, alignItems: 'end' }}>
-        <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
-          标签机
+      <div style={{
+        border: `1px solid ${colors.line}`,
+        background: '#04131f',
+        padding: 10,
+        display: 'grid',
+        gap: 9,
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(220px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+          <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
+            连接方式
+            <select
+              value={state.config.connectionType}
+              disabled={busy || state.health === 'printing'}
+              onChange={(event) => {
+                const connectionType = event.target.value as PrinterConnectionType;
+                void run(
+                  () => labelPrinterRuntime.changeConnectionType(connectionType),
+                  `已切换为${connectionType === 'wifi' ? ' WiFi' : ' USB'}连接`,
+                );
+              }}
+              style={fieldStyle}
+            >
+              <option value="usb">USB</option>
+              <option value="wifi">WiFi / 局域网</option>
+            </select>
+          </label>
+
+          {!isWifi ? <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
+            USB 标签机
+            <select
+              value={state.config.printerName}
+              disabled={busy || state.health === 'printing'}
+              onChange={(event) => {
+                const name = event.target.value;
+                labelPrinterRuntime.updateConfig({ printerName: name });
+                if (name) void run(() => labelPrinterRuntime.connectUsbPrinter(name), 'USB 标签机已连接');
+              }}
+              style={{ ...fieldStyle, width: '100%' }}
+            >
+              <option value="">-- 选择 USB 标签机 --</option>
+              {usbPrinters.map((printer) => <option key={`${printer.name}:${printer.port}`} value={printer.name}>{printer.name}</option>)}
+            </select>
+          </label> : <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
+            WiFi 标签机 IP
+            <input
+              value={state.config.wifiAddress}
+              disabled={busy || state.health === 'printing'}
+              onChange={(event) => labelPrinterRuntime.updateConfig({ wifiAddress: event.target.value, wifiPrinterName: '' })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && state.config.wifiAddress.trim()) {
+                  void run(
+                    () => labelPrinterRuntime.connectWifiPrinter(state.config.wifiAddress, state.config.wifiPrinterName),
+                    'WiFi 标签机已连接',
+                  );
+                }
+              }}
+              placeholder="例如 192.168.1.88"
+              spellCheck={false}
+              style={{ ...fieldStyle, width: '100%', fontFamily: 'Consolas, monospace' }}
+            />
+          </label>}
+
+          <button
+            type="button"
+            disabled={busy || state.health === 'printing'}
+            onClick={() => void run(() => labelPrinterRuntime.scanPrinters(), isWifi ? 'WiFi 扫描完成' : 'USB 扫描完成')}
+            style={{ ...fieldStyle, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, height: 31 }}
+          >
+            <RefreshCw size={13} />扫描
+          </button>
+        </div>
+
+        {isWifi && <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(220px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+          <div style={{ fontSize: 10.5, color: colors.muted, paddingBottom: 8 }}>局域网发现设备</div>
           <select
-            value={state.config.printerName}
+            value={wifiPrinters.some((printer) => printer.address === state.config.wifiAddress) ? state.config.wifiAddress : ''}
+            disabled={busy || state.health === 'printing'}
             onChange={(event) => {
-              const name = event.target.value;
-              labelPrinterRuntime.updateConfig({ printerName: name });
-              if (name) void run(() => labelPrinterRuntime.connectPrinter(name), '打印机已连接');
+              const address = event.target.value;
+              const target = wifiPrinters.find((printer) => printer.address === address);
+              if (!address || !target) return;
+              labelPrinterRuntime.updateConfig({ wifiAddress: address, wifiPrinterName: target.name });
+              void run(() => labelPrinterRuntime.connectWifiPrinter(address, target.name), 'WiFi 标签机已连接');
             }}
             style={{ ...fieldStyle, width: '100%' }}
           >
-            <option value="">-- 选择 USB 标签机 --</option>
-            {state.printers.map((printer) => <option key={`${printer.name}:${printer.port}`} value={printer.name}>{printer.name}</option>)}
+            <option value="">-- 扫描结果（也可直接输入 IP） --</option>
+            {wifiPrinters.map((printer) => <option key={`${printer.name}:${printer.address}`} value={printer.address}>{printer.name} · {printer.address}</option>)}
           </select>
-        </label>
+          <button
+            type="button"
+            disabled={busy || state.health === 'printing' || !state.config.wifiAddress.trim()}
+            onClick={() => void run(
+              () => labelPrinterRuntime.connectWifiPrinter(state.config.wifiAddress, state.config.wifiPrinterName),
+              'WiFi 标签机已连接',
+            )}
+            style={{ ...fieldStyle, cursor: 'pointer', height: 31, color: colors.cyan, fontWeight: 700 }}
+          >
+            连接测试
+          </button>
+        </div>}
 
-        <button
-          type="button"
-          disabled={busy || state.health === 'printing'}
-          onClick={() => void run(() => labelPrinterRuntime.scanPrinters(), '扫描完成')}
-          style={{ ...fieldStyle, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, height: 31 }}
-        >
-          <RefreshCw size={13} />扫描
-        </button>
+        {isWifi && <div style={{ fontSize: 10, color: colors.muted }}>
+          WiFi 模式要求电脑与标签机位于同一局域网。优先使用“扫描”，若局域网广播受限，可直接输入打印机 IPv4 地址连接。
+        </div>}
+      </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))', gap: 8, alignItems: 'end' }}>
         <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
           浓度
           <select value={state.config.density} onChange={(event) => labelPrinterRuntime.updateConfig({ density: Number(event.target.value) })} style={fieldStyle}>
