@@ -601,7 +601,13 @@ export class FlameDetectorService extends EventEmitter {
         continue;
       }
       const entry = this.pool.get(connKey(unit, this.config));
-      if (entry?.ok && this.waveformStreamingArmed && !tracker.isReady()) void this.initializeUnit(unit, entry.client);
+      if (entry?.ok && this.waveformStreamingArmed && !tracker.isReady()) {
+        // Re-arm the request flag before calling initializeUnit so a request
+        // that was already in flight across the limit transition can schedule
+        // its next retry when it settles.
+        this.broadcastModeRequestingUnits.add(unit.index);
+        void this.initializeUnit(unit, entry.client);
+      }
     }
     this.broadcastStateNow();
   }
@@ -904,6 +910,7 @@ export class FlameDetectorService extends EventEmitter {
         waitForResponse: true,
       });
       if (!this.isCurrentClient(unit, client)) return false;
+      if (!this.modeRetryAllowed()) return false;
       console.log(`[FlameService] 设备 ${unit.index} 波形模式切换已确认，继续等待波形数据`);
       state.startup = tracker.markModeSwitchOk();
       this.logLifecycle(unit.index, 'MODE_SWITCH_OK', state.startup);
