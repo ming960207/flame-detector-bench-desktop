@@ -5,6 +5,7 @@
       "label": "双波长",
       "productModel": "GHT-1050-02",
       "expectedSoftwareVersion": "",
+      "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 2,
       "relayFunctionalTestEnabled": false,
       "productCodeRule": {
@@ -19,6 +20,7 @@
       "label": "三波长",
       "productModel": "GHT-1050-03",
       "expectedSoftwareVersion": "",
+      "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 3,
       "relayFunctionalTestEnabled": false,
       "productCodeRule": {
@@ -33,6 +35,7 @@
       "label": "四波长",
       "productModel": "GHT-1050-04",
       "expectedSoftwareVersion": "",
+      "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 4,
       "relayFunctionalTestEnabled": false,
       "productCodeRule": {
@@ -47,6 +50,7 @@
       "label": "图探型",
       "productModel": "GHT-1050-05",
       "expectedSoftwareVersion": "",
+      "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 3,
       "relayFunctionalTestEnabled": false,
       "productCodeRule": {
