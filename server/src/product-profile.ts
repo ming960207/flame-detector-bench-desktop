@@ -15,7 +15,7 @@ export interface ProductProfileConfig {
   /** 具体产品型号，用于自动编号流水号按型号独立计数。 */
   productModel: string;
   expectedSoftwareVersion: string;
-  /** 勾选后预检阶段不发送软件版本读取指令，版本也不参与 PASS/FAIL 判定。 */
+  /** 勾选后仍发送版本读取指令并记录实际版本，但版本结果不参与 PASS/FAIL 判定。 */
   skipSoftwareVersionCheck: boolean;
   expectedProbeCount: number;
   /** 具体型号是否执行真实火警/故障继电器功能测试。关闭时记录表按业务规则填“合格”，后台标 DEFAULT_PASS。 */
