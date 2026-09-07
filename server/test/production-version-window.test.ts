@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { evaluateFieldDetectorBatch } from '../src/closure/field-detector-verdict.js';
 import type { FieldStatusSnapshot } from '../src/closure/field-status-server.js';
 import type { FlameConfig } from '../src/config.js';
 import type { PLCProcessStatus } from '../src/process-status.js';
@@ -97,4 +98,63 @@ test('software version read starts at EMC +8s and runs only once inside the fina
 
   coordinator.observeStatus(emcStatus(startedAt + EMC_SOFTWARE_VERSION_READ_OFFSET_MS + 1_000));
   assert.equal(versionReads, 1);
+});
+
+test('completed batch cannot pass while the software version check is still pending', () => {
+  const verdict = evaluateFieldDetectorBatch(
+    {
+      units: [{
+        index: 1,
+        address: 1,
+        online: true,
+        fault: false,
+        sourceReady: true,
+        syncOk: true,
+        probeCount: 2,
+        sensitivity: 1,
+        snr21: 1,
+        snr23: 1,
+        snr31: 1,
+        features: [],
+        lastUpdate: 10_000,
+      }],
+      onlineCount: 1,
+      fireCount: 0,
+      faultCount: 0,
+      timestamp: 10_000,
+    } as any,
+    {
+      phase: 'COMPLETE',
+      thresholds: {},
+      units: [],
+    } as any,
+    {
+      batchId: 'batch-emc-1',
+      productType: DEFAULT_PRODUCT_DETECTION_CONFIG.selectedType,
+      productLabel: 'test',
+      expectedSoftwareVersion: '01.02.03.04',
+      expectedProbeCount: 2,
+      startedAt: 1,
+      completedAt: 0,
+      verdict: 'PENDING',
+      units: [{
+        index: 1,
+        address: 1,
+        productType: DEFAULT_PRODUCT_DETECTION_CONFIG.selectedType,
+        expectedSoftwareVersion: '01.02.03.04',
+        actualSoftwareVersion: null,
+        expectedProbeCount: 2,
+        actualProbeCount: 2,
+        fireAlarm: false,
+        fault: false,
+        checkedAt: 1,
+        verdict: 'PENDING',
+        reasons: ['SOFTWARE_VERSION_PENDING'],
+      }],
+    },
+    DEFAULT_PRODUCT_DETECTION_CONFIG,
+  );
+
+  assert.equal(verdict.verdict, 'FAIL');
+  assert.equal(verdict.units[0]?.reason, 'PRODUCT_PRECHECK_NOT_COMPLETED');
 });
