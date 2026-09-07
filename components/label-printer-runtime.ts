@@ -1,4 +1,5 @@
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
+export type PrinterConnectionType = 'usb' | 'wifi';
 
 export interface ProductLabelPrintJob {
   id: string;
@@ -30,10 +31,20 @@ export interface LabelPrintQueueSummary {
   total: number;
 }
 
+export interface LabelPrinterDevice {
+  connectionType: PrinterConnectionType;
+  name: string;
+  port?: number;
+  address?: string;
+}
+
 export interface LocalLabelPrinterConfig {
   autoPrint: boolean;
+  connectionType: PrinterConnectionType;
   printerName: string;
   printerPort: number;
+  wifiAddress: string;
+  wifiPrinterName: string;
   density: number;
   labelType: number;
   printMode: number;
@@ -42,7 +53,7 @@ export interface LocalLabelPrinterConfig {
 export interface LabelPrinterRuntimeState {
   health: 'idle' | 'connecting' | 'service-offline' | 'printer-offline' | 'ready' | 'printing' | 'error';
   detail: string;
-  printers: Array<{ name: string; port: number }>;
+  printers: LabelPrinterDevice[];
   config: LocalLabelPrinterConfig;
   jobs: ProductLabelPrintJob[];
   summary: LabelPrintQueueSummary;
@@ -52,6 +63,9 @@ export interface LabelPrinterRuntimeState {
 
 interface JcAck {
   apiName?: string;
+  code?: number;
+  info?: unknown;
+  result?: unknown;
   resultAck?: {
     errorCode?: number;
     info?: unknown;
@@ -69,20 +83,30 @@ interface PendingRequest {
 const STORAGE_KEY = 'flame-detector-label-printer-config-v1';
 const DEFAULT_CONFIG: LocalLabelPrinterConfig = {
   autoPrint: true,
+  connectionType: 'usb',
   printerName: '',
   printerPort: 0,
+  wifiAddress: '',
+  wifiPrinterName: '',
   density: 3,
   labelType: 1,
   printMode: 1,
 };
+
+function normalizeConnectionType(value: unknown): PrinterConnectionType {
+  return value === 'wifi' ? 'wifi' : 'usb';
+}
 
 function loadConfig(): LocalLabelPrinterConfig {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<LocalLabelPrinterConfig>;
     return {
       autoPrint: parsed.autoPrint !== false,
+      connectionType: normalizeConnectionType(parsed.connectionType),
       printerName: typeof parsed.printerName === 'string' ? parsed.printerName : '',
       printerPort: Number.isFinite(Number(parsed.printerPort)) ? Number(parsed.printerPort) : 0,
+      wifiAddress: typeof parsed.wifiAddress === 'string' ? parsed.wifiAddress : '',
+      wifiPrinterName: typeof parsed.wifiPrinterName === 'string' ? parsed.wifiPrinterName : '',
       density: Number.isFinite(Number(parsed.density)) ? Number(parsed.density) : 3,
       labelType: [1, 2, 3, 4, 5, 6, 10].includes(Number(parsed.labelType)) ? Number(parsed.labelType) : 1,
       printMode: [1, 2].includes(Number(parsed.printMode)) ? Number(parsed.printMode) : 1,
@@ -102,11 +126,28 @@ function localDate(timestamp: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+function unpackAckPayload(response: JcAck): unknown {
+  let payload = response.resultAck?.info ?? response.resultAck?.result ?? response.info ?? response.result;
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); } catch { /* keep text */ }
+  }
+  return payload;
+}
+
+function normalizeIpv4(value: string): string {
+  return value.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+}
+
+function isValidIpv4(value: string): boolean {
+  const parts = normalizeIpv4(value).split('.');
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
+}
+
 class JingchenTransport {
   private socket: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private jobListeners = new Set<(message: JcAck) => void>();
-  private selectedPrinter: { name: string; port: number } | null = null;
+  private selectedPrinter: LabelPrinterDevice | null = null;
   private initialized = false;
 
   get serviceConnected(): boolean {
@@ -140,8 +181,9 @@ class JingchenTransport {
         if (!isCommitProgress) {
           window.clearTimeout(pending.timer);
           this.pending.delete(apiName);
-          if (message.resultAck?.errorCode === 0) pending.resolve(message);
-          else pending.reject(new Error(String(message.resultAck?.info || `${apiName} failed`)));
+          const rawCode = message.resultAck?.errorCode ?? message.code;
+          if (rawCode === undefined || Number(rawCode) === 0) pending.resolve(message);
+          else pending.reject(new Error(String(message.resultAck?.info ?? message.info ?? `${apiName} failed (${rawCode})`)));
         }
       }
       if (apiName === 'commitJob') {
@@ -198,6 +240,7 @@ class JingchenTransport {
     for (const port of [37989, 37888]) {
       try {
         await this.openPort(port);
+        console.info(`[标签打印] 已连接精臣打印服务 ws://127.0.0.1:${port}`);
         return;
       } catch (error) {
         lastError = error;
@@ -231,31 +274,70 @@ class JingchenTransport {
     this.initialized = true;
   }
 
-  async listUsbPrinters(): Promise<Array<{ name: string; port: number }>> {
+  async listUsbPrinters(): Promise<LabelPrinterDevice[]> {
     const response = await this.request('getAllPrinters');
-    let info = response.resultAck?.info;
-    if (typeof info === 'string') {
-      try { info = JSON.parse(info); } catch { /* keep text */ }
-    }
-    const printers: Array<{ name: string; port: number }> = [];
+    const info = unpackAckPayload(response);
+    const printers: LabelPrinterDevice[] = [];
     if (Array.isArray(info)) {
       info.forEach((item, index) => {
-        if (typeof item === 'string') printers.push({ name: item, port: index });
+        if (typeof item === 'string') printers.push({ connectionType: 'usb', name: item, port: index });
         else if (item && typeof item === 'object') {
           const row = item as Record<string, unknown>;
-          const name = String(row.printerName || row.deviceName || '').trim();
-          if (name) printers.push({ name, port: Number(row.port) || index });
+          const name = String(row.printerName || row.deviceName || row.name || '').trim();
+          if (name) printers.push({ connectionType: 'usb', name, port: Number(row.port) || index });
         }
       });
     } else if (info && typeof info === 'object') {
-      Object.entries(info as Record<string, unknown>).forEach(([name, port]) => printers.push({ name, port: Number(port) || 0 }));
+      Object.entries(info as Record<string, unknown>).forEach(([name, port]) => printers.push({ connectionType: 'usb', name, port: Number(port) || 0 }));
     }
+    console.info(`[标签打印] USB扫描完成 count=${printers.length}`);
+    return printers;
+  }
+
+  async listWifiPrinters(): Promise<LabelPrinterDevice[]> {
+    let response: JcAck;
+    try {
+      response = await this.request('getWifiDevices', undefined, 7_000);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`当前精臣打印服务未能完成 WiFi 设备扫描：${detail}。请确认 jcPrinterSdk.exe 版本支持 getWifiDevices。`);
+    }
+    const payload = unpackAckPayload(response);
+    const rawList = Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).list)
+        ? (payload as Record<string, unknown>).list as unknown[]
+        : [];
+    const printers: LabelPrinterDevice[] = [];
+    for (const item of rawList) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const address = normalizeIpv4(String(row.address || row.ip || row.ipAddress || '').trim());
+      if (!isValidIpv4(address)) continue;
+      const name = String(row.name || row.printerName || row.deviceName || '').trim() || `WiFi打印机 ${address}`;
+      printers.push({ connectionType: 'wifi', name, address });
+    }
+    console.info(`[标签打印] WiFi扫描完成 count=${printers.length} devices=${printers.map((item) => `${item.name}@${item.address}`).join(',') || '-'}`);
     return printers;
   }
 
   async selectUsbPrinter(name: string, port: number): Promise<void> {
     await this.request('selectPrinter', { printerName: name, port });
-    this.selectedPrinter = { name, port };
+    this.selectedPrinter = { connectionType: 'usb', name, port };
+    console.info(`[标签打印] USB标签机连接成功 name=${name} port=${port}`);
+  }
+
+  async selectWifiPrinter(addressValue: string, name = ''): Promise<void> {
+    const address = normalizeIpv4(addressValue);
+    if (!isValidIpv4(address)) throw new Error(`WiFi 标签机 IP 地址无效：${addressValue || '(空)'}`);
+    try {
+      await this.request('openPrinterByDevice', { address, name, deviceType: 1 }, 10_000);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`WiFi 标签机连接失败 ${address}：${detail}。请确认打印机与电脑同一局域网，且 jcPrinterSdk.exe 支持 openPrinterByDevice。`);
+    }
+    this.selectedPrinter = { connectionType: 'wifi', name: name || `WiFi打印机 ${address}`, address };
+    console.info(`[标签打印] WiFi标签机连接成功 name=${name || '-'} address=${address}`);
   }
 
   addJobListener(listener: (message: JcAck) => void): void { this.jobListeners.add(listener); }
@@ -339,49 +421,124 @@ class LabelPrinterRuntime {
     this.timer = window.setInterval(() => void this.tick(), 1200);
   }
 
-  private async initializePrinter(): Promise<void> {
+  private readyDetail(config = this.state.config): string {
+    if (config.connectionType === 'wifi') {
+      return `WiFi 标签机已就绪：${config.wifiPrinterName || '精臣标签机'} · ${config.wifiAddress}`;
+    }
+    return `USB 标签机已就绪：${config.printerName || '已连接设备'}`;
+  }
+
+  private async initializePrinter(force = false): Promise<void> {
     if (this.busy) return;
     const now = Date.now();
-    if (now - this.lastRecoveryAt < 3000 && this.state.health !== 'idle') return;
+    if (!force && now - this.lastRecoveryAt < 3000 && this.state.health !== 'idle') return;
     this.lastRecoveryAt = now;
-    this.emit({ health: 'connecting', detail: '正在连接精臣打印服务…' });
+    const config = this.state.config;
+    this.emit({ health: 'connecting', detail: `正在初始化${config.connectionType === 'wifi' ? ' WiFi' : ' USB'}标签机…` });
     try {
       await this.transport.connect();
       await this.transport.initSdk();
+
+      if (config.connectionType === 'wifi') {
+        const configuredAddress = normalizeIpv4(config.wifiAddress);
+        if (configuredAddress) {
+          await this.transport.selectWifiPrinter(configuredAddress, config.wifiPrinterName);
+          if (configuredAddress !== config.wifiAddress) this.updateConfig({ wifiAddress: configuredAddress });
+          this.emit({ health: 'ready', detail: this.readyDetail({ ...this.state.config, wifiAddress: configuredAddress }) });
+          return;
+        }
+
+        const printers = await this.transport.listWifiPrinters();
+        this.emit({ printers });
+        if (printers.length === 0) {
+          this.emit({ health: 'printer-offline', detail: '未搜索到 WiFi 精臣标签机；可手工输入打印机 IP 后连接' });
+          return;
+        }
+        if (printers.length !== 1) {
+          this.emit({ health: 'printer-offline', detail: `已发现 ${printers.length} 台 WiFi 标签机，请选择设备` });
+          return;
+        }
+        const target = printers[0];
+        await this.connectWifiPrinter(target.address || '', target.name);
+        return;
+      }
+
       const printers = await this.transport.listUsbPrinters();
       this.emit({ printers });
-      const config = this.state.config;
       const saved = printers.find((printer) => printer.name === config.printerName);
       const target = saved ?? (!config.printerName && printers.length === 1 ? printers[0] : undefined);
       if (!target) {
-        this.emit({ health: 'printer-offline', detail: printers.length === 0 ? '未检测到 USB 精臣标签打印机' : '请选择标签打印机' });
+        this.emit({ health: 'printer-offline', detail: printers.length === 0 ? '未检测到 USB 精臣标签打印机' : '请选择 USB 标签打印机' });
         return;
       }
-      await this.transport.selectUsbPrinter(target.name, target.port);
+      await this.transport.selectUsbPrinter(target.name, target.port || 0);
       if (target.name !== config.printerName || target.port !== config.printerPort) {
-        this.updateConfig({ printerName: target.name, printerPort: target.port });
+        this.updateConfig({ printerName: target.name, printerPort: target.port || 0 });
       }
-      this.emit({ health: 'ready', detail: `标签机已就绪：${target.name}` });
+      this.emit({ health: 'ready', detail: this.readyDetail() });
     } catch (error) {
-      this.emit({ health: 'service-offline', detail: error instanceof Error ? error.message : String(error) });
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[标签打印] 初始化失败 mode=${config.connectionType}:`, error);
+      this.emit({ health: this.transport.serviceConnected ? 'printer-offline' : 'service-offline', detail });
     }
   }
 
-  async scanPrinters(): Promise<void> { this.lastRecoveryAt = 0; await this.initializePrinter(); }
+  async scanPrinters(): Promise<void> {
+    this.lastRecoveryAt = 0;
+    const type = this.state.config.connectionType;
+    this.emit({ printers: [], health: 'connecting', detail: type === 'wifi' ? '正在扫描局域网 WiFi 标签机…' : '正在扫描 USB 标签机…' });
+    await this.transport.connect();
+    await this.transport.initSdk();
+    if (type === 'wifi') {
+      const printers = await this.transport.listWifiPrinters();
+      this.emit({
+        printers,
+        health: 'printer-offline',
+        detail: printers.length > 0 ? `已发现 ${printers.length} 台 WiFi 标签机，请选择或输入 IP 连接` : '未搜索到 WiFi 标签机；可手工输入 IP 直连',
+      });
+      return;
+    }
+    const printers = await this.transport.listUsbPrinters();
+    this.emit({ printers, health: 'printer-offline', detail: printers.length > 0 ? `已发现 ${printers.length} 台 USB 标签机，请选择设备` : '未检测到 USB 精臣标签打印机' });
+  }
 
-  async connectPrinter(name: string): Promise<void> {
-    const target = this.state.printers.find((printer) => printer.name === name);
-    if (!target) throw new Error('所选打印机不在当前 USB 列表中');
-    await this.transport.selectUsbPrinter(target.name, target.port);
-    this.updateConfig({ printerName: target.name, printerPort: target.port });
-    this.emit({ health: 'ready', detail: `标签机已就绪：${target.name}` });
+  async changeConnectionType(connectionType: PrinterConnectionType): Promise<void> {
+    if (this.state.health === 'printing') throw new Error('打印任务执行中，不能切换标签机连接方式');
+    this.updateConfig({ connectionType });
+    this.lastRecoveryAt = 0;
+    this.emit({ printers: [], health: 'connecting', detail: `正在切换到${connectionType === 'wifi' ? ' WiFi' : ' USB'}标签机…` });
+    await this.initializePrinter(true);
+  }
+
+  async connectUsbPrinter(name: string): Promise<void> {
+    const target = this.state.printers.find((printer) => printer.connectionType === 'usb' && printer.name === name);
+    if (!target) throw new Error('所选打印机不在当前 USB 列表中，请重新扫描');
+    await this.transport.connect();
+    await this.transport.initSdk();
+    await this.transport.selectUsbPrinter(target.name, target.port || 0);
+    this.updateConfig({ connectionType: 'usb', printerName: target.name, printerPort: target.port || 0 });
+    this.emit({ health: 'ready', detail: this.readyDetail() });
+  }
+
+  async connectPrinter(name: string): Promise<void> { await this.connectUsbPrinter(name); }
+
+  async connectWifiPrinter(addressValue: string, name = ''): Promise<void> {
+    const address = normalizeIpv4(addressValue);
+    if (!isValidIpv4(address)) throw new Error('请输入有效的 WiFi 标签机 IPv4 地址，例如 192.168.1.88');
+    await this.transport.connect();
+    await this.transport.initSdk();
+    await this.transport.selectWifiPrinter(address, name);
+    this.updateConfig({ connectionType: 'wifi', wifiAddress: address, wifiPrinterName: name });
+    this.emit({ health: 'ready', detail: this.readyDetail() });
   }
 
   updateConfig(patch: Partial<LocalLabelPrinterConfig>): void {
     const config: LocalLabelPrinterConfig = { ...this.state.config, ...patch };
+    config.connectionType = normalizeConnectionType(config.connectionType);
     config.density = Math.max(1, Math.min(15, Number(config.density) || 3));
     config.labelType = [1, 2, 3, 4, 5, 6, 10].includes(Number(config.labelType)) ? Number(config.labelType) : 1;
     config.printMode = [1, 2].includes(Number(config.printMode)) ? Number(config.printMode) : 1;
+    config.printerPort = Number.isFinite(Number(config.printerPort)) ? Number(config.printerPort) : 0;
     saveConfig(config);
     this.emit({ config });
   }
@@ -464,9 +621,10 @@ class LabelPrinterRuntime {
       this.emit({ health: 'printing', detail: `正在打印 D${claimed.slot} · ${claimed.verdict}`, currentJobId: claimed.id });
       await this.drawAndPrint(claimed);
       await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/printed`, { workerId: this.workerId });
-      this.emit({ health: 'ready', detail: `标签机已就绪：${this.state.config.printerName || '已连接设备'}`, currentJobId: null, lastPrintedJobId: claimed.id });
+      this.emit({ health: 'ready', detail: this.readyDetail(), currentJobId: null, lastPrintedJobId: claimed.id });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error('[标签打印] 打印任务失败:', error);
       if (claimed) {
         try { await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/failed`, { workerId: this.workerId, error: message }); } catch { /* preserve original */ }
       }
