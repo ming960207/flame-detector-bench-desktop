@@ -58,7 +58,6 @@ const AUTO_TEST_RECONNECT_WAIT_MS = 1000;
 const AUTO_TEST_MAX_ATTEMPTS = 4;
 const WAVEFORM_STALE_TIMEOUT_MS = 10000;
 const WAVEFORM_STATE_BROADCAST_INTERVAL_MS = 50;
-const TCP_INITIALIZE_STAGGER_MS = 250;
 const PRECHECK_DRAIN_DELAY_MS = 150;
 const READY_BARRIER_TIMEOUT_MS = 15_000;
 const READY_BARRIER_POLL_INTERVAL_MS = 50;
@@ -179,6 +178,7 @@ export interface AutoTestReport {
 
 export interface DetectorReadyReport {
   ready: boolean;
+  verticalDownLimitGateEnabled: boolean;
   verticalDownLimitKnown: boolean;
   verticalDownLimitReached: boolean;
   timeoutMs: number;
@@ -341,18 +341,33 @@ export class FlameDetectorService extends EventEmitter {
     await this.closePool();
     if (generation !== this.lifecycleGeneration || this.disposed) return;
     this.devices.clear();
-    const errors: string[] = [];
-
-    for (const unit of this.config.units) {
-      if (!unit.enabled) continue;
-      const result = await this.connectUnit(unit, generation);
-      if (!result.ok) errors.push(`${result.key}: ${result.error}`);
-      if (generation !== this.lifecycleGeneration || this.disposed) return;
+    const enabledUnits = this.config.units.filter((unit) => unit.enabled);
+    const tcpGroups = new Map<string, FlameUnitConfig[]>();
+    const rtuUnits: FlameUnitConfig[] = [];
+    for (const unit of enabledUnits) {
+      if ((unit.connMode ?? this.config.mode) !== 'TCP') {
+        rtuUnits.push(unit);
+        continue;
+      }
+      const key = connKey(unit, this.config);
+      const group = tcpGroups.get(key) ?? [];
+      group.push(unit);
+      tcpGroups.set(key, group);
     }
+    const groupedTcpResults = await Promise.all([...tcpGroups.values()].map(async (group) => {
+      const results: Array<{ ok: boolean; key: string; error: string }> = [];
+      for (const unit of group) results.push(await this.connectUnit(unit, generation, false));
+      return results;
+    }));
+    const results = groupedTcpResults.flat();
+    for (const unit of rtuUnits) results.push(await this.connectUnit(unit, generation, false));
+    const errors = results.filter((result) => !result.ok).map((result) => `${result.key}: ${result.error}`);
 
     if (generation !== this.lifecycleGeneration || this.disposed) return;
     const anyOk = [...this.pool.values()].some((entry) => entry.ok);
     if (anyOk) {
+      await this.initializeConnectedTcpUnits();
+      if (generation !== this.lifecycleGeneration || this.disposed) return;
       this.lastError = errors.join('; ');
       this.emit('connected');
       this.startPolling();
@@ -423,6 +438,7 @@ export class FlameDetectorService extends EventEmitter {
   private async connectUnit(
     unit: FlameUnitConfig,
     generation = this.lifecycleGeneration,
+    initializeWaveform = true,
   ): Promise<{ ok: boolean; key: string; error: string }> {
     const key = connKey(unit, this.config);
     const isTcp = (unit.connMode ?? this.config.mode) === 'TCP';
@@ -434,7 +450,7 @@ export class FlameDetectorService extends EventEmitter {
           if (!this.attachPushListener(unit, existing.client)) throw new Error('探测器 TCP 原始监听器创建失败');
         }
         this.markTransportConnected(unit);
-        if (isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, existing.client);
+        if (initializeWaveform && isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, existing.client);
         return { ok: true, key, error: '' };
       } catch (error: any) {
         existing.ok = false;
@@ -458,7 +474,7 @@ export class FlameDetectorService extends EventEmitter {
         throw new Error('探测器 TCP 原始监听器创建失败');
       }
       this.markTransportConnected(unit);
-      if (isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, client);
+      if (initializeWaveform && isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, client);
       console.log(`[FlameService] 连接成功: ${key}`);
       return { ok: true, key, error: '' };
     } catch (error: any) {
@@ -569,8 +585,30 @@ export class FlameDetectorService extends EventEmitter {
     return tracker;
   }
 
+  /** Different TCP endpoints initialize in parallel; shared endpoints remain serialized. */
+  private async initializeConnectedTcpUnits(): Promise<void> {
+    if (!this.waveformStreamingArmed || !this.modeRetryAllowed()) return;
+    const groups = new Map<string, Array<{ unit: FlameUnitConfig; client: FlameDetectorClient }>>();
+    for (const unit of this.config.units) {
+      if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
+      const key = connKey(unit, this.config);
+      const entry = this.pool.get(key);
+      if (!entry?.ok) continue;
+      const group = groups.get(key) ?? [];
+      group.push({ unit, client: entry.client });
+      groups.set(key, group);
+    }
+    await Promise.all([...groups.values()].map(async (group) => {
+      for (const { unit, client } of group) await this.initializeUnit(unit, client);
+    }));
+  }
+
   private modeRetryAllowed(): boolean {
-    return this.verticalDownLimitKnown && this.verticalDownLimitReached;
+    return !this.lowerLimitGateEnabled() || (this.verticalDownLimitKnown && this.verticalDownLimitReached);
+  }
+
+  private lowerLimitGateEnabled(): boolean {
+    return this.config.waveformModeSwitchLowerLimitGateEnabled !== false;
   }
 
   setVerticalDownLimit(reached: boolean): void {
@@ -579,6 +617,10 @@ export class FlameDetectorService extends EventEmitter {
     this.verticalDownLimitKnown = true;
     this.verticalDownLimitReached = next;
     if (!changed) return;
+    if (!this.lowerLimitGateEnabled()) {
+      this.broadcastStateNow();
+      return;
+    }
 
     for (const unit of this.config.units) {
       if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
@@ -606,9 +648,9 @@ export class FlameDetectorService extends EventEmitter {
         // that was already in flight across the limit transition can schedule
         // its next retry when it settles.
         this.broadcastModeRequestingUnits.add(unit.index);
-        void this.initializeUnit(unit, entry.client);
       }
     }
+    if (next) void this.initializeConnectedTcpUnits();
     this.broadcastStateNow();
   }
 
@@ -680,13 +722,7 @@ export class FlameDetectorService extends EventEmitter {
 
   async startWaveformStreaming(): Promise<void> {
     this.waveformStreamingArmed = true;
-    for (const unit of this.config.units) {
-      if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
-      const entry = this.pool.get(connKey(unit, this.config));
-      if (!entry?.ok) continue;
-      await this.initializeUnit(unit, entry.client);
-      await new Promise((resolve) => setTimeout(resolve, TCP_INITIALIZE_STAGGER_MS));
-    }
+    await this.initializeConnectedTcpUnits();
   }
 
   async runProductPrecheck(productConfig: ProductDetectionConfig, batchId: string | null = null): Promise<ProductPrecheckReport> {
@@ -1358,6 +1394,7 @@ export class FlameDetectorService extends EventEmitter {
     });
     return {
       ready: units.length > 0 && units.every((unit) => unit.ready),
+      verticalDownLimitGateEnabled: this.lowerLimitGateEnabled(),
       verticalDownLimitKnown: this.verticalDownLimitKnown,
       verticalDownLimitReached: this.verticalDownLimitReached,
       timeoutMs,
@@ -1389,13 +1426,8 @@ export class FlameDetectorService extends EventEmitter {
       state.lastError = undefined;
       state.lastUpdate = Date.now();
       this.units.set(unit.index, state);
-      if (!unit.enabled) continue;
-      const entry = this.pool.get(connKey(unit, this.config));
-      if (!entry?.ok) continue;
-      if ((unit.connMode ?? this.config.mode) === 'TCP' && this.waveformStreamingArmed && this.modeRetryAllowed()) {
-        void this.initializeUnit(unit, entry.client);
-      }
     }
+    if (this.modeRetryAllowed()) void this.initializeConnectedTcpUnits();
     this.broadcastStateNow();
   }
 

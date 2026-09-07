@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer, type Server } from 'node:net';
 import test from 'node:test';
 import { DetectorStartupTracker } from '../src/modbus/detector-startup.js';
 import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
+import { calculateModbusCRC16 } from '../src/modbus/flame-data-decoder.js';
+import { normalizeFlameConfig } from '../src/closure/field-status-server.js';
 
 test('detector startup becomes TEST_READY only after five consecutive valid frames', () => {
   let now = 1_000;
@@ -82,8 +88,138 @@ test('flame service exposes the vertical lower-limit gate for continuous ACK ret
     port: 31_001,
     units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
   });
+  assert.equal(service.getReadyReport()?.verticalDownLimitGateEnabled, true);
   assert.equal(service.getReadyReport()?.verticalDownLimitReached, false);
   service.setVerticalDownLimit(true);
   assert.equal(service.getReadyReport()?.verticalDownLimitReached, true);
   await service.disconnect();
+});
+
+test('disabling the lower-limit gate allows immediate waveform mode initialization', async () => {
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: 31_001,
+    waveformModeSwitchLowerLimitGateEnabled: false,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
+  });
+  const report = service.getReadyReport();
+  assert.equal(report.verticalDownLimitGateEnabled, false);
+  assert.notEqual(report.units[0]?.startup.state, 'WAITING_FOR_VERTICAL_LOWER_LIMIT');
+  await service.disconnect();
+});
+
+test('lower-limit gate setting survives flame configuration normalization', () => {
+  const current = {
+    mode: 'TCP' as const,
+    ip: '127.0.0.1',
+    port: 31_001,
+    waveformModeSwitchLowerLimitGateEnabled: true,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP' as const, tcpHost: '127.0.0.1', tcpPort: 31_001 }],
+  };
+  assert.equal(
+    normalizeFlameConfig({ waveformModeSwitchLowerLimitGateEnabled: false }, current).waveformModeSwitchLowerLimitGateEnabled,
+    false,
+  );
+});
+
+function modeAck(): Buffer {
+  const body = Buffer.from([0x01, 0x10, 0x30, 0x00, 0x00, 0x02]);
+  const crc = calculateModbusCRC16(body);
+  return Buffer.concat([body, Buffer.from([crc & 0xFF, (crc >>> 8) & 0xFF])]);
+}
+
+async function listenModeServer(index: number, receivedAt: number[]): Promise<{ server: Server; port: number }> {
+  const server = createServer((socket) => {
+    let acknowledged = false;
+    socket.on('data', () => {
+      if (acknowledged) return;
+      acknowledged = true;
+      receivedAt[index] = Date.now();
+      setTimeout(() => socket.write(modeAck()), 120);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('TEST_SERVER_ADDRESS_UNAVAILABLE');
+  return { server, port: address.port };
+}
+
+test('six detector mode commands are issued concurrently instead of waiting for previous ACKs', async () => {
+  const receivedAt: number[] = [];
+  const listeners = await Promise.all(Array.from({ length: 6 }, (_, index) => listenModeServer(index, receivedAt)));
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: listeners[0]!.port,
+    waveformModeSwitchLowerLimitGateEnabled: false,
+    units: listeners.map(({ port }, index) => ({
+      index: index + 1,
+      address: 1,
+      enabled: true,
+      connMode: 'TCP' as const,
+      tcpHost: '127.0.0.1',
+      tcpPort: port,
+    })),
+  }, {
+    deferWaveformUntilInspection: true,
+    lockPath: join(tmpdir(), `flame-detector-concurrency-${randomUUID()}.lock`),
+  });
+
+  try {
+    await service.connect();
+    await service.startWaveformStreaming();
+    assert.equal(receivedAt.length, 6);
+    const skewMs = Math.max(...receivedAt) - Math.min(...receivedAt);
+    assert.ok(skewMs < 100, `six mode commands were serialized; observed skew=${skewMs}ms`);
+  } finally {
+    await service.disconnect();
+    await Promise.all(listeners.map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  }
+});
+
+test('enabled lower-limit gate blocks every mode command until the limit then releases all six concurrently', async () => {
+  const receivedAt: number[] = [];
+  const listeners = await Promise.all(Array.from({ length: 6 }, (_, index) => listenModeServer(index, receivedAt)));
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: listeners[0]!.port,
+    waveformModeSwitchLowerLimitGateEnabled: true,
+    units: listeners.map(({ port }, index) => ({
+      index: index + 1,
+      address: 1,
+      enabled: true,
+      connMode: 'TCP' as const,
+      tcpHost: '127.0.0.1',
+      tcpPort: port,
+    })),
+  }, {
+    lockPath: join(tmpdir(), `flame-detector-limit-gate-${randomUUID()}.lock`),
+  });
+
+  try {
+    await service.connect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(receivedAt.filter(Number.isFinite).length, 0);
+
+    service.setVerticalDownLimit(true);
+    const deadline = Date.now() + 1_000;
+    while (receivedAt.filter(Number.isFinite).length < 6 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(receivedAt.filter(Number.isFinite).length, 6);
+    const skewMs = Math.max(...receivedAt) - Math.min(...receivedAt);
+    assert.ok(skewMs < 100, `lower-limit release serialized mode commands; observed skew=${skewMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 160));
+  } finally {
+    await service.disconnect();
+    await Promise.all(listeners.map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  }
 });

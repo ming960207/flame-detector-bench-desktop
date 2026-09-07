@@ -72,6 +72,8 @@ export interface FlameConfig {
   pollIntervalMs?: number;
   protocol?: FlameProtocolId;
   waveformSendMode?: WaveformSendMode;
+  /** 是否必须等待 PLC 垂直下限反馈后才发送波形模式切换指令。 */
+  waveformModeSwitchLowerLimitGateEnabled?: boolean;
   waveformDisplayMode?: 'raw' | 'normalized';
   waveformMaxSamples?: number;
   waveformAnalysis?: Partial<WaveformAnalysisConfig>;
@@ -223,6 +225,7 @@ export const config: AppConfig = {
     waveformSendMode: process.env.FLAME_WAVEFORM_SEND_MODE === 'filtered'
       ? 'filtered'
       : DEFAULT_WAVEFORM_SEND_MODE,
+    waveformModeSwitchLowerLimitGateEnabled: process.env.FLAME_WAVEFORM_LOWER_LIMIT_GATE !== 'false',
     waveformDisplayMode: process.env.FLAME_WAVEFORM_MODE === 'raw' ? 'raw' : 'normalized',
     waveformMaxSamples: parseInt(process.env.FLAME_WAVEFORM_SAMPLES || '1000', 10),
     waveformAnalysis: {

@@ -50,6 +50,7 @@ const emptyConfig: FlameDetectorConfig = {
   })),
   pollIntervalMs: 250,
   waveformSendMode: 'active',
+  waveformModeSwitchLowerLimitGateEnabled: true,
   waveformDisplayMode: 'normalized',
   waveformMaxSamples: 1000,
   waveformAnalysis: {
@@ -390,6 +391,7 @@ function DeviceConfigEditor({ draft, setDraft }: { draft: FlameDetectorConfig; s
       <label>波特率<input type="number" value={draft.baudRate || 115200} onChange={(event) => setDraft({ ...draft, baudRate: Number(event.target.value) })} /></label>
       <label>默认协议<select value={draft.protocol || ''} onChange={(event) => setDraft({ ...draft, protocol: (event.target.value || undefined) as FlameDetectorConfig['protocol'] })}><option value="">自动识别</option><option value="standard">三波长</option><option value="four-wavelength">四波长</option></select></label>
       <label>默认波形发送模式<select value={draft.waveformSendMode || 'active'} onChange={(event) => setDraft({ ...draft, waveformSendMode: event.target.value as 'active' | 'filtered' })}><option value="active">主动发送</option><option value="filtered">滤波发送</option></select></label>
+      <label>模式切换关联垂直下限<select value={draft.waveformModeSwitchLowerLimitGateEnabled === false ? '0' : '1'} onChange={(event) => setDraft({ ...draft, waveformModeSwitchLowerLimitGateEnabled: event.target.value === '1' })}><option value="1">启用</option><option value="0">关闭（连接后立即并发切换）</option></select></label>
       {draft.mode === 'TCP' && <label>默认端口<input type="number" min="1" max="65535" value={draft.port || 31001} onChange={(event) => setDraft({ ...draft, port: Number(event.target.value) })} /></label>}
       <label>采样周期(ms)<input type="number" min="100" max="900" value={draft.pollIntervalMs || 250} onChange={(event) => setDraft({ ...draft, pollIntervalMs: Number(event.target.value) })} /></label>
       <label>波形显示<select value={draft.waveformDisplayMode || 'normalized'} onChange={(event) => setDraft({ ...draft, waveformDisplayMode: event.target.value as 'raw' | 'normalized' })}><option value="normalized">归一化</option><option value="raw">原始值</option></select></label>

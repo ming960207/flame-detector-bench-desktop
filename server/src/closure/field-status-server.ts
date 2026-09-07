@@ -183,6 +183,9 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
     waveformSendMode: source.waveformSendMode === 'active' || source.waveformSendMode === 'filtered'
       ? source.waveformSendMode
       : (current.waveformSendMode ?? DEFAULT_WAVEFORM_SEND_MODE),
+    waveformModeSwitchLowerLimitGateEnabled: typeof source.waveformModeSwitchLowerLimitGateEnabled === 'boolean'
+      ? source.waveformModeSwitchLowerLimitGateEnabled
+      : (current.waveformModeSwitchLowerLimitGateEnabled ?? true),
     waveformDisplayMode: source.waveformDisplayMode === 'raw' || source.waveformDisplayMode === 'normalized'
       ? source.waveformDisplayMode
       : (current.waveformDisplayMode ?? 'normalized'),
@@ -412,6 +415,7 @@ export function createFieldStatusRuntime(
     const verticalLowerLimit = verticalLowerLimitSignal === true;
     const verticalLowerLimitKnown = typeof verticalLowerLimitSignal === 'boolean';
     const verticalLowerLimitStarted = verticalLowerLimitKnown && verticalLowerLimit && previousStatus?.io?.inputs?.verticalDownFeedback !== true;
+    const verticalLowerLimitGateEnabled = detectors.getConfig?.().waveformModeSwitchLowerLimitGateEnabled !== false;
     currentStatus = status;
     if (verticalLowerLimitKnown) detectors.setVerticalDownLimit?.(verticalLowerLimit);
     const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
@@ -432,7 +436,7 @@ export function createFieldStatusRuntime(
         beginDetectorStartupBarrier();
       }
     }
-    if (verticalLowerLimitStarted && !batchStarted) beginDetectorStartupBarrier();
+    if (verticalLowerLimitGateEnabled && verticalLowerLimitStarted && !batchStarted) beginDetectorStartupBarrier();
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
@@ -551,6 +555,7 @@ export function createFieldStatusRuntime(
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
   app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
     ready: false,
+    verticalDownLimitGateEnabled: true,
     verticalDownLimitKnown: false,
     verticalDownLimitReached: false,
     timeoutMs: 15_000,
