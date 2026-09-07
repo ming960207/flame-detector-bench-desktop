@@ -57,12 +57,187 @@
       box-shadow: 0 0 15px rgba(34, 197, 94, 0.6);
       border-color: #22c55e;
     }
+
+    /*
+     * D1-D6 实时波形卡片状态灯。
+     * 不建立额外 WebSocket/HTTP 轮询，直接跟随现有 React 卡片实时状态类更新，
+     * 避免为了状态灯增加现场数据链路负载。
+     */
+    .wutos-sensor-caption {
+      justify-content: flex-start !important;
+    }
+
+    .wutos-device-state-lamps {
+      display: inline-flex;
+      flex: 0 1 auto;
+      min-width: 0;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(1px, .11cqw, 2px);
+      margin-left: auto;
+      margin-right: clamp(2px, .2cqw, 4px);
+      white-space: nowrap;
+    }
+
+    .wutos-device-state-lamp {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 1px;
+      color: #718997;
+      font-size: clamp(2.6px, .25cqw, 4.4px);
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      transition: color .12s ease, text-shadow .12s ease;
+    }
+
+    .wutos-device-state-lamp > i {
+      display: inline-block;
+      width: clamp(3px, .28cqw, 5px);
+      height: clamp(3px, .28cqw, 5px);
+      flex: 0 0 auto;
+      border: 1px solid rgba(74, 101, 116, .72);
+      border-radius: 50%;
+      background: #9aa9b0;
+      box-shadow: inset 0 0 2px rgba(0, 0, 0, .32);
+      transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
+    }
+
+    .wutos-device-state-lamp.is-active[data-state-kind="fire"],
+    .wutos-device-state-lamp.is-active[data-state-kind="fire-relay"] {
+      color: #c62828;
+      text-shadow: 0 0 3px rgba(239, 68, 68, .42);
+    }
+
+    .wutos-device-state-lamp.is-active[data-state-kind="fire"] > i,
+    .wutos-device-state-lamp.is-active[data-state-kind="fire-relay"] > i {
+      border-color: #ff3b30;
+      background: #ff3b30;
+      box-shadow: 0 0 4px rgba(255, 59, 48, .9), inset 0 0 2px rgba(255, 255, 255, .65);
+    }
+
+    .wutos-device-state-lamp.is-active[data-state-kind="fault"],
+    .wutos-device-state-lamp.is-active[data-state-kind="fault-relay"] {
+      color: #b36a00;
+      text-shadow: 0 0 3px rgba(245, 158, 11, .38);
+    }
+
+    .wutos-device-state-lamp.is-active[data-state-kind="fault"] > i,
+    .wutos-device-state-lamp.is-active[data-state-kind="fault-relay"] > i {
+      border-color: #f59e0b;
+      background: #f59e0b;
+      box-shadow: 0 0 4px rgba(245, 158, 11, .9), inset 0 0 2px rgba(255, 255, 255, .62);
+    }
+
+    .wutos-device-state-lamp.is-offline {
+      color: #9aa9b0;
+      opacity: .62;
+    }
+
+    .wutos-device-state-lamp.is-offline > i {
+      border-color: #9aa9b0;
+      background: #c7d0d5;
+      box-shadow: none;
+    }
   </style>
   <link rel="stylesheet" href="./index.css">
 </head>
 
 <body>
   <div id="root"></div>
+  <script>
+    (() => {
+      const SELECTOR = '.wutos-sensor-card';
+      const LAMPS = [
+        { kind: 'fire', label: '火警', title: '火警状态' },
+        { kind: 'fault', label: '故障', title: '故障状态' },
+        { kind: 'fire-relay', label: '火警继电器', title: '火警继电器输出状态' },
+        { kind: 'fault-relay', label: '故障继电器', title: '故障继电器输出状态' },
+      ];
+
+      function ensureLampGroup(card) {
+        const caption = card.querySelector('.wutos-sensor-caption');
+        if (!caption) return null;
+        let group = caption.querySelector('.wutos-device-state-lamps');
+        if (group) return group;
+
+        group = document.createElement('div');
+        group.className = 'wutos-device-state-lamps';
+        group.setAttribute('role', 'status');
+        group.setAttribute('aria-label', '探测器实时状态指示');
+
+        for (const item of LAMPS) {
+          const lamp = document.createElement('span');
+          lamp.className = 'wutos-device-state-lamp';
+          lamp.dataset.stateKind = item.kind;
+          lamp.dataset.stateTitle = item.title;
+          const dot = document.createElement('i');
+          dot.setAttribute('aria-hidden', 'true');
+          const text = document.createElement('span');
+          text.textContent = item.label;
+          lamp.append(dot, text);
+          group.appendChild(lamp);
+        }
+
+        const waveformMeta = Array.from(caption.children).find((child) => child.tagName === 'SPAN');
+        if (waveformMeta) caption.insertBefore(group, waveformMeta);
+        else caption.appendChild(group);
+        return group;
+      }
+
+      function updateCard(card) {
+        const group = ensureLampGroup(card);
+        if (!group) return;
+
+        const offline = card.classList.contains('is-offline');
+        const fire = card.classList.contains('is-fire');
+        const fault = card.classList.contains('is-fault');
+        // 当前探测器协议实时帧提供火警/故障输出状态，没有独立的物理触点位。
+        // 因此继电器灯表示对应继电器“输出动作状态”；外部 DIO 物理反馈仍由
+        // 继电器功能检测用于最终 PASS/FAIL 判定，不在这里伪装为触点反馈。
+        const states = {
+          fire,
+          fault,
+          'fire-relay': fire,
+          'fault-relay': fault,
+        };
+
+        group.querySelectorAll('.wutos-device-state-lamp').forEach((lamp) => {
+          const kind = lamp.dataset.stateKind;
+          const active = Boolean(states[kind]);
+          lamp.classList.toggle('is-active', !offline && active);
+          lamp.classList.toggle('is-offline', offline);
+          lamp.setAttribute('aria-label', `${lamp.dataset.stateTitle || ''}：${offline ? '离线未知' : active ? '动作' : '正常'}`);
+          lamp.title = `${lamp.dataset.stateTitle || ''}：${offline ? '离线未知' : active ? '动作' : '正常'}`;
+        });
+      }
+
+      let scheduled = false;
+      function refreshAll() {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          document.querySelectorAll(SELECTOR).forEach(updateCard);
+        });
+      }
+
+      const observer = new MutationObserver(refreshAll);
+      const start = () => {
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+        refreshAll();
+      };
+
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+      else start();
+    })();
+  </script>
   <script type="module" src="./index.tsx"></script>
 </body>
 
