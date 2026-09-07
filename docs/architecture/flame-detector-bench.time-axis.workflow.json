@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "火焰探测器检测台｜时间横轴工序总览",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.time-axis.html",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 500],
+    "views": [
+      { "id": "time-axis", "label": "时间轴总览", "focus": ["start", "home", "heat", "zone2", "flash", "finish"], "note": "横轴从启动向右推进，阶段标签同时标出 PLC 定时与工序动作；移动结束仍以到位信号确认。" },
+      { "id": "quality-window", "label": "采集与判定", "focus": ["heat", "precheck", "zone2", "flash", "gate"], "note": "热源稳定、噪声窗口、六机预检、干扰波形和最终门禁组成一条并行质量链。" },
+      { "id": "stop-branch", "label": "异常中止", "focus": ["stop", "abort", "start", "finish"], "note": "任意阶段 STOP 或安全链断开都会清除动作并阻止当前批次放行。" }
+    ]
+  },
+  "lanes": [
+    { "id": "process", "label": "检测动作" },
+    { "id": "quality", "label": "采集与判定" },
+    { "id": "exception", "label": "异常安全", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "t0", "label": "0s", "fromCol": 0, "toCol": 0, "variant": "security" },
+    { "id": "home", "label": "0–22s", "fromCol": 1, "toCol": 1, "variant": "emphasis" },
+    { "id": "heat", "label": "22–82s", "fromCol": 2, "toCol": 2, "variant": "emphasis" },
+    { "id": "zone2", "label": "82s+", "fromCol": 3, "toCol": 3 },
+    { "id": "flash", "label": "+9s", "fromCol": 4, "toCol": 4, "variant": "emphasis" },
+    { "id": "finish", "label": "+10s+", "fromCol": 5, "toCol": 5, "variant": "security" }
+  ],
+  "groups": [
+    { "id": "quality-chain", "label": "质量链：预检 → 波形 → 放行门禁", "lane": "quality", "fromCol": 2, "toCol": 5, "variant": "emphasis" },
+    { "id": "safety-group", "label": "任意阶段 STOP / 急停", "lane": "exception", "fromCol": 0, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["start", "home", "heat", "zone2", "flash", "finish"],
+  "nodes": [
+    { "id": "start", "lane": "process", "col": 0, "type": "security", "label": "启动", "sublabel": "选型·安全", "tag": "t=0", "width": 72, "height": 68 },
+    { "id": "home", "lane": "process", "col": 1, "type": "external", "label": "归零", "sublabel": "回初位→区1", "tag": "2s+8s+1s", "width": 72, "height": 68 },
+    { "id": "heat", "lane": "process", "col": 2, "type": "external", "label": "热源位", "sublabel": "下压·稳定·噪声", "tag": "10s+30s+30s", "width": 72, "height": 68 },
+    { "id": "zone2", "lane": "process", "col": 3, "type": "external", "label": "检测区2", "sublabel": "升·移·压", "tag": "10s+2s+10s", "width": 60, "height": 68 },
+    { "id": "flash", "lane": "process", "col": 4, "type": "external", "label": "爆闪", "sublabel": "5亮+4间", "tag": "≈9s", "width": 60, "height": 68 },
+    { "id": "finish", "lane": "process", "col": 5, "type": "external", "label": "EMC·回位", "sublabel": "电磁→原位", "tag": "10s+10s", "width": 80, "height": 68 },
+    { "id": "precheck", "lane": "quality", "col": 2, "type": "backend", "label": "六机预检", "sublabel": "版本·探头·灵敏度", "tag": "≈800ms", "width": 76, "height": 68 },
+    { "id": "gate", "lane": "quality", "col": 5, "type": "security", "label": "放行门禁", "sublabel": "完成·通过·无待定", "tag": "6台", "width": 80, "height": 68 },
+    { "id": "stop", "lane": "exception", "col": 0, "type": "security", "label": "STOP/急停", "sublabel": "任意阶段", "tag": "M2.0/I1.0", "width": 78, "height": 68 },
+    { "id": "abort", "lane": "exception", "col": 5, "type": "security", "label": "清除·中止", "sublabel": "清输出·报警", "tag": "M1.0", "width": 82, "height": 68 }
+  ],
+  "edges": [
+    { "id": "start-home", "from": "start", "to": "home", "role": "main" },
+    { "id": "home-heat", "from": "home", "to": "heat", "role": "main", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "heat-zone2", "from": "heat", "to": "zone2", "role": "main" },
+    { "id": "zone2-flash", "from": "zone2", "to": "flash", "role": "main", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "flash-finish", "from": "flash", "to": "finish", "role": "main" },
+    { "id": "heat-precheck", "from": "heat", "to": "precheck", "role": "async", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "precheck-gate", "from": "precheck", "to": "gate", "role": "async", "variant": "emphasis", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "finish-gate", "from": "finish", "to": "gate", "role": "return", "variant": "security", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "stop-abort", "from": "stop", "to": "abort", "role": "error", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "时间轴读法", "items": ["T37–T63 是 PLC 固定计时；移动结束由到位信号确认。", "T62=2s 允许区2垂直与水平移动重叠；热源稳定30s + 噪声30s为核心窗口。"] },
+    { "dot": "emerald", "title": "动作与判定", "items": ["噪声≥400样本、干扰≥80；挥手约5s、爆闪约9s、EMC10s。", "干扰比≤1.5；趋势 A≥0.8、B≥0.75；SNR23按产品配置判定。"] },
+    { "dot": "rose", "title": "放行与异常", "items": ["预检通过 + PLC COMPLETE + 分析 PASS + 无 PENDING，才形成正式结果。", "STOP/急停清除自动步、热源、气缸、爆闪输出，当前批次禁止放行。"] }
+  ]
+}
