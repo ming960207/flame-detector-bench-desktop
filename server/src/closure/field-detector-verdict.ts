@@ -122,7 +122,7 @@ function thresholdMatches(
   if (limits.minSensitivity > 0) {
     const value = metrics.sensitivity;
     if (value === null) return 'SENSITIVITY_MISSING';
-    if (value < limits.minSensitivity) return 'SENSITIVITY_BELOW_LIMIT';
+    if (value < limits.minSensitivity!) return 'SENSITIVITY_BELOW_LIMIT';
   }
   return undefined;
 }
@@ -207,7 +207,14 @@ function evaluateUnit(
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
+  // Product precheck is evidence collected during the signal-stabilization wait.
+  // Keep its detailed reasons attached to the unit, but do not expose an operator
+  // NG result while the mechanical/waveform inspection is still running. The same
+  // recorded failure becomes authoritative once the quantitative process completes.
   if (precheck?.verdict === 'FAIL') {
+    if (!complete) {
+      return result(base, metrics, 'PENDING', 'PENDING', 'PRODUCT_PRECHECK_RECORDED', precheck, missingProbes);
+    }
     return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
   }
   if (productConfig && complete && precheck?.verdict === 'PENDING') {
