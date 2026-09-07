@@ -10,10 +10,10 @@ import {
 } from './product-profile.js';
 import {
   autoStatus,
-  fixedDefaultPassItems,
+  fixedNotApplicableItems,
   measuredValue,
   recordConclusion,
-  relayDisabledDefaultPass,
+  relayTestNotApplicable,
   type InspectionItemStatus,
   type ProductionInspectionProductResult,
   type ProductionInspectionRecord,
@@ -62,7 +62,10 @@ function productVerdict(
   basePassed: boolean,
   statuses: InspectionItemStatus[],
 ): InspectionItemStatus {
-  return basePassed && statuses.every((status) => status === '合格') ? '合格' : '不合格';
+  if (!basePassed) return '不合格';
+  if (statuses.some((status) => status === '不合格')) return '不合格';
+  if (statuses.some((status) => status === '未检测')) return '未检测';
+  return '合格';
 }
 
 export function buildProductionInspectionRecord(input: ProductionInspectionRecordBuildInput): ProductionInspectionRecord {
@@ -76,14 +79,14 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
     const precheck = input.precheck?.units.find((unit) => unit.index === slot);
     const relayUnit = relay?.units.find((unit) => unit.detectorIndex === slot);
     const codeItem = allocation?.items.find((item) => item.slot === slot);
-    const fixed = fixedDefaultPassItems();
+    const fixed = fixedNotApplicableItems();
 
     const fireAction = profile.relayFunctionalTestEnabled
       ? autoStatus(relayUnit?.alarm.verdict === 'PASS', reasonText(relayUnit?.alarm.reasons ?? ['RELAY_RESULT_MISSING']))
-      : relayDisabledDefaultPass();
+      : relayTestNotApplicable();
     const faultAction = profile.relayFunctionalTestEnabled
       ? autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
-      : relayDisabledDefaultPass();
+      : relayTestNotApplicable();
 
     const amplitudes = amplitudeValues(input.waveformAnalysis, slot, profile.expectedProbeCount);
     const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot, profile.expectedProbeCount);
@@ -177,7 +180,14 @@ function dateText(timestamp: number): string {
 }
 
 function statusCell(status: InspectionItemStatus): string {
-  return `<span class="${status === '合格' ? 'pass' : 'fail'}">${status}</span>`;
+  const className = status === '合格'
+    ? 'pass'
+    : status === '不合格'
+      ? 'fail'
+      : status === '未检测'
+        ? 'not-tested'
+        : 'not-applicable';
+  return `<span class="${className}">${status}</span>`;
 }
 
 export function productionInspectionRecordHtml(record: ProductionInspectionRecord): string {
@@ -202,7 +212,7 @@ export function productionInspectionRecordHtml(record: ProductionInspectionRecor
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(record.productModel)}生产检验记录</title>
 <style>
-body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111;margin:24px;background:#fff}h1{text-align:center;font-size:22px;margin:0 0 14px}.meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:6px 0}.meta span{white-space:nowrap}table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}th,td{border:1px solid #222;padding:7px 5px;text-align:center;vertical-align:middle}.item{text-align:left;font-weight:600}th:first-child,td:first-child{width:38px}th:nth-child(2),td:nth-child(2){width:175px}.pass{font-weight:700}.fail{font-weight:700;text-decoration:underline}.footer{display:grid;grid-template-columns:2fr 1fr 1fr;margin-top:12px;border:1px solid #222}.footer>div{padding:10px;border-right:1px solid #222}.footer>div:last-child{border-right:0}@media print{body{margin:8mm}.no-print{display:none}}
+body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111;margin:24px;background:#fff}h1{text-align:center;font-size:22px;margin:0 0 14px}.meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:6px 0}.meta span{white-space:nowrap}table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}th,td{border:1px solid #222;padding:7px 5px;text-align:center;vertical-align:middle}.item{text-align:left;font-weight:600}th:first-child,td:first-child{width:38px}th:nth-child(2),td:nth-child(2){width:175px}.pass{font-weight:700}.fail{font-weight:700;text-decoration:underline}.not-tested{font-weight:700;text-decoration:underline}.not-applicable{font-weight:600}.footer{display:grid;grid-template-columns:2fr 1fr 1fr;margin-top:12px;border:1px solid #222}.footer>div{padding:10px;border-right:1px solid #222}.footer>div:last-child{border-right:0}@media print{body{margin:8mm}.no-print{display:none}}
 </style></head><body>
 <h1>点型红外火焰探测器生产检验记录</h1>
 <div class="meta"><span>产品型号：${escapeHtml(record.productModel)}</span><span>数量：${record.quantity}</span><span>检验标准：${escapeHtml(record.standard)}</span></div>
