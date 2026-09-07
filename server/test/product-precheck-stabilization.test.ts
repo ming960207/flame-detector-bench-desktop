@@ -118,3 +118,66 @@ test('software version mismatch is finalized during position-one precheck instea
   assert.ok(report.units[0]?.reasons.includes('SOFTWARE_VERSION_MISMATCH'));
   assert.ok(!report.units[0]?.reasons.includes('SOFTWARE_VERSION_PENDING'));
 });
+
+test('skipping software version verdict still sends the version command and records the actual version', async () => {
+  const flameConfig: FlameConfig = {
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: 31001,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31001 }],
+  };
+  const productConfig = normalizeProductDetectionConfig({
+    selectedType: 'DUAL_WAVELENGTH',
+    profiles: {
+      DUAL_WAVELENGTH: {
+        expectedSoftwareVersion: '01.02.03.04',
+        skipSoftwareVersionCheck: true,
+        expectedProbeCount: 2,
+        relayFunctionalTestEnabled: false,
+      },
+    },
+  }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const codeStore = {
+    allocateBatch: async (_model: string, _rule: unknown, productionDate: Date, _count: number, batchId: string | null) => ({
+      batchId,
+      status: 'DISABLED' as const,
+      productModel: 'GHT-1050-02',
+      monthKey: null,
+      productionDate: productionDate.getTime(),
+      items: [],
+      reason: 'TEST_DISABLED',
+    }),
+  } as unknown as ProductCodeStore;
+
+  const calls: string[] = [];
+  const service = new ProductAwareFlameDetectorService(flameConfig, codeStore);
+  const internal = service as unknown as { devices: Map<number, FlameDetectorDevice> };
+  internal.devices.set(1, {
+    readSoftwareVersion: async () => {
+      calls.push('software-version');
+      return '01020305';
+    },
+    readProbeCount: async () => {
+      calls.push('probe-count');
+      return 2;
+    },
+    readSensitivity: async () => {
+      calls.push('sensitivity');
+      return 1;
+    },
+    readAlarmStatus: async () => {
+      calls.push('alarm-status');
+      return { fireAlarm: false, fault: false, rawFire: 0, rawFault: 0 };
+    },
+  } as unknown as FlameDetectorDevice);
+
+  const report = await service.runProductPrecheck(productConfig, 'batch-stabilization-skip-version');
+
+  assert.deepEqual(calls, ['software-version', 'probe-count', 'sensitivity', 'alarm-status']);
+  assert.equal(report.units[0]?.actualSoftwareVersion, '01.02.03.05');
+  assert.ok(!report.units[0]?.reasons.includes('SOFTWARE_VERSION_MISMATCH'));
+  assert.ok(!report.units[0]?.reasons.includes('SOFTWARE_VERSION_READ_FAILED'));
+  assert.ok(!report.units[0]?.reasons.includes('SOFTWARE_VERSION_NOT_CONFIGURED'));
+  assert.equal(report.units[0]?.verdict, 'PASS');
+  assert.equal(report.verdict, 'PASS');
+});
