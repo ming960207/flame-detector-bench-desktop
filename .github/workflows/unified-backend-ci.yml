@@ -37,6 +37,9 @@ jobs:
       - name: Install server dependencies
         run: npm ci --prefix server
 
+      - name: Validate Electron main process
+        run: node --check desktop/main.cjs
+
       - name: Build unified server
         run: npm run build:server
 
