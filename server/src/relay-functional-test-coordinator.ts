@@ -71,6 +71,9 @@ function sleep(ms: number): Promise<void> {
  *
  * DIAGNOSTIC 则必须真正逐槽位完成一整套火警/故障循环后再进入下一槽位，
  * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
+ *
+ * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
+ * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
  */
 export class RelayFunctionalTestCoordinator {
   constructor(
@@ -313,6 +316,62 @@ export class RelayFunctionalTestCoordinator {
     }
   }
 
+  private addCleanupReason(state: UnitWorkState, reason: string): void {
+    uniquePush(state.result.alarm.reasons, reason);
+    uniquePush(state.result.fault.reasons, reason);
+  }
+
+  private async emergencyCleanup(work: Map<number, UnitWorkState>): Promise<void> {
+    const resetAccepted = new Set<number>();
+    await Promise.all([...work.entries()].map(async ([index, state]) => {
+      try {
+        await this.detectors.reset(index);
+        resetAccepted.add(index);
+      } catch {
+        this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
+      }
+    }));
+
+    const stable = new Map<number, number>();
+    const recovered = new Set<number>();
+    const feedbackErrors = new Map<number, string>();
+    const deadline = Date.now() + this.config.resetTimeoutMs;
+
+    while (Date.now() <= deadline && recovered.size < resetAccepted.size) {
+      await Promise.all([...work.entries()].map(async ([index]) => {
+        if (!resetAccepted.has(index) || recovered.has(index)) return;
+        try {
+          const internal = await this.detectors.readLatched(index);
+          const physical = await this.physicalState(index);
+          if (physical.error) {
+            feedbackErrors.set(index, physical.error);
+            stable.set(index, 0);
+            return;
+          }
+          const clear = internal.fire === false
+            && internal.fault === false
+            && physical.alarm === false
+            && physical.fault === false;
+          const next = clear ? (stable.get(index) ?? 0) + 1 : 0;
+          stable.set(index, next);
+          if (next >= this.config.stableSamples) recovered.add(index);
+        } catch {
+          stable.set(index, 0);
+        }
+      }));
+      if (recovered.size >= resetAccepted.size) break;
+      await sleep(this.config.sampleIntervalMs);
+    }
+
+    for (const [index, state] of work.entries()) {
+      if (!resetAccepted.has(index)) continue;
+      if (recovered.has(index)) continue;
+      const feedbackError = feedbackErrors.get(index);
+      if (feedbackError) this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
+      else this.addCleanupReason(state, 'EMERGENCY_RESET_NOT_CONFIRMED');
+    }
+  }
+
   private finalizeAction(action: RelayActionResult): void {
     action.verdict = action.commandAccepted
       && action.internalStateReached
@@ -348,9 +407,16 @@ export class RelayFunctionalTestCoordinator {
       indexes.map((index) => [index, { result: emptyUnit(index), commandStartedAt: null }]),
     );
 
-    await this.readBaseline(work);
-    if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
-    else await this.runFastBatch(work);
+    try {
+      await this.readBaseline(work);
+      if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
+      else await this.runFastBatch(work);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const state of work.values()) this.addCleanupReason(state, `RELAY_TEST_ABORTED:${message}`);
+    } finally {
+      await this.emergencyCleanup(work);
+    }
 
     const units = [...work.values()].map(({ result }) => {
       this.finalizeAction(result.alarm);
