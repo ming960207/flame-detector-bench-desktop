@@ -139,19 +139,11 @@ export class ProductionRunCoordinator extends EventEmitter {
     this.saving.add(batchId);
 
     try {
-      // Normally this finished around EMC +8 s. Await it before archival so the
-      // record always uses the final version verdict. If the +8 s trigger was
-      // missed, a post-EMC fallback read is safe because waveform judgment has
-      // already completed and remains untouched.
+      // A version request may begin near the end of M11.2 and still be resolving
+      // when COMPLETE is observed. Await that already-started request, but never
+      // start a new hardware version read after EMC has ended.
       const pendingVersionCheck = this.versionChecks.get(batchId);
-      if (pendingVersionCheck) {
-        await pendingVersionCheck;
-      } else {
-        await this.detectors.finalizeProductPrecheckVersions(
-          snapshot.summary.productConfig,
-          batchId,
-        );
-      }
+      if (pendingVersionCheck) await pendingVersionCheck;
       snapshot = this.snapshot();
 
       const context = this.detectors.getBatchContext(batchId);
