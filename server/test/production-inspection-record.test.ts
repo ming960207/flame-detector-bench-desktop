@@ -122,7 +122,7 @@ function precheck(relayEnabled = false) {
   } as any;
 }
 
-test('record keeps code status separate from detector verdict and defaults five non-measured items to pass', () => {
+test('record keeps code status separate and marks bench-external items as not applicable', () => {
   const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
   const record = buildProductionInspectionRecord({
     batchId: 'batch-1',
@@ -137,19 +137,22 @@ test('record keeps code status separate from detector verdict and defaults five 
   assert.equal(record.products[0]?.productCode, null);
   assert.equal(record.products[0]?.productCodeStatus, 'RULE_MISSING');
   assert.equal(record.products[0]?.verdict, '合格');
-  assert.equal(record.products[0]?.workCurrent.source, 'DEFAULT_PASS');
-  assert.equal(record.products[0]?.fireAction.source, 'DEFAULT_PASS');
+  assert.equal(record.products[0]?.workCurrent.source, 'NOT_APPLICABLE');
+  assert.equal(record.products[0]?.workCurrent.status, '不适用');
+  assert.equal(record.products[0]?.fireAction.source, 'NOT_APPLICABLE');
+  assert.equal(record.products[0]?.fireAction.status, '不适用');
   assert.deepEqual(record.products[0]?.amplitude.values, [150, 180, 170]);
   assert.equal(record.conclusion, '合格');
   const html = productionInspectionRecordHtml(record);
   assert.match(html, /未生成/);
   assert.match(html, /150，180，170/);
+  assert.match(html, /不适用/);
 });
 
 test('enabled relay test gates the slot verdict independently', () => {
   const productConfig = normalizeProductDetectionConfig({
-      ...DEFAULT_PRODUCT_DETECTION_CONFIG,
-      selectedType: 'THREE_WAVELENGTH',
+    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
+    selectedType: 'THREE_WAVELENGTH',
     profiles: {
       ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
       THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },
@@ -168,5 +171,24 @@ test('enabled relay test gates the slot verdict independently', () => {
   assert.equal(record.products[0]?.verdict, '合格');
   assert.equal(record.products[1]?.faultAction.status, '不合格');
   assert.equal(record.products[1]?.verdict, '不合格');
+  assert.equal(record.conclusion, '不合格');
+});
+
+test('required relay test cannot pass when real relay evidence is missing', () => {
+  const productConfig = normalizeProductDetectionConfig({
+    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
+    selectedType: 'THREE_WAVELENGTH',
+    profiles: {
+      ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
+      THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },
+    },
+  });
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-1', productConfig, precheck: precheck(false), detectorVerdict: detectorVerdict(), waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG, productionDate: Date.now(),
+  });
+  assert.equal(record.products[0]?.fireAction.status, '不合格');
+  assert.equal(record.products[0]?.faultAction.status, '不合格');
+  assert.equal(record.products[0]?.verdict, '不合格');
   assert.equal(record.conclusion, '不合格');
 });
