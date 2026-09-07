@@ -248,7 +248,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
    * complete version command works while continuous waveform push is enabled, but
    * the visible waveform can pause for about three seconds. Doing it first leaves
    * the remaining identity/relay checks and the stabilization wait to absorb that
-   * display gap before quantitative noise capture begins.
+   * display gap before quantitative noise capture begins. The command is always sent;
+   * configuration only controls whether its result contributes to PASS/FAIL.
    */
   private async readPositionOneIdentity(indexes: number[]): Promise<Record<number, PositionOneIdentity>> {
     const entries = await Promise.all(indexes.map(async (index) => {
@@ -261,7 +262,7 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       };
       try {
         const device = this.detectorDevice(index);
-        try { result.softwareVersion = await device.readSoftwareVersion(); } catch { /* explicit reason below */ }
+        try { result.softwareVersion = await device.readSoftwareVersion(); } catch { /* explicit reason below when enabled */ }
         try { result.probeCount = await device.readProbeCount(); } catch { /* explicit reason below */ }
         try { result.sensitivity = await device.readSensitivity(); } catch { /* explicit reason below */ }
         try {
@@ -363,12 +364,14 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         const live = currentByIndex.get(index);
         const reasons: string[] = [];
 
-        if (identity.softwareVersion === null) {
-          uniquePush(reasons, 'SOFTWARE_VERSION_READ_FAILED');
-        } else if (!profile.expectedSoftwareVersion.trim()) {
-          uniquePush(reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
-        } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, identity.softwareVersion)) {
-          uniquePush(reasons, 'SOFTWARE_VERSION_MISMATCH');
+        if (!profile.skipSoftwareVersionCheck) {
+          if (identity.softwareVersion === null) {
+            uniquePush(reasons, 'SOFTWARE_VERSION_READ_FAILED');
+          } else if (!profile.expectedSoftwareVersion.trim()) {
+            uniquePush(reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
+          } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, identity.softwareVersion)) {
+            uniquePush(reasons, 'SOFTWARE_VERSION_MISMATCH');
+          }
         }
 
         if (identity.probeCount === null) uniquePush(reasons, 'PROBE_COUNT_READ_FAILED');
