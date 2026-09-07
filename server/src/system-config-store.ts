@@ -13,6 +13,12 @@ const CONFIG_FILE_PATH = process.env.APP_DATA_DIR
   ? join(process.env.APP_DATA_DIR, 'system-config.json')
   : join(__dirname, '..', 'system-config.json');
 
+const BASE_SNAPSHOT = Symbol('system-config-base-snapshot');
+
+type SnapshottedSystemConfigStore = SystemConfigStore & {
+  [BASE_SNAPSHOT]?: SystemConfigStore;
+};
+
 export interface SystemConfigStore {
   steps: unknown[];
   modbusConfig?: unknown;
@@ -32,11 +38,33 @@ export type SystemConfigUpdater = (
   current: SystemConfigStore,
 ) => SystemConfigStore | Promise<SystemConfigStore>;
 
-export function createDefaultSystemConfig(): SystemConfigStore {
+function clonePlain(store: SystemConfigStore): SystemConfigStore {
+  return JSON.parse(JSON.stringify(store)) as SystemConfigStore;
+}
+
+function withSnapshot(store: SystemConfigStore, base: SystemConfigStore = store): SystemConfigStore {
+  Object.defineProperty(store as SnapshottedSystemConfigStore, BASE_SNAPSHOT, {
+    value: clonePlain(base),
+    enumerable: true,
+    configurable: true,
+  });
+  return store;
+}
+
+function plainDefaultSystemConfig(): SystemConfigStore {
   return {
     steps: [],
     lastUpdated: Date.now(),
   };
+}
+
+export function createDefaultSystemConfig(): SystemConfigStore {
+  const store = plainDefaultSystemConfig();
+  return withSnapshot(store, store);
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 /**
@@ -50,7 +78,7 @@ export class SystemConfigRepository {
 
   constructor(private readonly filePath = CONFIG_FILE_PATH) {}
 
-  async load(): Promise<SystemConfigStore | null> {
+  private async loadRaw(): Promise<SystemConfigStore | null> {
     try {
       const data = await fs.readFile(this.filePath, 'utf-8');
       return JSON.parse(data) as SystemConfigStore;
@@ -60,6 +88,11 @@ export class SystemConfigRepository {
       }
       return null;
     }
+  }
+
+  async load(): Promise<SystemConfigStore | null> {
+    const store = await this.loadRaw();
+    return store ? withSnapshot(store, store) : null;
   }
 
   private async write(store: SystemConfigStore): Promise<void> {
@@ -82,24 +115,49 @@ export class SystemConfigRepository {
     return result;
   }
 
-  /** Complete replacement for legacy callers. Prefer update() for API mutations. */
+  /**
+   * Compatibility save for existing API handlers. load()/createDefaultSystemConfig()
+   * attach an enumerable Symbol snapshot that survives object spread. If another
+   * handler has already saved a newer snapshot, only fields changed by this caller
+   * relative to its own base snapshot are merged into the latest file.
+   */
   save(store: SystemConfigStore): Promise<void> {
     return this.enqueue(async () => {
-      await this.write(store);
+      const snapshotted = store as SnapshottedSystemConfigStore;
+      const base = snapshotted[BASE_SNAPSHOT];
+      if (!base) {
+        await this.write(store);
+        return;
+      }
+
+      const latest = await this.loadRaw() ?? plainDefaultSystemConfig();
+      const merged = { ...latest } as Record<string, unknown>;
+      const submitted = store as unknown as Record<string, unknown>;
+      const original = base as unknown as Record<string, unknown>;
+      const keys = new Set([...Object.keys(original), ...Object.keys(submitted)]);
+
+      for (const key of keys) {
+        const before = original[key];
+        const after = submitted[key];
+        if (sameValue(before, after)) continue;
+        if (Object.prototype.hasOwnProperty.call(submitted, key)) merged[key] = after;
+        else delete merged[key];
+      }
+
+      await this.write(merged as unknown as SystemConfigStore);
     });
   }
 
   /**
    * Atomically load the latest snapshot, apply one mutation, and persist it while
-   * holding the repository queue. Concurrent callers therefore compose instead of
-   * replacing one another with stale snapshots.
+   * holding the repository queue. New API code should prefer this method directly.
    */
   update(updater: SystemConfigUpdater): Promise<SystemConfigStore> {
     return this.enqueue(async () => {
-      const current = await this.load() ?? createDefaultSystemConfig();
-      const next = await updater(current);
+      const current = await this.loadRaw() ?? plainDefaultSystemConfig();
+      const next = await updater(clonePlain(current));
       await this.write(next);
-      return next;
+      return withSnapshot(next, next);
     });
   }
 }
