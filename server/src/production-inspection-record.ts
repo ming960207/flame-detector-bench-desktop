@@ -1,7 +1,7 @@
 import type { ProductCodeGenerationStatus } from './product-code.js';
 
-export type InspectionItemStatus = '合格' | '不合格';
-export type InspectionItemSource = 'AUTO' | 'DEFAULT_PASS';
+export type InspectionItemStatus = '合格' | '不合格' | '未检测' | '不适用';
+export type InspectionItemSource = 'AUTO' | 'NOT_TESTED' | 'NOT_APPLICABLE';
 
 export interface ProductionInspectionRecordConfig {
   inspector: string;
@@ -70,8 +70,12 @@ export interface ProductionInspectionRecord {
   generatedAt: number;
 }
 
-export function defaultPass(reason: string): InspectionStatusValue {
-  return { status: '合格', source: 'DEFAULT_PASS', reason };
+export function notTested(reason: string): InspectionStatusValue {
+  return { status: '未检测', source: 'NOT_TESTED', reason };
+}
+
+export function notApplicable(reason: string): InspectionStatusValue {
+  return { status: '不适用', source: 'NOT_APPLICABLE', reason };
 }
 
 export function autoStatus(passed: boolean, reason?: string): InspectionStatusValue {
@@ -89,18 +93,27 @@ export function measuredValue<T>(value: T, passed: boolean, reason?: string): In
   };
 }
 
-export function fixedDefaultPassItems() {
+/**
+ * These items are outside the current bench's automatic measurement scope.
+ * They must never be represented as a measured PASS; use explicit N/A evidence instead.
+ */
+export function fixedNotApplicableItems() {
   return {
-    workCurrent: defaultPass('BENCH_DOES_NOT_MEASURE_WORK_CURRENT'),
-    ledDisplay: defaultPass('BENCH_DOES_NOT_MEASURE_LED_DISPLAY'),
-    powerFluctuation: defaultPass('BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION'),
-    highTemp: defaultPass('BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE'),
-    lowTemp: defaultPass('BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE'),
+    workCurrent: notApplicable('BENCH_DOES_NOT_MEASURE_WORK_CURRENT'),
+    ledDisplay: notApplicable('BENCH_DOES_NOT_MEASURE_LED_DISPLAY'),
+    powerFluctuation: notApplicable('BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION'),
+    highTemp: notApplicable('BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE'),
+    lowTemp: notApplicable('BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE'),
   };
 }
 
-export function relayDisabledDefaultPass(reason = 'RELAY_TEST_DISABLED'): InspectionStatusValue {
-  return defaultPass(reason);
+/**
+ * relayFunctionalTestEnabled=false means this product profile does not require the
+ * relay functional test in the current bench recipe. Record N/A rather than PASS.
+ * When the profile enables the relay test, callers must supply real AUTO evidence.
+ */
+export function relayTestNotApplicable(reason = 'RELAY_TEST_NOT_REQUIRED_FOR_PROFILE'): InspectionStatusValue {
+  return notApplicable(reason);
 }
 
 export function normalizeProductionInspectionRecordConfig(
@@ -120,5 +133,7 @@ export function normalizeProductionInspectionRecordConfig(
 }
 
 export function recordConclusion(products: ProductionInspectionProductResult[]): InspectionItemStatus {
-  return products.some((product) => product.verdict === '不合格') ? '不合格' : '合格';
+  if (products.some((product) => product.verdict === '不合格')) return '不合格';
+  if (products.some((product) => product.verdict === '未检测')) return '未检测';
+  return '合格';
 }
