@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import mqtt, { MqttClient } from 'mqtt';
 import { DEFAULT_MQTT_BROKER, type MQTTConfigLocal } from './config.js';
+import { ReliableMQTTOutbox } from './mqtt-reliable-outbox.js';
 import type { ProductionRunArchive } from './production-run-coordinator.js';
 import type { TestProgramArchive } from './test-program/test-program-types.js';
 import { ConnectionStatus, FlameDetectorState } from './types.js';
@@ -10,7 +10,6 @@ const DEFAULT_FACTORY_ID = 'SH_F1';
 const DEFAULT_LINE_ID = 'LINE_A1';
 const DEFAULT_DEVICE_ID = 'flame_detector_bench';
 const HEARTBEAT_MS = 30000;
-const MAX_PENDING_RELIABLE_MESSAGES = 100;
 
 function cleanString(value: unknown, fallback = '', maxLength = 256): string {
   if (typeof value !== 'string') return fallback;
@@ -97,57 +96,10 @@ export interface MQTTPublisherStatus {
   clientId?: string;
   lastError?: string;
   pendingReliableMessages: number;
+  oldestPendingAt?: number;
+  backlogWarning: boolean;
+  outboxPersistenceHealthy: boolean;
   outboxFile: string;
-}
-
-interface PendingReliableMessage {
-  topic: string;
-  payload: unknown;
-  queuedAt: number;
-}
-
-interface PersistedOutboxItem extends PendingReliableMessage {
-  key: string;
-}
-
-function readOutbox(file: string): Map<string, PendingReliableMessage> {
-  if (!existsSync(file)) return new Map();
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-    if (!Array.isArray(parsed)) return new Map();
-    const entries: Array<[string, PendingReliableMessage]> = [];
-    for (const item of parsed.slice(-MAX_PENDING_RELIABLE_MESSAGES)) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-      const value = item as Partial<PersistedOutboxItem>;
-      if (typeof value.key !== 'string' || !value.key || typeof value.topic !== 'string' || !value.topic) continue;
-      entries.push([value.key.slice(0, 256), {
-        topic: value.topic.slice(0, 1024),
-        payload: value.payload,
-        queuedAt: Number.isFinite(Number(value.queuedAt)) ? Number(value.queuedAt) : Date.now(),
-      }]);
-    }
-    return new Map(entries);
-  } catch (error) {
-    console.error('[MQTT Server] 待上传队列读取失败，将从空队列启动:', error instanceof Error ? error.message : String(error));
-    return new Map();
-  }
-}
-
-function persistOutbox(file: string, messages: ReadonlyMap<string, PendingReliableMessage>): void {
-  mkdirSync(dirname(file), { recursive: true });
-  if (messages.size === 0) {
-    try { unlinkSync(file); } catch { /* file may not exist */ }
-    return;
-  }
-  const items: PersistedOutboxItem[] = Array.from(messages.entries()).map(([key, message]) => ({ key, ...message }));
-  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
-    renameSync(temporary, file);
-  } catch (error) {
-    try { unlinkSync(temporary); } catch { /* no temporary file */ }
-    throw error;
-  }
 }
 
 export function buildInspectionResultPayload(run: TestProgramArchive, deviceId: string, timestamp = run.archivedAt || Date.now()) {
@@ -315,9 +267,9 @@ export class MQTTPublisher {
   private lastSignature = '';
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private lastError = '';
-  private readonly outboxFile: string;
-  private pendingReliableMessages: Map<string, PendingReliableMessage>;
+  private readonly outbox: ReliableMQTTOutbox;
   private flushingReliableMessages = false;
+  private backlogWarningLogged = false;
 
   constructor(config: Partial<MQTTConfigLocal> = {}, options: { outboxFile?: string } = {}) {
     this.config = normalizeMQTTConfig(config, {
@@ -327,8 +279,9 @@ export class MQTTPublisher {
       lineId: DEFAULT_LINE_ID,
       deviceId: DEFAULT_DEVICE_ID,
     });
-    this.outboxFile = options.outboxFile || defaultOutboxFile();
-    this.pendingReliableMessages = readOutbox(this.outboxFile);
+    this.outbox = new ReliableMQTTOutbox(options.outboxFile || defaultOutboxFile());
+    const outboxStatus = this.outbox.status();
+    if (!outboxStatus.persistenceHealthy && outboxStatus.lastError) this.lastError = outboxStatus.lastError;
   }
 
   getConfig(): MQTTConfigLocal {
@@ -341,14 +294,18 @@ export class MQTTPublisher {
   }
 
   getStatus(): MQTTPublisherStatus {
+    const outbox = this.outbox.status();
     return {
       enabled: this.config.mqttEnabled,
       connected: this.connected,
       broker: brokerLabel(this.config.brokerUrl),
       clientId: this.config.clientId,
-      lastError: this.lastError || undefined,
-      pendingReliableMessages: this.pendingReliableMessages.size,
-      outboxFile: this.outboxFile,
+      lastError: this.lastError || outbox.lastError || undefined,
+      pendingReliableMessages: outbox.pending,
+      ...(outbox.oldestPendingAt === undefined ? {} : { oldestPendingAt: outbox.oldestPendingAt }),
+      backlogWarning: outbox.backlogWarning,
+      outboxPersistenceHealthy: outbox.persistenceHealthy,
+      outboxFile: outbox.file,
     };
   }
 
@@ -542,28 +499,25 @@ export class MQTTPublisher {
     return this.publish(eventTopic(this.config), payload);
   }
 
-  private persistReliableMessages(): void {
-    try {
-      persistOutbox(this.outboxFile, this.pendingReliableMessages);
-    } catch (error) {
-      this.lastError = `MQTT_OUTBOX_WRITE_FAILED: ${error instanceof Error ? error.message : String(error)}`;
-      console.error('[MQTT Server] 待上传队列保存失败:', this.lastError);
+  private updateOutboxHealth(): void {
+    const status = this.outbox.status();
+    if (!status.persistenceHealthy && status.lastError) this.lastError = status.lastError;
+    if (status.backlogWarning && !this.backlogWarningLogged) {
+      this.backlogWarningLogged = true;
+      console.warn(`[MQTT Server] 待上传生产/检测结果已积压 ${status.pending} 条；队列不会自动丢弃，请检查 Broker/网络。`);
     }
+    if (!status.backlogWarning) this.backlogWarningLogged = false;
   }
 
   private async publishReliable(key: string, topic: string, payload: unknown): Promise<boolean> {
     const success = await this.publish(topic, payload);
     if (success) {
-      if (this.pendingReliableMessages.delete(key)) this.persistReliableMessages();
+      this.outbox.delete(key);
+      this.updateOutboxHealth();
       return true;
     }
-    this.pendingReliableMessages.set(key, { topic, payload, queuedAt: Date.now() });
-    while (this.pendingReliableMessages.size > MAX_PENDING_RELIABLE_MESSAGES) {
-      const oldest = this.pendingReliableMessages.keys().next().value as string | undefined;
-      if (!oldest) break;
-      this.pendingReliableMessages.delete(oldest);
-    }
-    this.persistReliableMessages();
+    this.outbox.set(key, { topic, payload, queuedAt: Date.now() });
+    this.updateOutboxHealth();
     return false;
   }
 
@@ -571,12 +525,12 @@ export class MQTTPublisher {
     if (this.flushingReliableMessages || !this.connected) return;
     this.flushingReliableMessages = true;
     try {
-      for (const [key, message] of Array.from(this.pendingReliableMessages.entries())) {
+      for (const [key, message] of this.outbox.entries()) {
         if (!this.connected) break;
         const success = await this.publish(message.topic, message.payload);
         if (success) {
-          this.pendingReliableMessages.delete(key);
-          this.persistReliableMessages();
+          this.outbox.delete(key);
+          this.updateOutboxHealth();
         }
       }
     } finally {
