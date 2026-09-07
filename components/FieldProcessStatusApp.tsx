@@ -25,6 +25,8 @@ const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
 const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
 const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
+const WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS = 1000;
+let lastWaveformUiDiagnosticAt = 0;
 
 type DetailTab = 'device' | 'product' | 'production' | 'observer';
 
@@ -43,6 +45,24 @@ function processDisplayLabel(status: PLCProcessStatus | null | undefined) {
   const label = status?.processLabel ?? status?.label;
   if (!label) return '工序待同步';
   return hasActivePLCProcessAlarm(status) ? label + ' · 告警/中止' : label;
+}
+
+function logWaveformUiDiagnostic(
+  kind: 'snapshot' | 'delta',
+  payload: FlameDetectorState | FlameDetectorWaveformDelta,
+  sentAt?: number,
+) {
+  const now = Date.now();
+  if (now - lastWaveformUiDiagnosticAt < WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS) return;
+  lastWaveformUiDiagnosticAt = now;
+  const units = payload.units.map((unit) => {
+    const delta = 'historyDelta' in unit ? unit.historyDelta.length : '-';
+    const reset = 'historyReset' in unit && unit.historyReset ? 1 : 0;
+    const lastAge = unit.lastUpdate > 0 ? Math.max(0, now - unit.lastUpdate) : -1;
+    return `D${unit.index}{on=${unit.online ? 1 : 0},total=${unit.historySampleTotal ?? '-'},delta=${delta},lastAgeMs=${lastAge},reset=${reset}}`;
+  }).join(' ');
+  const wireAge = Number.isFinite(Number(sentAt)) ? Math.max(0, now - Number(sentAt)) : -1;
+  console.info(`[WaveformDiag][UI] kind=${kind} wireAgeMs=${wireAge} payloadAgeMs=${Math.max(0, now - payload.timestamp)} ${units}`);
 }
 
 export function FieldProcessStatusApp() {
@@ -151,11 +171,17 @@ export function FieldProcessStatusApp() {
         if (!disposed) timer = setTimeout(connect, WS_RECONNECT_DELAY_MS);
         return;
       }
-      socket.onopen = () => setChannelOnline(true);
-      socket.onerror = () => setChannelOnline(false);
+      socket.onopen = () => {
+        console.info(`[RuntimeDiag][UI] WebSocket connected ${WS}`);
+        setChannelOnline(true);
+      };
+      socket.onerror = () => {
+        console.error(`[RuntimeDiag][UI] WebSocket error ${WS}`);
+        setChannelOnline(false);
+      };
       socket.onmessage = ({ data }) => {
         try {
-          const message = JSON.parse(data) as { type: string; payload: unknown };
+          const message = JSON.parse(data) as { type: string; payload: unknown; timestamp?: number };
           if (message.type === 'plc_process_status') {
             const next = message.payload as PLCProcessStatus;
             setStatus(next);
@@ -163,18 +189,26 @@ export function FieldProcessStatusApp() {
               ? 'PLC 工序已同步：' + processDisplayLabel(next)
               : 'PLC 返回未知工序码');
           }
-          if (message.type === 'flame_state') setDetectors(message.payload as FlameDetectorState);
+          if (message.type === 'flame_state') {
+            const state = message.payload as FlameDetectorState;
+            logWaveformUiDiagnostic('snapshot', state, message.timestamp);
+            setDetectors(state);
+          }
           if (message.type === 'flame_waveform_delta') {
+            const delta = message.payload as FlameDetectorWaveformDelta;
+            logWaveformUiDiagnostic('delta', delta, message.timestamp);
             setDetectors((previous) => previous
-              ? mergeFlameWaveformDelta(previous, message.payload as FlameDetectorWaveformDelta)
+              ? mergeFlameWaveformDelta(previous, delta)
               : previous);
           }
           if (message.type === 'field_summary') applySummary(message.payload as FieldSummaryPayload);
-        } catch {
+        } catch (error) {
+          console.error('[RuntimeDiag][UI] invalid WebSocket message', error);
           setNotice('数据通道返回无效消息，等待下一次同步。');
         }
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
+        console.warn(`[RuntimeDiag][UI] WebSocket closed code=${event.code} reason=${event.reason || '-'}`);
         setChannelOnline(false);
         if (!disposed) timer = setTimeout(connect, WS_RECONNECT_DELAY_MS);
       };
