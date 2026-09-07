@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DetectorStartupTracker } from '../src/modbus/detector-startup.js';
+import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
 
 test('detector startup becomes TEST_READY only after five consecutive valid frames', () => {
   let now = 1_000;
@@ -63,4 +64,26 @@ test('valid frames without a confirmed mode switch never become test ready', () 
   const ready = tracker.markModeSwitchOk();
   assert.equal(ready.state, 'TEST_READY');
   assert.equal(ready.testReadyAt, 3_000);
+});
+
+test('startup can wait for the vertical lower limit without becoming a terminal failure', () => {
+  const tracker = new DetectorStartupTracker(4, 1, () => 4_000);
+  tracker.markPowerOn();
+  tracker.markCommunicationReady();
+  assert.equal(tracker.markWaitingForLowerLimit().state, 'WAITING_FOR_VERTICAL_LOWER_LIMIT');
+  assert.equal(tracker.markModeSwitching(4).state, 'MODE_SWITCHING');
+  assert.equal(tracker.snapshot().failureReason, undefined);
+});
+
+test('flame service exposes the vertical lower-limit gate for continuous ACK retries', async () => {
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: 31_001,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
+  });
+  assert.equal(service.getReadyReport()?.verticalDownLimitReached, false);
+  service.setVerticalDownLimit(true);
+  assert.equal(service.getReadyReport()?.verticalDownLimitReached, true);
+  await service.disconnect();
 });

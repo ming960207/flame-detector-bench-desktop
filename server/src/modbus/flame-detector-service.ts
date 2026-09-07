@@ -59,9 +59,7 @@ const AUTO_TEST_MAX_ATTEMPTS = 4;
 const WAVEFORM_STALE_TIMEOUT_MS = 10000;
 const WAVEFORM_STATE_BROADCAST_INTERVAL_MS = 50;
 const TCP_INITIALIZE_STAGGER_MS = 250;
-const SEND_MODE_RETRY_MAX_INTERVAL_MS = 5000;
 const PRECHECK_DRAIN_DELAY_MS = 150;
-const MAX_MODE_SWITCH_ATTEMPTS = 3;
 const READY_BARRIER_TIMEOUT_MS = 15_000;
 const READY_BARRIER_POLL_INTERVAL_MS = 50;
 const PROTOCOL_DIAGNOSTIC_FRAME_LIMIT = 5;
@@ -181,6 +179,8 @@ export interface AutoTestReport {
 
 export interface DetectorReadyReport {
   ready: boolean;
+  verticalDownLimitKnown: boolean;
+  verticalDownLimitReached: boolean;
   timeoutMs: number;
   startedAt: number;
   completedAt: number;
@@ -231,6 +231,8 @@ export class FlameDetectorService extends EventEmitter {
   private startupTrackers = new Map<number, DetectorStartupTracker>();
   private protocolDiagnosticFrames = new Map<number, number>();
   private lifecycleBatchId = '-';
+  private verticalDownLimitKnown = false;
+  private verticalDownLimitReached = false;
   private readonly lifecycleLogPath = process.env.DETECTOR_LIFECYCLE_LOG
     || join(process.env.APP_DATA_DIR || process.cwd(), 'logs', 'detector-lifecycle.log');
 
@@ -432,7 +434,7 @@ export class FlameDetectorService extends EventEmitter {
           if (!this.attachPushListener(unit, existing.client)) throw new Error('探测器 TCP 原始监听器创建失败');
         }
         this.markTransportConnected(unit);
-        if (isTcp && this.waveformStreamingArmed) void this.initializeUnit(unit, existing.client);
+        if (isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, existing.client);
         return { ok: true, key, error: '' };
       } catch (error: any) {
         existing.ok = false;
@@ -456,7 +458,7 @@ export class FlameDetectorService extends EventEmitter {
         throw new Error('探测器 TCP 原始监听器创建失败');
       }
       this.markTransportConnected(unit);
-      if (isTcp && this.waveformStreamingArmed) void this.initializeUnit(unit, client);
+      if (isTcp && this.waveformStreamingArmed && this.modeRetryAllowed()) void this.initializeUnit(unit, client);
       console.log(`[FlameService] 连接成功: ${key}`);
       return { ok: true, key, error: '' };
     } catch (error: any) {
@@ -565,6 +567,43 @@ export class FlameDetectorService extends EventEmitter {
     const tracker = new DetectorStartupTracker(unit.index, unit.address);
     this.startupTrackers.set(unit.index, tracker);
     return tracker;
+  }
+
+  private modeRetryAllowed(): boolean {
+    return this.verticalDownLimitKnown && this.verticalDownLimitReached;
+  }
+
+  setVerticalDownLimit(reached: boolean): void {
+    const next = Boolean(reached);
+    const changed = !this.verticalDownLimitKnown || this.verticalDownLimitReached !== next;
+    this.verticalDownLimitKnown = true;
+    this.verticalDownLimitReached = next;
+    if (!changed) return;
+
+    for (const unit of this.config.units) {
+      if (!unit.enabled || (unit.connMode ?? this.config.mode) !== 'TCP') continue;
+      const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+      const tracker = this.startupTracker(unit);
+      if (!next) {
+        this.stopBroadcastModeRequests(unit.index);
+        this.broadcastModeRetryAttempts.delete(unit.index);
+        if (!tracker.isReady()) {
+          state.startup = tracker.markWaitingForLowerLimit();
+          state.lastError = 'WAITING_FOR_VERTICAL_LOWER_LIMIT';
+          state.online = false;
+          state.sourceReady = false;
+          state.syncOk = false;
+          state.sendMode = 0;
+          state.lastUpdate = Date.now();
+          this.units.set(unit.index, state);
+          this.emit('unit_update', state);
+        }
+        continue;
+      }
+      const entry = this.pool.get(connKey(unit, this.config));
+      if (entry?.ok && this.waveformStreamingArmed && !tracker.isReady()) void this.initializeUnit(unit, entry.client);
+    }
+    this.broadcastStateNow();
   }
 
   private logLifecycle(index: number, event: string, startup: DetectorStartupDiagnostic, detail = ''): void {
@@ -756,7 +795,7 @@ export class FlameDetectorService extends EventEmitter {
   private async pollUnit(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<void> {
     if (this.initializingUnits.has(unit.index)) return;
     if ((unit.connMode ?? this.config.mode) === 'TCP') {
-      if (this.waveformStreamingArmed && !this.broadcastModeUnits.has(unit.index)) void this.initializeUnit(unit, client);
+      if (this.waveformStreamingArmed && this.modeRetryAllowed() && !this.broadcastModeUnits.has(unit.index)) void this.initializeUnit(unit, client);
       return;
     }
     if (Date.now() - (this.lastPushAt.get(unit.index) ?? 0) < 5000) return;
@@ -830,15 +869,9 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private scheduleBroadcastModeRetry(unit: FlameUnitConfig, client: FlameDetectorClient): void {
-    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return;
+    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.modeRetryAllowed() || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return;
     if (this.broadcastModeRetryTimers.has(unit.index) || this.broadcastModeRequestInFlight.has(unit.index)) return;
-    const currentAttempt = this.broadcastModeRetryAttempts.get(unit.index) ?? 0;
-    if (currentAttempt >= MAX_MODE_SWITCH_ATTEMPTS) return;
-    const attempt = currentAttempt + 1;
-    const retryDelay = Math.min(
-      SEND_MODE_BROADCAST_RETRY_INTERVAL_MS * (2 ** Math.min(attempt - 1, 5)),
-      SEND_MODE_RETRY_MAX_INTERVAL_MS,
-    );
+    const retryDelay = SEND_MODE_BROADCAST_RETRY_INTERVAL_MS;
     const timer = setTimeout(() => {
       this.broadcastModeRetryTimers.delete(unit.index);
       void this.sendBroadcastModeRequest(unit, client);
@@ -847,7 +880,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private async sendBroadcastModeRequest(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<boolean> {
-    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return false;
+    if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.modeRetryAllowed() || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return false;
     const inFlightClient = this.broadcastModeRequestInFlight.get(unit.index);
     if (inFlightClient === client) return false;
     if (inFlightClient && !this.isCurrentClient(unit, inFlightClient)) this.broadcastModeRequestInFlight.delete(unit.index);
@@ -861,7 +894,7 @@ export class FlameDetectorService extends EventEmitter {
     this.startupTrackers.set(unit.index, tracker);
     state.startup = tracker.markModeSwitching(attempt);
     this.logLifecycle(unit.index, 'MODE_SWITCH_START', state.startup, `attempt=${attempt}`);
-    console.log(`[FlameService] 设备 ${unit.index} 发送波形模式切换请求 (模式 ${sendMode}, 尝试 ${attempt}/${MAX_MODE_SWITCH_ATTEMPTS})`);
+    console.log(`[FlameService] 设备 ${unit.index} 发送波形模式切换请求 (模式 ${sendMode}, 持续重试第 ${attempt} 次)`);
     try {
       const device = this.getDevice(unit, client);
       await device.sendBroadcastSendMode({
@@ -885,6 +918,12 @@ export class FlameDetectorService extends EventEmitter {
     } catch (error: any) {
       console.error(`[FlameService] 设备 ${unit.index} 波形模式切换请求失败:`, error?.message || String(error));
       if (!this.isCurrentClient(unit, client)) return false;
+      this.logLifecycle(
+        unit.index,
+        'MODE_SWITCH_ACK_TIMEOUT',
+        tracker.snapshot(),
+        `lowerLimit=${this.verticalDownLimitReached ? 1 : 0} reason=${error?.message || String(error)}`,
+      );
       const lastPush = this.lastPushAt.get(unit.index) ?? 0;
       const waveformIsRecent = lastPush > 0 && Date.now() - lastPush <= this.waveformStaleTimeoutMs();
       if (waveformIsRecent) {
@@ -900,20 +939,12 @@ export class FlameDetectorService extends EventEmitter {
         state.syncOk = false;
         state.lastError = error?.message || String(error);
       }
-      if (attempt >= MAX_MODE_SWITCH_ATTEMPTS) {
-        const reason = `MODE_SWITCH_FAILED_AFTER_${MAX_MODE_SWITCH_ATTEMPTS}_ATTEMPTS`;
-        state.startup = tracker.markModeSwitchFailure(reason);
-        this.logLifecycle(unit.index, 'MODE_SWITCH_FAIL', state.startup, `reason=${reason}`);
-        state.lastError = reason;
-        this.stopBroadcastModeRequests(unit.index);
-        console.error(`[FlameService] 设备 ${unit.index} 模式切换失败，已达到最大重试次数 ${MAX_MODE_SWITCH_ATTEMPTS}`);
-      }
       state.lastUpdate = Date.now();
       this.units.set(unit.index, state);
       return false;
     } finally {
       if (this.broadcastModeRequestInFlight.get(unit.index) === client) this.broadcastModeRequestInFlight.delete(unit.index);
-      if (this.waveformStreamingArmed && this.broadcastModeRequestingUnits.has(unit.index) && this.isCurrentClient(unit, client)) this.scheduleBroadcastModeRetry(unit, client);
+      if (this.waveformStreamingArmed && this.modeRetryAllowed() && this.broadcastModeRequestingUnits.has(unit.index) && this.isCurrentClient(unit, client)) this.scheduleBroadcastModeRetry(unit, client);
       this.emit('unit_update', state);
     }
   }
@@ -947,6 +978,11 @@ export class FlameDetectorService extends EventEmitter {
 
   private handleWaveformStale(unit: FlameUnitConfig, client: FlameDetectorClient): void {
     if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
+    if (!this.modeRetryAllowed()) {
+      this.stopBroadcastModeRequests(unit.index);
+      this.setVerticalDownLimit(false);
+      return;
+    }
     this.stopBroadcastModeRequests(unit.index);
     this.broadcastModeRetryAttempts.delete(unit.index);
     this.broadcastModeRequestingUnits.add(unit.index);
@@ -960,7 +996,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private async initializeUnit(unit: FlameUnitConfig, client: FlameDetectorClient): Promise<void> {
-    if (!this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
+    if (!this.waveformStreamingArmed || !this.modeRetryAllowed() || !this.isCurrentClient(unit, client)) return;
     if (this.initializingUnits.get(unit.index) === client) return;
     this.initializingUnits.set(unit.index, client);
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
@@ -1315,6 +1351,8 @@ export class FlameDetectorService extends EventEmitter {
     });
     return {
       ready: units.length > 0 && units.every((unit) => unit.ready),
+      verticalDownLimitKnown: this.verticalDownLimitKnown,
+      verticalDownLimitReached: this.verticalDownLimitReached,
       timeoutMs,
       startedAt,
       completedAt: Date.now(),
@@ -1336,6 +1374,7 @@ export class FlameDetectorService extends EventEmitter {
       this.broadcastModeUnits.delete(unit.index);
       const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
       state.startup = startup;
+      if (!this.modeRetryAllowed()) state.startup = tracker.markWaitingForLowerLimit();
       state.online = false;
       state.sourceReady = false;
       state.syncOk = false;
@@ -1346,7 +1385,7 @@ export class FlameDetectorService extends EventEmitter {
       if (!unit.enabled) continue;
       const entry = this.pool.get(connKey(unit, this.config));
       if (!entry?.ok) continue;
-      if ((unit.connMode ?? this.config.mode) === 'TCP' && this.waveformStreamingArmed) {
+      if ((unit.connMode ?? this.config.mode) === 'TCP' && this.waveformStreamingArmed && this.modeRetryAllowed()) {
         void this.initializeUnit(unit, entry.client);
       }
     }
@@ -1362,25 +1401,18 @@ export class FlameDetectorService extends EventEmitter {
       : READY_BARRIER_TIMEOUT_MS;
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs;
-    while (Date.now() < deadline) {
+    while (!this.disposed) {
       const report = this.getReadyReport(requiredSlots, timeoutMs);
-      if (report.ready || report.units.some((unit) => unit.startup.state === 'FAILED')) return { ...report, startedAt };
+      if (report.ready) return { ...report, startedAt };
+      // Once the PLC confirms the vertical lower limit, keep retrying until an
+      // ACK arrives; the timeout only bounds the pre-limit waiting state.
+      if (this.modeRetryAllowed()) {
+        await new Promise((resolve) => setTimeout(resolve, READY_BARRIER_POLL_INTERVAL_MS));
+        continue;
+      }
+      if (Date.now() >= deadline) return { ...report, startedAt, completedAt: Date.now() };
       await new Promise((resolve) => setTimeout(resolve, READY_BARRIER_POLL_INTERVAL_MS));
     }
-    for (const item of this.getReadyReport(requiredSlots, timeoutMs).units) {
-      if (item.ready) continue;
-      const tracker = this.startupTrackers.get(item.index);
-      const state = this.units.get(item.index);
-      if (!tracker || !state) continue;
-      const reason = item.startup.failureReason || `DETECTOR_STARTUP_TIMEOUT:D${item.index}`;
-      const startup = tracker.markTimeout(reason);
-      state.startup = startup;
-      state.lastError = reason;
-      state.lastUpdate = Date.now();
-      this.units.set(item.index, state);
-      this.emit('unit_update', state);
-    }
-    this.broadcastStateNow();
     return { ...this.getReadyReport(requiredSlots, timeoutMs), ready: false, startedAt, completedAt: Date.now() };
   }
 

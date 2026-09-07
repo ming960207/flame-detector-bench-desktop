@@ -146,7 +146,9 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_STARTUP_MODE_SWITCHING: '模式切换未确认',
   DETECTOR_STARTUP_MODE_SWITCH_OK: '模式已切换，等待首帧同步',
   DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '首帧已收到，等待通道同步',
-  MODE_SWITCH_FAILED_AFTER_3_ATTEMPTS: '模式切换重试 3 次仍失败',
+  DETECTOR_STARTUP_WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
+  MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
+  WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
   NOISE_RMS_EXCEEDS_LIMIT: '噪声 RMS 超过上限',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
@@ -200,6 +202,7 @@ function localDateTime(timestamp: number | null): string {
 function startupStateText(state: string | undefined): string {
   const labels: Record<string, string> = {
     DISCONNECTED: '未连接',
+    WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待下限位',
     POWER_ON: '已上电',
     COMMUNICATION_READY: '通信就绪',
     MODE_SWITCHING: '模式切换中',

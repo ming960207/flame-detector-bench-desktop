@@ -83,10 +83,10 @@ test('mode-switch startup failure is reported before waveform threshold evaluati
     modeSwitchAttempts: 3,
     channelValidStreak: 0,
     requiredChannelCount: 3,
-    failureReason: 'MODE_SWITCH_FAILED_AFTER_3_ATTEMPTS',
+    failureReason: 'MODE_SWITCH_TIMEOUT',
   };
 
   const result = evaluateFieldDetectorBatch(state, { phase: 'COMPLETE', thresholds: {}, units: [] } as any);
   assert.equal(result.units[5]?.verdict, 'FAIL');
-  assert.equal(result.units[5]?.reason, 'MODE_SWITCH_FAILED_AFTER_3_ATTEMPTS');
+  assert.equal(result.units[5]?.reason, 'MODE_SWITCH_TIMEOUT');
 });

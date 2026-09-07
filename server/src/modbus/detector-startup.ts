@@ -4,6 +4,7 @@ export const DETECTOR_STARTUP_FRAME_STREAK_REQUIRED = 5;
 
 export type DetectorStartupState =
   | 'DISCONNECTED'
+  | 'WAITING_FOR_VERTICAL_LOWER_LIMIT'
   | 'POWER_ON'
   | 'COMMUNICATION_READY'
   | 'MODE_SWITCHING'
@@ -97,6 +98,14 @@ export class DetectorStartupTracker {
   markPowerOn(): DetectorStartupDiagnostic {
     if (this.diagnostic.powerOnAt === null) this.diagnostic.powerOnAt = timestamp(this.now);
     this.diagnostic.state = 'POWER_ON';
+    return this.snapshot();
+  }
+
+  markWaitingForLowerLimit(): DetectorStartupDiagnostic {
+    this.diagnostic.failureReason = undefined;
+    if (this.diagnostic.state !== 'TEST_READY') {
+      this.diagnostic.state = 'WAITING_FOR_VERTICAL_LOWER_LIMIT';
+    }
     return this.snapshot();
   }
 

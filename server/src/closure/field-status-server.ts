@@ -91,6 +91,7 @@ export interface FlameDetectorStatusSource {
   isTransportConnected?(): boolean;
   isDataStreamConnected?(): boolean;
   clearWaveformHistory?(): void;
+  setVerticalDownLimit?(reached: boolean): void;
   prepareWaveformStartup?(batchId?: string): void;
   waitForReady?(options?: { requiredSlots?: number[]; timeoutMs?: number }): Promise<DetectorReadyReport>;
   getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
@@ -265,6 +266,7 @@ export function createFieldStatusRuntime(
   let detectorMutationBusy = false;
   let detectorStartupBatchId: string | null = null;
   let detectorStartupReport: DetectorReadyReport | undefined = detectors.getReadyReport?.();
+  let detectorStartupWaitGeneration = 0;
   let inspectionPositions = new Map<InspectionPositionId, InspectionPositionResult>();
   const positionStartedAt = new Map<InspectionPositionId, number>();
 
@@ -304,6 +306,31 @@ export function createFieldStatusRuntime(
     ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
   const broadcastSummary = () => wsServer.broadcastFieldSummary(summary());
+
+  const beginDetectorStartupBarrier = (): void => {
+    if (!detectors.waitForReady || !waveformAnalysisState.batchId) return;
+    const startupBatchId = waveformAnalysisState.batchId;
+    const generation = ++detectorStartupWaitGeneration;
+    const requiredSlots = detectors.getConfig?.().units.filter((unit) => unit.enabled).map((unit) => unit.index);
+    detectorStartupReport = detectors.getReadyReport?.(requiredSlots) ?? detectorStartupReport;
+    void detectors.waitForReady({ requiredSlots, timeoutMs: 15_000 }).then((report) => {
+      if (generation !== detectorStartupWaitGeneration || detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+      detectorStartupReport = report;
+      const failed = report.units.find((unit) => !unit.ready);
+      const waitingForLimit = failed?.startup.state === 'WAITING_FOR_VERTICAL_LOWER_LIMIT';
+      waveformAnalysis.setDetectorStartupBarrier(
+        report.ready,
+        report.ready ? undefined : failed?.startup.failureReason || (waitingForLimit ? 'WAITING_FOR_VERTICAL_LOWER_LIMIT' : 'DETECTOR_STARTUP_TIMEOUT'),
+      );
+      recomputeVerdicts();
+      broadcastSummary();
+    }).catch((error) => {
+      if (generation !== detectorStartupWaitGeneration || detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      waveformAnalysis.setDetectorStartupBarrier(false, reason);
+      broadcastSummary();
+    });
+  };
 
   const runProductPrecheck = async (batchId: string | null): Promise<void> => {
     if (productPrecheckBusy || !detectors.runProductPrecheck) return;
@@ -381,7 +408,12 @@ export function createFieldStatusRuntime(
     const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true && previousStatus?.io?.steps?.stepM10_4 === true;
     const flashStarted = status.io?.steps?.stepM11_0 === true && previousStatus?.io?.steps?.stepM11_0 !== true;
     const flashCompleted = status.io?.steps?.stepM11_0 !== true && previousStatus?.io?.steps?.stepM11_0 === true;
+    const verticalLowerLimitSignal = status.io?.inputs?.verticalDownFeedback;
+    const verticalLowerLimit = verticalLowerLimitSignal === true;
+    const verticalLowerLimitKnown = typeof verticalLowerLimitSignal === 'boolean';
+    const verticalLowerLimitStarted = verticalLowerLimitKnown && verticalLowerLimit && previousStatus?.io?.inputs?.verticalDownFeedback !== true;
     currentStatus = status;
+    if (verticalLowerLimitKnown) detectors.setVerticalDownLimit?.(verticalLowerLimit);
     const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
       && previousStage !== 'FLASH' && previousStage !== 'EMC';
     waveformAnalysis.observeProcess(status);
@@ -394,30 +426,13 @@ export function createFieldStatusRuntime(
       streamingStoppedBatchId = null;
       applyProductWaveformProfile();
       detectorStartupBatchId = waveformAnalysisState.batchId;
-      const requiredSlots = detectors.getConfig?.().units.filter((unit) => unit.enabled).map((unit) => unit.index);
       if (detectors.waitForReady && waveformAnalysisState.batchId) {
         waveformAnalysis.setDetectorStartupBarrier(false);
         detectors.prepareWaveformStartup?.(waveformAnalysisState.batchId ?? undefined);
-        detectorStartupReport = detectors.getReadyReport?.(requiredSlots) ?? detectorStartupReport;
-        const startupBatchId = waveformAnalysisState.batchId;
-        void detectors.waitForReady({ requiredSlots, timeoutMs: 15_000 }).then((report) => {
-          if (detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
-          detectorStartupReport = report;
-          const failed = report.units.find((unit) => !unit.ready);
-          waveformAnalysis.setDetectorStartupBarrier(
-            report.ready,
-            report.ready ? undefined : failed?.startup.failureReason || `DETECTOR_STARTUP_TIMEOUT:D${failed?.index ?? '-'}`,
-          );
-          recomputeVerdicts();
-          broadcastSummary();
-        }).catch((error) => {
-          if (detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
-          const reason = error instanceof Error ? error.message : String(error);
-          waveformAnalysis.setDetectorStartupBarrier(false, reason);
-          broadcastSummary();
-        });
+        beginDetectorStartupBarrier();
       }
     }
+    if (verticalLowerLimitStarted && !batchStarted) beginDetectorStartupBarrier();
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
@@ -536,6 +551,8 @@ export function createFieldStatusRuntime(
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
   app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
     ready: false,
+    verticalDownLimitKnown: false,
+    verticalDownLimitReached: false,
     timeoutMs: 15_000,
     startedAt: null,
     completedAt: Date.now(),

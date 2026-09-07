@@ -131,6 +131,7 @@ function formatRatio(value: number | undefined) {
 function startupLabel(unit: FlameDetectorUnitState | undefined): string {
   const labels: Record<string, string> = {
     DISCONNECTED: '未连接',
+    WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
     POWER_ON: '已上电',
     COMMUNICATION_READY: '通信就绪',
     MODE_SWITCHING: '模式切换中',
@@ -164,7 +165,9 @@ function reasonLabel(reason: string | undefined) {
     DETECTOR_STARTUP_MODE_SWITCHING: '模式切换未确认',
     DETECTOR_STARTUP_MODE_SWITCH_OK: '等待首帧同步',
     DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '等待通道同步',
-    MODE_SWITCH_FAILED_AFTER_3_ATTEMPTS: '模式切换失败（已重试 3 次）',
+    DETECTOR_STARTUP_WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
+    MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
+    WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
     DETECTOR_FAULT: '设备故障',
     NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
     NOISE_EXCEEDS_LIMIT: '噪声超限',
