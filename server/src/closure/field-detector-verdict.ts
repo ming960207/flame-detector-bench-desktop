@@ -56,9 +56,25 @@ export interface FieldDetectorBatchVerdict {
   productPrecheckVerdict?: ProductPrecheckReport['verdict'] | null;
 }
 
+const REQUIRED_PRODUCTION_SLOTS = [1, 2, 3, 4, 5, 6] as const;
+
 function finiteOrNull(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function emptyMetrics(): FieldDetectorMetrics {
+  return {
+    noiseRms: null,
+    noisePeakToPeak: null,
+    noiseAbsolute: null,
+    interferenceRatio: null,
+    consistencyTrend: null,
+    snr21: null,
+    snr23: null,
+    snr31: null,
+    sensitivity: null,
+  };
 }
 
 function detectorMetrics(unit: FlameDetectorUnitState, analysis?: WaveformAnalysisUnitResult): FieldDetectorMetrics {
@@ -279,7 +295,9 @@ function evaluateUnit(
 
 /**
  * Field verdicts are derived from read-only detector telemetry, product identity
- * precheck, and the completed waveform snapshot.
+ * precheck, and the completed waveform snapshot. Formal production always owns six
+ * required slots; a missing/disabled slot must remain visible rather than disappear
+ * from the result set.
  */
 export function evaluateFieldDetectorBatch(
   state: FlameDetectorState,
@@ -289,20 +307,29 @@ export function evaluateFieldDetectorBatch(
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
   const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
-  const participatingIndexes = productPrecheck?.units?.length
-    ? new Set(productPrecheck.units.map((unit) => unit.index))
-    : null;
+  const stateByIndex = new Map(state.units.map((unit) => [unit.index, unit]));
+  const complete = analysisSnapshot?.phase === 'COMPLETE';
   const productProfile = productConfig ? selectedProductProfile(productConfig) : null;
-  const sourceUnits = participatingIndexes
-    ? state.units.filter((unit) => participatingIndexes.has(unit.index))
-    : state.units;
-  const units = sourceUnits.map((unit) => evaluateUnit(
-    unit,
-    analysisByIndex.get(unit.index),
-    analysisSnapshot,
-    precheckByIndex.get(unit.index),
-    productConfig,
-  ));
+  const units = REQUIRED_PRODUCTION_SLOTS.map((index) => {
+    const unit = stateByIndex.get(index);
+    if (!unit) {
+      return result(
+        { index, address: index, sampledAt: state.timestamp },
+        emptyMetrics(),
+        complete ? 'FAIL' : 'PENDING',
+        complete ? 'FAIL' : 'PENDING',
+        'DETECTOR_SLOT_MISSING',
+        precheckByIndex.get(index),
+      );
+    }
+    return evaluateUnit(
+      unit,
+      analysisByIndex.get(index),
+      analysisSnapshot,
+      precheckByIndex.get(index),
+      productConfig,
+    );
+  });
   const grade = units.some((unit) => unit.grade === 'FAIL')
     ? 'FAIL'
     : analysisSnapshot && units.some((unit) => unit.grade === 'PENDING')
