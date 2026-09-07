@@ -210,6 +210,9 @@ function evaluateUnit(
   if (precheck?.verdict === 'FAIL') {
     return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
   }
+  if (productConfig && complete && precheck?.verdict === 'PENDING') {
+    return result(base, metrics, 'FAIL', 'FAIL', 'PRODUCT_PRECHECK_NOT_COMPLETED', precheck, missingProbes);
+  }
   if (productConfig && complete && !precheck) {
     return result(base, metrics, 'FAIL', 'FAIL', 'PRODUCT_PRECHECK_NOT_COMPLETED', undefined, missingProbes);
   }
