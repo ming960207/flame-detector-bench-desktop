@@ -87,6 +87,7 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
   assert.deepEqual(events.slice(2, 4).sort(), ['reset:1', 'reset:2']);
   assert.deepEqual(events.slice(4, 6).sort(), ['simulate:1:fault', 'simulate:2:fault']);
   assert.deepEqual(events.slice(6, 8).sort(), ['reset:1', 'reset:2']);
+  assert.deepEqual(events.slice(8).sort(), ['reset:1', 'reset:2']);
   assert.equal(events.some((event) => event.includes('alarm+fault')), false);
 });
 
@@ -126,10 +127,11 @@ test('DIAGNOSTIC completes one detector before activating the next detector', as
   const report = await coordinator.run('diagnostic-1');
 
   assert.equal(report.verdict, 'PASS');
-  assert.deepEqual(events, [
+  assert.deepEqual(events.slice(0, 8), [
     'D1:alarm', 'D1:reset', 'D1:fault', 'D1:reset',
     'D2:alarm', 'D2:reset', 'D2:fault', 'D2:reset',
   ]);
+  assert.deepEqual(events.slice(8).sort(), ['D1:reset', 'D2:reset']);
 });
 
 test('FAST_BATCH reports alarm contact failure without invalidating a passing fault phase', async () => {
@@ -139,7 +141,7 @@ test('FAST_BATCH reports alarm contact failure without invalidating a passing fa
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       internal = { ...state };
-      inputs.X1 = false; // 火警阶段模拟 Alarm 实体触点不动作
+      inputs.X1 = false;
       inputs.X2 = state.fault;
     },
     async reset() {
@@ -192,6 +194,7 @@ test('DIO feedback read failures are reported as communication failures', async 
   assert.equal(report.verdict, 'FAIL');
   assert.ok(report.units[0]?.alarm.reasons.includes('RELAY_FEEDBACK_READ_FAILED:DIO_CONNECTION_FAILED'));
   assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'), false);
+  assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('EMERGENCY_RESET_FEEDBACK_READ_FAILED:')));
 });
 
 test('combined alarm+fault simulation is never used by FAST_BATCH production flow', async () => {
@@ -228,4 +231,39 @@ test('combined alarm+fault simulation is never used by FAST_BATCH production flo
 
   assert.equal(report.verdict, 'PASS');
   assert.equal(combinedCalls, 0);
+});
+
+test('emergency cleanup failure is explicit and forces the relay test to fail', async () => {
+  let internal = { fire: false, fault: false };
+  const inputs: Record<string, boolean> = { X1: false, X2: false };
+  let resetCalls = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      internal = { ...state };
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
+    },
+    async reset() {
+      resetCalls += 1;
+      throw new Error('reset transport unavailable');
+    },
+    async readLatched() { return { ...internal }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mode: 'FAST_BATCH',
+    stableSamples: 1,
+    sampleIntervalMs: 50,
+    feedbackTimeoutMs: 100,
+    resetTimeoutMs: 100,
+    mappings: createMapping([1]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
+  const report = await coordinator.run('cleanup-fail');
+
+  assert.equal(report.verdict, 'FAIL');
+  assert.ok(resetCalls >= 3);
+  assert.ok(report.units[0]?.alarm.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
+  assert.ok(report.units[0]?.fault.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
 });
