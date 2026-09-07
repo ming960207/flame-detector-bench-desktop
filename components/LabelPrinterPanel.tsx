@@ -91,6 +91,8 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
   const usbPrinters = state.printers.filter((printer) => printer.connectionType === 'usb');
   const wifiPrinters = state.printers.filter((printer) => printer.connectionType === 'wifi');
   const isWifi = state.config.connectionType === 'wifi';
+  const selectedWifi = wifiPrinters.find((printer) => printer.name === state.config.wifiPrinterName && printer.port === state.config.wifiPort);
+  const selectedWifiKey = selectedWifi ? `${selectedWifi.name}:${selectedWifi.port}` : '';
 
   return <section style={{
     marginTop: 14,
@@ -169,23 +171,20 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
               {usbPrinters.map((printer) => <option key={`${printer.name}:${printer.port}`} value={printer.name}>{printer.name}</option>)}
             </select>
           </label> : <label style={{ display: 'grid', gap: 5, fontSize: 10.5, color: colors.muted }}>
-            WiFi 标签机 IP
-            <input
-              value={state.config.wifiAddress}
+            WiFi 标签机
+            <select
+              value={selectedWifiKey}
               disabled={busy || state.health === 'printing'}
-              onChange={(event) => labelPrinterRuntime.updateConfig({ wifiAddress: event.target.value, wifiPrinterName: '' })}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && state.config.wifiAddress.trim()) {
-                  void run(
-                    () => labelPrinterRuntime.connectWifiPrinter(state.config.wifiAddress, state.config.wifiPrinterName),
-                    'WiFi 标签机已连接',
-                  );
-                }
+              onChange={(event) => {
+                const target = wifiPrinters.find((printer) => `${printer.name}:${printer.port}` === event.target.value);
+                if (!target) return;
+                labelPrinterRuntime.updateConfig({ wifiPrinterName: target.name, wifiPort: target.port || 0, wifiAddress: target.address || '' });
               }}
-              placeholder="例如 192.168.1.88"
-              spellCheck={false}
-              style={{ ...fieldStyle, width: '100%', fontFamily: 'Consolas, monospace' }}
-            />
+              style={{ ...fieldStyle, width: '100%' }}
+            >
+              <option value="">-- 请先扫描 WiFi 标签机 --</option>
+              {wifiPrinters.map((printer) => <option key={`${printer.name}:${printer.port}`} value={`${printer.name}:${printer.port}`}>{printer.name} · TCP {printer.port}{printer.address ? ` · ${printer.address}` : ''}</option>)}
+            </select>
           </label>}
 
           <button
@@ -199,37 +198,25 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
         </div>
 
         {isWifi && <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(220px, 1fr) auto', gap: 8, alignItems: 'end' }}>
-          <div style={{ fontSize: 10.5, color: colors.muted, paddingBottom: 8 }}>局域网发现设备</div>
-          <select
-            value={wifiPrinters.some((printer) => printer.address === state.config.wifiAddress) ? state.config.wifiAddress : ''}
-            disabled={busy || state.health === 'printing'}
-            onChange={(event) => {
-              const address = event.target.value;
-              const target = wifiPrinters.find((printer) => printer.address === address);
-              if (!address || !target) return;
-              labelPrinterRuntime.updateConfig({ wifiAddress: address, wifiPrinterName: target.name });
-              void run(() => labelPrinterRuntime.connectWifiPrinter(address, target.name), 'WiFi 标签机已连接');
-            }}
-            style={{ ...fieldStyle, width: '100%' }}
-          >
-            <option value="">-- 扫描结果（也可直接输入 IP） --</option>
-            {wifiPrinters.map((printer) => <option key={`${printer.name}:${printer.address}`} value={printer.address}>{printer.name} · {printer.address}</option>)}
-          </select>
+          <div style={{ fontSize: 10.5, color: colors.muted, paddingBottom: 8 }}>扫描结果</div>
+          <div style={{ ...fieldStyle, minHeight: 16, display: 'flex', alignItems: 'center', color: selectedWifi ? colors.text : colors.muted }}>
+            {selectedWifi ? `${selectedWifi.name} · TCP ${selectedWifi.port}${selectedWifi.address ? ` · ${selectedWifi.address}` : ' · IP 由 SDK 返回'}` : '扫描后从上方列表选择在线设备'}
+          </div>
           <button
             type="button"
-            disabled={busy || state.health === 'printing' || !state.config.wifiAddress.trim()}
+            disabled={busy || state.health === 'printing' || !selectedWifi}
             onClick={() => void run(
-              () => labelPrinterRuntime.connectWifiPrinter(state.config.wifiAddress, state.config.wifiPrinterName),
+              () => labelPrinterRuntime.connectWifiPrinter(selectedWifi!.name, selectedWifi!.port || 0),
               'WiFi 标签机已连接',
             )}
             style={{ ...fieldStyle, cursor: 'pointer', height: 31, color: colors.cyan, fontWeight: 700 }}
           >
-            连接测试
+            连接 WiFi
           </button>
         </div>}
 
         {isWifi && <div style={{ fontSize: 10, color: colors.muted }}>
-          WiFi 模式要求电脑与标签机位于同一局域网。优先使用“扫描”，若局域网广播受限，可直接输入打印机 IPv4 地址连接。
+          WiFi 模式要求电脑与标签机位于同一局域网。连接必须使用 SDK 扫描结果中的设备名称和 TCP 端口，不能仅凭 IP 直连。
         </div>}
       </div>
 
