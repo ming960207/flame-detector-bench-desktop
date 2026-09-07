@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Save, Settings2, ShieldCheck } from 'lucide-react';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import { productCodeRuleMissingFields } from '../server/src/product-code';
@@ -109,6 +109,16 @@ function cloneConfig(config: ProductDetectionConfig): ProductDetectionConfig {
   return JSON.parse(JSON.stringify(config)) as ProductDetectionConfig;
 }
 
+export function shouldSyncProductDraft(
+  draft: ProductDetectionConfig | null,
+  lastSynced: ProductDetectionConfig | null,
+  incoming: ProductDetectionConfig,
+): boolean {
+  if (!draft || !lastSynced) return true;
+  const draftSnapshot = JSON.stringify(draft);
+  return draftSnapshot === JSON.stringify(lastSynced) || draftSnapshot === JSON.stringify(incoming);
+}
+
 function allocationText(precheck: ProductPrecheckReport | null): { text: string; tone: 'muted' | 'pass' | 'warn' | 'fail' } {
   const allocation = precheck?.productCodeAllocation;
   if (!allocation) return { text: '等待批次启动', tone: 'muted' };
@@ -195,12 +205,20 @@ export function ProductModelSelector({ config, locked, busy, onUpdate }: Product
 
 export function ProductTypeControl({ config, locked, precheck, busy, detectorVerdict, onUpdate }: Props) {
   const [draft, setDraft] = useState<ProductDetectionConfig | null>(config ? cloneConfig(config) : null);
+  const lastSyncedConfig = useRef<ProductDetectionConfig | null>(config ? cloneConfig(config) : null);
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (config) setDraft(cloneConfig(config));
+    if (!config) {
+      lastSyncedConfig.current = null;
+      setDraft(null);
+      return;
+    }
+    const previousSynced = lastSyncedConfig.current;
+    setDraft((current) => shouldSyncProductDraft(current, previousSynced, config) ? cloneConfig(config) : current);
+    lastSyncedConfig.current = cloneConfig(config);
   }, [config]);
 
   const profile = useMemo(() => config ? selectedProductProfile(config) : null, [config]);

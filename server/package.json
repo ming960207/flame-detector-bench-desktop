@@ -9,8 +9,8 @@
     "dev:field": "node scripts/dev-field.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
-    "test": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/relay-feedback-dio.test.ts test/production-inspection-record.test.ts test/production-mqtt.test.ts test/label-print-queue.test.ts test/test-program-runtime-config.test.ts test/product-precheck-stabilization.test.ts test/precheck-display-verdict.test.ts test/wifi-label-printer.test.ts",
-    "test:product": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/relay-feedback-dio.test.ts test/production-inspection-record.test.ts test/production-mqtt.test.ts test/label-print-queue.test.ts test/test-program-runtime-config.test.ts test/product-precheck-stabilization.test.ts test/precheck-display-verdict.test.ts test/wifi-label-printer.test.ts",
+    "test": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/relay-feedback-dio.test.ts test/production-inspection-record.test.ts test/production-mqtt.test.ts test/label-print-queue.test.ts test/test-program-runtime-config.test.ts test/product-precheck-stabilization.test.ts test/precheck-display-verdict.test.ts test/wifi-label-printer.test.ts test/product-config-draft-sync.test.ts",
+    "test:product": "tsx --test test/product-profile-precheck.test.ts test/product-code-relay.test.ts test/relay-functional-test-coordinator.test.ts test/relay-feedback-dio.test.ts test/production-inspection-record.test.ts test/production-mqtt.test.ts test/label-print-queue.test.ts test/test-program-runtime-config.test.ts test/product-precheck-stabilization.test.ts test/precheck-display-verdict.test.ts test/wifi-label-printer.test.ts test/product-config-draft-sync.test.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {
