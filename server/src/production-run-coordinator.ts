@@ -15,11 +15,6 @@ import {
   type ProductionInspectionRecordConfig,
 } from './production-inspection-record.js';
 
-// PLC M11.2 uses T39 +100, i.e. a 10 s EMC window. Read software version at
-// +8 s so the operation lives in the final two seconds without changing the
-// waveform capture window or the EMC decision logic.
-export const EMC_SOFTWARE_VERSION_READ_OFFSET_MS = 8_000;
-
 export interface ProductionRunArchive {
   schemaVersion: 1;
   batchId: string;
@@ -50,11 +45,9 @@ export class ProductionRunCoordinator extends EventEmitter {
   private recordConfig: ProductionInspectionRecordConfig = DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG;
   private capturedRecordConfig: ProductionInspectionRecordConfig | null = null;
   private batchStartedAt: number | null = null;
-  private emcStartedAt: number | null = null;
   private wasActive = false;
   private saving = new Set<string>();
   private saved = new Set<string>();
-  private readonly versionChecks = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly snapshot: () => FieldStatusSnapshot,
@@ -77,7 +70,6 @@ export class ProductionRunCoordinator extends EventEmitter {
     const active = isFormalActive(status);
     if (active && !this.wasActive) {
       this.batchStartedAt = status.timestamp;
-      this.emcStartedAt = null;
       this.capturedRecordConfig = cloneRecordConfig(this.recordConfig);
 
       // createFieldStatusRuntime registered its PLC listener before this coordinator,
@@ -92,38 +84,15 @@ export class ProductionRunCoordinator extends EventEmitter {
           status.timestamp,
         );
       } else {
+        // Defensive fallback: precheck will allocate with this exact start timestamp.
         this.detectors.noteFormalBatchStartedAt(status.timestamp);
       }
     }
     this.wasActive = active;
 
-    // Use the same PLC bit as FieldWaveformAnalysis. The EMC waveform is still
-    // captured for the entire M11.2 high window; this side task neither clears
-    // history nor pauses/re-arms the detector stream.
-    const emcActive = status.io?.steps?.stepM11_2 === true;
-    if (emcActive && this.emcStartedAt === null) this.emcStartedAt = status.timestamp;
-    if (emcActive && this.emcStartedAt !== null
-      && status.timestamp - this.emcStartedAt >= EMC_SOFTWARE_VERSION_READ_OFFSET_MS) {
-      const snapshot = this.snapshot();
-      const batchId = snapshot.summary.waveformAnalysis.batchId;
-      if (batchId && !this.versionChecks.has(batchId)) {
-        const check = this.detectors.finalizeProductPrecheckVersions(
-          snapshot.summary.productConfig,
-          batchId,
-        ).then((report) => {
-          // If position-one preparation was unexpectedly not ready yet, allow a
-          // later status sample in the same final-two-second window to retry.
-          if (!report) this.versionChecks.delete(batchId);
-          return report;
-        }).catch((error) => {
-          this.versionChecks.delete(batchId);
-          console.error('[生产检测] EMC末段软件版本读取失败:', error instanceof Error ? error.message : String(error));
-          return null;
-        });
-        this.versionChecks.set(batchId, check);
-      }
-    }
-
+    // Product identity and relay functional checks are fully completed at detection
+    // position 1 during signal stabilization. No detector command is intentionally
+    // scheduled in FLASH or EMC stages, so those waveform windows remain pure.
     if (isComplete(status)) {
       // field-status runtime is registered first on the same EventEmitter; defer
       // one turn so snapshot() contains the just-completed waveform/final verdict.
@@ -132,20 +101,13 @@ export class ProductionRunCoordinator extends EventEmitter {
   }
 
   private async archiveCompletedBatch(): Promise<void> {
-    let snapshot = this.snapshot();
+    const snapshot = this.snapshot();
     const batchId = snapshot.summary.waveformAnalysis.batchId;
     if (!batchId || snapshot.summary.waveformAnalysis.phase !== 'COMPLETE') return;
     if (this.saved.has(batchId) || this.saving.has(batchId)) return;
     this.saving.add(batchId);
 
     try {
-      // A version request may begin near the end of M11.2 and still be resolving
-      // when COMPLETE is observed. Await that already-started request, but never
-      // start a new hardware version read after EMC has ended.
-      const pendingVersionCheck = this.versionChecks.get(batchId);
-      if (pendingVersionCheck) await pendingVersionCheck;
-      snapshot = this.snapshot();
-
       const context = this.detectors.getBatchContext(batchId);
       const productionDate = snapshot.summary.productPrecheck?.productionDate
         ?? context?.productionDate
@@ -184,7 +146,6 @@ export class ProductionRunCoordinator extends EventEmitter {
       console.error('[生产检验记录] 批次归档失败:', error instanceof Error ? error.message : String(error));
     } finally {
       this.saving.delete(batchId);
-      this.versionChecks.delete(batchId);
     }
   }
 
