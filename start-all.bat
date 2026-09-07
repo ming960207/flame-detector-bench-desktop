@@ -17,6 +17,21 @@ echo Latest  : %CD%\logs\latest.log
 echo.
 
 :: ========================================
+:: 0. Clean up every previous project runtime
+:: ========================================
+echo [CLEANUP] Stopping previous project processes and releasing ports...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-all.ps1" -ProjectRoot "%CD%"
+if errorlevel 1 (
+    echo [ERROR] Existing project processes or ports could not be stopped.
+    echo         Resolve the reported PIDs/ports, then run start-all.bat again.
+    echo.
+    pause
+    exit /b 1
+)
+echo [OK] Previous project processes stopped and ports released
+echo.
+
+:: ========================================
 :: 1. Check Node.js / npm
 :: ========================================
 where node >nul 2>&1
