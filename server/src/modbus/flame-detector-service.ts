@@ -7,6 +7,8 @@
 
 import ModbusRTU from 'modbus-serial';
 import { EventEmitter } from 'events';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DEFAULT_FLAME_POLL_INTERVAL_MS, MAX_FLAME_POLL_INTERVAL_MS, FlameConfig, FlameUnitConfig } from '../config.js';
 import { FlameDetectorUnitState, FlameDetectorState, FlameFeature, FlameSample } from '../types.js';
 import {
@@ -42,6 +44,10 @@ import {
   defaultFlameDetectorProcessLockPath,
   type FlameDetectorProcessLock,
 } from './flame-detector-process-lock.js';
+import {
+  DetectorStartupTracker,
+  type DetectorStartupDiagnostic,
+} from './detector-startup.js';
 
 const SEND_MODE_BROADCAST_RETRY_INTERVAL_MS = 250;
 const TCP_RECONNECT_INTERVAL_MS = 250;
@@ -55,6 +61,10 @@ const WAVEFORM_STATE_BROADCAST_INTERVAL_MS = 50;
 const TCP_INITIALIZE_STAGGER_MS = 250;
 const SEND_MODE_RETRY_MAX_INTERVAL_MS = 5000;
 const PRECHECK_DRAIN_DELAY_MS = 150;
+const MAX_MODE_SWITCH_ATTEMPTS = 3;
+const READY_BARRIER_TIMEOUT_MS = 15_000;
+const READY_BARRIER_POLL_INTERVAL_MS = 50;
+const PROTOCOL_DIAGNOSTIC_FRAME_LIMIT = 5;
 
 interface SocketBinding {
   socket: RawTcpSocket;
@@ -169,6 +179,20 @@ export interface AutoTestReport {
   passed: boolean;
 }
 
+export interface DetectorReadyReport {
+  ready: boolean;
+  timeoutMs: number;
+  startedAt: number;
+  completedAt: number;
+  requiredSlots: number[];
+  units: Array<{
+    index: number;
+    address: number;
+    ready: boolean;
+    startup: DetectorStartupDiagnostic;
+  }>;
+}
+
 export class FlameDetectorService extends EventEmitter {
   private config: FlameConfig;
   private pool: Map<string, { client: FlameDetectorClient; ok: boolean }> = new Map();
@@ -204,6 +228,11 @@ export class FlameDetectorService extends EventEmitter {
   private readonly deferWaveformUntilInspection: boolean;
   private waveformStreamingArmed = false;
   private lifecycleGeneration = 0;
+  private startupTrackers = new Map<number, DetectorStartupTracker>();
+  private protocolDiagnosticFrames = new Map<number, number>();
+  private lifecycleBatchId = '-';
+  private readonly lifecycleLogPath = process.env.DETECTOR_LIFECYCLE_LOG
+    || join(process.env.APP_DATA_DIR || process.cwd(), 'logs', 'detector-lifecycle.log');
 
   constructor(config: FlameConfig, options: { lockPath?: string; deferWaveformUntilInspection?: boolean } = {}) {
     super();
@@ -219,6 +248,9 @@ export class FlameDetectorService extends EventEmitter {
     for (let index = 1; index <= 6; index += 1) {
       const unit = configured.get(index) ?? { index, address: index, enabled: false };
       const existing = this.units.get(index);
+      const tracker = this.startupTrackers.get(index) ?? new DetectorStartupTracker(index, unit.address);
+      this.startupTrackers.set(index, tracker);
+      if (tracker.snapshot().address !== unit.address) tracker.reset(unit.address);
       this.units.set(index, existing ? { ...existing, address: unit.address } : this.defaultUnitState(unit));
     }
   }
@@ -261,6 +293,7 @@ export class FlameDetectorService extends EventEmitter {
       historySamples: [],
       rawHistorySamples: [],
       historySampleTotal: 0,
+      startup: this.startupTrackers.get(unit.index)?.snapshot(),
     };
   }
 
@@ -368,6 +401,20 @@ export class FlameDetectorService extends EventEmitter {
     this.lastPushAt.clear();
     this.initializingUnits.clear();
     this.broadcastModeUnits.clear();
+    this.protocolDiagnosticFrames.clear();
+    for (const unit of this.config.units) {
+      const tracker = this.startupTrackers.get(unit.index);
+      if (!tracker) continue;
+      const startup = tracker.reset(unit.address);
+      const state = this.units.get(unit.index);
+      if (state) {
+        state.startup = startup;
+        state.online = false;
+        state.sourceReady = false;
+        state.syncOk = false;
+        state.sendMode = 0;
+      }
+    }
     this.closing = false;
   }
 
@@ -426,6 +473,13 @@ export class FlameDetectorService extends EventEmitter {
 
   private markTransportConnected(unit: FlameUnitConfig): void {
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+    const tracker = this.startupTrackers.get(unit.index) ?? new DetectorStartupTracker(unit.index, unit.address);
+    this.startupTrackers.set(unit.index, tracker);
+    const previous = tracker.snapshot();
+    const startup = tracker.markCommunicationReady();
+    state.startup = startup;
+    if (previous.powerOnAt === null) this.logLifecycle(unit.index, 'POWER_ON', startup);
+    this.logLifecycle(unit.index, 'RS485_RESPONSE', startup);
     state.lastError = undefined;
     state.lastUpdate = Date.now();
     this.units.set(unit.index, state);
@@ -461,6 +515,13 @@ export class FlameDetectorService extends EventEmitter {
       this.broadcastModeRequestInFlight.delete(unit.index);
       this.waveformRecoveryRequestedUnits.delete(unit.index);
       this.baselines.delete(unit.index);
+      const state = this.units.get(unit.index);
+      if (state) {
+        state.startup = this.startupTracker(unit).reset(unit.address);
+        state.online = false;
+        state.sourceReady = false;
+        state.syncOk = false;
+      }
       console.log(`[FlameService] 设备 ${unit.index} 已清理旧连接，开始建立新连接`);
       const result = await this.connectUnit(unit, generation);
       console.log(`[FlameService] 设备 ${unit.index} 重连结果: ${result.ok ? '成功' : '失败 - ' + result.error}`);
@@ -498,6 +559,45 @@ export class FlameDetectorService extends EventEmitter {
       : SEND_MODE_BROADCAST_VALUE;
   }
 
+  private startupTracker(unit: FlameUnitConfig): DetectorStartupTracker {
+    const existing = this.startupTrackers.get(unit.index);
+    if (existing) return existing;
+    const tracker = new DetectorStartupTracker(unit.index, unit.address);
+    this.startupTrackers.set(unit.index, tracker);
+    return tracker;
+  }
+
+  private logLifecycle(index: number, event: string, startup: DetectorStartupDiagnostic, detail = ''): void {
+    try {
+      mkdirSync(dirname(this.lifecycleLogPath), { recursive: true });
+      const suffix = detail ? ` ${detail}` : '';
+      appendFileSync(
+        this.lifecycleLogPath,
+        `[${new Date().toISOString()}] batch=${this.lifecycleBatchId} D${index} ${event} state=${startup.state} attempts=${startup.modeSwitchAttempts} streak=${startup.channelValidStreak}${suffix}\n`,
+        'utf8',
+      );
+    } catch (error) {
+      console.warn('[FlameService] 写入探测器生命周期日志失败:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private logProtocolDiagnostic(
+    unit: FlameUnitConfig,
+    frame: Buffer,
+    samples: Array<{ probe1?: number; probe2?: number; probe3?: number; probe4?: number }>,
+    mode: string,
+  ): void {
+    const count = this.protocolDiagnosticFrames.get(unit.index) ?? 0;
+    if (count >= PROTOCOL_DIAGNOSTIC_FRAME_LIMIT) return;
+    this.protocolDiagnosticFrames.set(unit.index, count + 1);
+    const latest = samples.at(-1);
+    const fields = ['probe1', 'probe2', 'probe3', 'probe4']
+      .map((key) => `${key.replace('probe', 'P')}=${latest?.[key as keyof typeof latest] ?? '-'}`)
+      .join(' ');
+    console.log(`[DetectorDiag] D${unit.index} RX FRAME mode=${mode} hex=${frame.toString('hex').toUpperCase()}`);
+    console.log(`[DetectorDiag] D${unit.index} PARSE ${fields}`);
+  }
+
   async stopWaveformStreaming(): Promise<void> {
     this.waveformStreamingArmed = false;
     for (const unit of this.config.units) {
@@ -523,6 +623,8 @@ export class FlameDetectorService extends EventEmitter {
       state.sourceReady = false;
       state.syncOk = false;
       state.lastUpdate = Date.now();
+      state.startup = this.startupTracker(unit).reset(unit.address);
+      this.protocolDiagnosticFrames.set(unit.index, 0);
       this.units.set(unit.index, state);
     }
     if (this.config.units.some((unit) => unit.enabled && (unit.connMode ?? this.config.mode) === 'TCP')) {
@@ -675,9 +777,24 @@ export class FlameDetectorService extends EventEmitter {
       state.protocol = params.protocol.id;
       state.version = params.version;
       state.runTime = params.runtime;
+      const tracker = this.startupTracker(unit);
+      tracker.markCommunicationReady();
+      tracker.markModeSwitchOk();
       const realtime = params.sendMode === 0 ? await device.readRealtimeFeatures() : null;
-      if (realtime) this.applyRealtimeState(state, realtime, device);
-      state.lastError = undefined;
+      if (realtime) {
+        const beforeStartup = tracker.snapshot();
+        const startup = tracker.observeFrame(realtime.samples, params.probeCount);
+        if (beforeStartup.firstFrameAt === null && startup.firstFrameAt !== null) this.logLifecycle(unit.index, 'FIRST_FRAME', startup);
+        if (beforeStartup.firstValidSampleAt === null && startup.firstValidSampleAt !== null) this.logLifecycle(unit.index, 'FIRST_VALID_SAMPLE', startup);
+        if (beforeStartup.channelSyncAt === null && startup.channelSyncAt !== null) this.logLifecycle(unit.index, 'CHANNEL_SYNC_OK', startup);
+        if (beforeStartup.testReadyAt === null && startup.testReadyAt !== null) this.logLifecycle(unit.index, 'TEST_READY', startup);
+        state.startup = startup;
+        state.syncOk = startup.channelSyncAt !== null;
+        this.applyRealtimeState(state, realtime, device);
+      } else {
+        state.startup = tracker.snapshot();
+      }
+      state.lastError = state.startup?.failureReason;
       state.lastUpdate = Date.now();
       this.units.set(unit.index, state);
     } catch (error: any) {
@@ -715,8 +832,9 @@ export class FlameDetectorService extends EventEmitter {
   private scheduleBroadcastModeRetry(unit: FlameUnitConfig, client: FlameDetectorClient): void {
     if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.broadcastModeRequestingUnits.has(unit.index) || !this.isCurrentClient(unit, client)) return;
     if (this.broadcastModeRetryTimers.has(unit.index) || this.broadcastModeRequestInFlight.has(unit.index)) return;
-    const attempt = (this.broadcastModeRetryAttempts.get(unit.index) ?? 0) + 1;
-    this.broadcastModeRetryAttempts.set(unit.index, attempt);
+    const currentAttempt = this.broadcastModeRetryAttempts.get(unit.index) ?? 0;
+    if (currentAttempt >= MAX_MODE_SWITCH_ATTEMPTS) return;
+    const attempt = currentAttempt + 1;
     const retryDelay = Math.min(
       SEND_MODE_BROADCAST_RETRY_INTERVAL_MS * (2 ** Math.min(attempt - 1, 5)),
       SEND_MODE_RETRY_MAX_INTERVAL_MS,
@@ -737,7 +855,13 @@ export class FlameDetectorService extends EventEmitter {
     this.broadcastModeRequestInFlight.set(unit.index, client);
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
     const sendMode = this.configuredWaveformSendMode();
-    console.log(`[FlameService] 设备 ${unit.index} 发送波形模式切换请求 (模式 ${sendMode}, 尝试 ${(this.broadcastModeRetryAttempts.get(unit.index) ?? 0) + 1})`);
+    const attempt = (this.broadcastModeRetryAttempts.get(unit.index) ?? 0) + 1;
+    this.broadcastModeRetryAttempts.set(unit.index, attempt);
+    const tracker = this.startupTrackers.get(unit.index) ?? new DetectorStartupTracker(unit.index, unit.address);
+    this.startupTrackers.set(unit.index, tracker);
+    state.startup = tracker.markModeSwitching(attempt);
+    this.logLifecycle(unit.index, 'MODE_SWITCH_START', state.startup, `attempt=${attempt}`);
+    console.log(`[FlameService] 设备 ${unit.index} 发送波形模式切换请求 (模式 ${sendMode}, 尝试 ${attempt}/${MAX_MODE_SWITCH_ATTEMPTS})`);
     try {
       const device = this.getDevice(unit, client);
       await device.sendBroadcastSendMode({
@@ -748,6 +872,10 @@ export class FlameDetectorService extends EventEmitter {
       });
       if (!this.isCurrentClient(unit, client)) return false;
       console.log(`[FlameService] 设备 ${unit.index} 波形模式切换已确认，继续等待波形数据`);
+      state.startup = tracker.markModeSwitchOk();
+      this.logLifecycle(unit.index, 'MODE_SWITCH_OK', state.startup);
+      this.stopBroadcastModeRequests(unit.index);
+      this.broadcastModeRetryAttempts.delete(unit.index);
       state.sendMode = sendMode;
       state.lastError = undefined;
       state.lastUpdate = Date.now();
@@ -762,8 +890,8 @@ export class FlameDetectorService extends EventEmitter {
       if (waveformIsRecent) {
         state.sendMode = sendMode;
         state.online = true;
-        state.sourceReady = true;
-        state.syncOk = true;
+        state.sourceReady = tracker.snapshot().modeSwitchOkAt !== null;
+        state.syncOk = tracker.snapshot().channelSyncAt !== null;
         state.lastError = undefined;
       } else {
         state.sendMode = 0;
@@ -771,6 +899,14 @@ export class FlameDetectorService extends EventEmitter {
         state.sourceReady = false;
         state.syncOk = false;
         state.lastError = error?.message || String(error);
+      }
+      if (attempt >= MAX_MODE_SWITCH_ATTEMPTS) {
+        const reason = `MODE_SWITCH_FAILED_AFTER_${MAX_MODE_SWITCH_ATTEMPTS}_ATTEMPTS`;
+        state.startup = tracker.markModeSwitchFailure(reason);
+        this.logLifecycle(unit.index, 'MODE_SWITCH_FAIL', state.startup, `reason=${reason}`);
+        state.lastError = reason;
+        this.stopBroadcastModeRequests(unit.index);
+        console.error(`[FlameService] 设备 ${unit.index} 模式切换失败，已达到最大重试次数 ${MAX_MODE_SWITCH_ATTEMPTS}`);
       }
       state.lastUpdate = Date.now();
       this.units.set(unit.index, state);
@@ -812,7 +948,13 @@ export class FlameDetectorService extends EventEmitter {
   private handleWaveformStale(unit: FlameUnitConfig, client: FlameDetectorClient): void {
     if (this.disposed || this.closing || !this.waveformStreamingArmed || !this.isCurrentClient(unit, client)) return;
     this.stopBroadcastModeRequests(unit.index);
+    this.broadcastModeRetryAttempts.delete(unit.index);
     this.broadcastModeRequestingUnits.add(unit.index);
+    const tracker = this.startupTracker(unit);
+    const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+    state.startup = tracker.reset(unit.address);
+    this.protocolDiagnosticFrames.set(unit.index, 0);
+    this.units.set(unit.index, state);
     this.setUnitOffline(unit, '实时波形流超时，正在重新切换发送模式');
     void this.initializeUnit(unit, client);
   }
@@ -924,6 +1066,8 @@ export class FlameDetectorService extends EventEmitter {
     if (watchdog) clearTimeout(watchdog);
     this.waveformWatchdogTimers.delete(unit.index);
     this.broadcastModeUnits.delete(unit.index);
+    this.startupTracker(unit).reset(unit.address);
+    this.protocolDiagnosticFrames.set(unit.index, 0);
     this.setUnitOffline(unit, error);
     this.scheduleUnitReconnect(unit);
   }
@@ -934,6 +1078,7 @@ export class FlameDetectorService extends EventEmitter {
     state.sourceReady = false;
     state.syncOk = false;
     state.sendMode = 0;
+    state.startup = this.startupTracker(unit).snapshot();
     state.lastError = error;
     state.lastUpdate = Date.now();
     this.units.set(unit.index, state);
@@ -951,24 +1096,29 @@ export class FlameDetectorService extends EventEmitter {
     state.probeCount = device.getProtocolProfile().channels;
     const decoded = decodeCustomWaveformFrame(frame, device.getProtocolProfile());
     if (decoded.samples.length === 0) return;
+    this.logProtocolDiagnostic(unit, frame, decoded.samples, 'custom');
     const normalized = device.normalizeSamples(decoded.samples, this.baselines.get(unit.index));
     this.baselines.set(unit.index, normalized.baseline);
-    if (this.broadcastModeRequestingUnits.has(unit.index)) {
-      this.stopBroadcastModeRequests(unit.index);
-      this.broadcastModeRetryAttempts.delete(unit.index);
-    }
     this.broadcastModeUnits.add(unit.index);
     const maxHistory = this.config.waveformMaxSamples || 1000;
+    const tracker = this.startupTracker(unit);
+    const beforeStartup = tracker.snapshot();
+    const startup = tracker.observeFrame(decoded.samples, device.getProtocolProfile().channels);
+    if (beforeStartup.firstFrameAt === null && startup.firstFrameAt !== null) this.logLifecycle(unit.index, 'FIRST_FRAME', startup);
+    if (beforeStartup.firstValidSampleAt === null && startup.firstValidSampleAt !== null) this.logLifecycle(unit.index, 'FIRST_VALID_SAMPLE', startup);
+    if (beforeStartup.channelSyncAt === null && startup.channelSyncAt !== null) this.logLifecycle(unit.index, 'CHANNEL_SYNC_OK', startup);
+    if (beforeStartup.testReadyAt === null && startup.testReadyAt !== null) this.logLifecycle(unit.index, 'TEST_READY', startup);
+    state.startup = startup;
     state.online = true;
-    state.sourceReady = true;
-    state.syncOk = true;
+    state.sourceReady = startup.modeSwitchOkAt !== null;
+    state.syncOk = startup.channelSyncAt !== null;
     state.rawSamples = decoded.samples;
     state.samples = normalized.samples;
     state.rawHistorySamples = [...(state.rawHistorySamples ?? []), ...decoded.samples].slice(-maxHistory);
     state.historySamples = [...(state.historySamples ?? []), ...normalized.samples].slice(-maxHistory);
     state.historySampleTotal = (state.historySampleTotal ?? 0) + decoded.samples.length;
     const latest = decoded.samples.at(-1);
-    state.sendMode = state.sendMode || this.configuredWaveformSendMode();
+    state.sendMode = startup.modeSwitchOkAt !== null ? this.configuredWaveformSendMode() : 0;
     state.probe1 = latest?.probe1 ?? state.probe1;
     state.probe2 = latest?.probe2 ?? state.probe2;
     state.probe3 = latest?.probe3 ?? state.probe3;
@@ -990,7 +1140,9 @@ export class FlameDetectorService extends EventEmitter {
     state.snr21 = metrics.probe1.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe1.fluctuation : 0;
     state.snr23 = metrics.probe3.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe3.fluctuation : 0;
     state.snr31 = metrics.probe1.fluctuation > 0 ? metrics.probe3.fluctuation / metrics.probe1.fluctuation : 0;
-    state.lastError = undefined;
+    state.lastError = startup.state === 'FAILED'
+      ? startup.failureReason
+      : startup.modeSwitchOkAt === null ? 'MODE_SWITCH_NOT_CONFIRMED' : undefined;
     state.lastUpdate = Date.now();
     this.lastPushAt.set(unit.index, state.lastUpdate);
     this.waveformRecoveryRequestedUnits.delete(unit.index);
@@ -1008,20 +1160,26 @@ export class FlameDetectorService extends EventEmitter {
     if (byteCount === 0x86 || byteCount === 0xA6) device.setProtocolProfile(FLAME_PROTOCOLS.STANDARD);
     const decoded = decodeModbusRealtimeFrame(frame, device.getProtocolProfile());
     if (decoded.samples.length === 0) return;
+    this.logProtocolDiagnostic(unit, frame, decoded.samples, 'modbus');
 
     state.protocol = device.getProtocolProfile().id;
     state.probeCount = device.getProtocolProfile().channels;
+    const tracker = this.startupTracker(unit);
+    if (tracker.snapshot().modeSwitchOkAt === null) tracker.markModeSwitchOk();
+    const beforeStartup = tracker.snapshot();
+    const startup = tracker.observeFrame(decoded.samples, device.getProtocolProfile().channels);
+    if (beforeStartup.firstFrameAt === null && startup.firstFrameAt !== null) this.logLifecycle(unit.index, 'FIRST_FRAME', startup);
+    if (beforeStartup.firstValidSampleAt === null && startup.firstValidSampleAt !== null) this.logLifecycle(unit.index, 'FIRST_VALID_SAMPLE', startup);
+    if (beforeStartup.channelSyncAt === null && startup.channelSyncAt !== null) this.logLifecycle(unit.index, 'CHANNEL_SYNC_OK', startup);
+    if (beforeStartup.testReadyAt === null && startup.testReadyAt !== null) this.logLifecycle(unit.index, 'TEST_READY', startup);
+    state.startup = startup;
     state.online = true;
     state.sourceReady = true;
-    state.syncOk = true;
-    state.sendMode = state.sendMode || this.configuredWaveformSendMode();
-    if (this.broadcastModeRequestingUnits.has(unit.index)) {
-      this.stopBroadcastModeRequests(unit.index);
-      this.broadcastModeRetryAttempts.delete(unit.index);
-    }
+    state.syncOk = startup.channelSyncAt !== null;
+    state.sendMode = startup.modeSwitchOkAt !== null ? this.configuredWaveformSendMode() : 0;
     this.broadcastModeUnits.add(unit.index);
     this.applyRealtimeState(state, decoded, device);
-    state.lastError = undefined;
+    state.lastError = startup.state === 'FAILED' ? startup.failureReason : undefined;
     state.lastUpdate = Date.now();
     this.lastPushAt.set(unit.index, state.lastUpdate);
     this.waveformRecoveryRequestedUnits.delete(unit.index);
@@ -1133,6 +1291,99 @@ export class FlameDetectorService extends EventEmitter {
     });
   }
 
+  getStartupDiagnostics(): DetectorStartupDiagnostic[] {
+    return [...this.startupTrackers.values()]
+      .map((tracker) => tracker.snapshot())
+      .sort((left, right) => left.index - right.index);
+  }
+
+  getReadyReport(requiredSlots = this.config.units.filter((unit) => unit.enabled).map((unit) => unit.index), timeoutMs = READY_BARRIER_TIMEOUT_MS): DetectorReadyReport {
+    const startedAt = Math.min(
+      ...requiredSlots.map((index) => this.startupTrackers.get(index)?.snapshot().powerOnAt ?? Date.now()),
+      Date.now(),
+    );
+    const units = requiredSlots.map((index) => {
+      const unit = this.config.units.find((item) => item.index === index);
+      const startup = this.startupTrackers.get(index)?.snapshot()
+        ?? new DetectorStartupTracker(index, unit?.address ?? index).snapshot();
+      return {
+        index,
+        address: unit?.address ?? startup.address,
+        ready: startup.state === 'TEST_READY',
+        startup,
+      };
+    });
+    return {
+      ready: units.length > 0 && units.every((unit) => unit.ready),
+      timeoutMs,
+      startedAt,
+      completedAt: Date.now(),
+      requiredSlots: [...requiredSlots],
+      units,
+    };
+  }
+
+  /** Reset the per-batch startup state and begin a fresh mode handshake. */
+  prepareWaveformStartup(batchId?: string): void {
+    this.lifecycleBatchId = typeof batchId === 'string' && batchId.trim() ? batchId.trim() : '-';
+    for (const unit of this.config.units) {
+      const tracker = this.startupTrackers.get(unit.index) ?? new DetectorStartupTracker(unit.index, unit.address);
+      this.startupTrackers.set(unit.index, tracker);
+      const startup = tracker.reset(unit.address);
+      this.protocolDiagnosticFrames.set(unit.index, 0);
+      this.stopBroadcastModeRequests(unit.index);
+      this.broadcastModeRetryAttempts.delete(unit.index);
+      this.broadcastModeUnits.delete(unit.index);
+      const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+      state.startup = startup;
+      state.online = false;
+      state.sourceReady = false;
+      state.syncOk = false;
+      state.sendMode = 0;
+      state.lastError = undefined;
+      state.lastUpdate = Date.now();
+      this.units.set(unit.index, state);
+      if (!unit.enabled) continue;
+      const entry = this.pool.get(connKey(unit, this.config));
+      if (!entry?.ok) continue;
+      if ((unit.connMode ?? this.config.mode) === 'TCP' && this.waveformStreamingArmed) {
+        void this.initializeUnit(unit, entry.client);
+      }
+    }
+    this.broadcastStateNow();
+  }
+
+  async waitForReady(options: { requiredSlots?: number[]; timeoutMs?: number } = {}): Promise<DetectorReadyReport> {
+    const requiredSlots = options.requiredSlots?.length
+      ? [...new Set(options.requiredSlots.filter((index) => Number.isInteger(index) && index >= 1 && index <= 6))]
+      : this.config.units.filter((unit) => unit.enabled).map((unit) => unit.index);
+    const timeoutMs = Number.isFinite(options.timeoutMs) && Number(options.timeoutMs) > 0
+      ? Math.floor(Number(options.timeoutMs))
+      : READY_BARRIER_TIMEOUT_MS;
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
+    while (Date.now() < deadline) {
+      const report = this.getReadyReport(requiredSlots, timeoutMs);
+      if (report.ready || report.units.some((unit) => unit.startup.state === 'FAILED')) return { ...report, startedAt };
+      await new Promise((resolve) => setTimeout(resolve, READY_BARRIER_POLL_INTERVAL_MS));
+    }
+    for (const item of this.getReadyReport(requiredSlots, timeoutMs).units) {
+      if (item.ready) continue;
+      const tracker = this.startupTrackers.get(item.index);
+      const state = this.units.get(item.index);
+      if (!tracker || !state) continue;
+      const reason = item.startup.failureReason || `DETECTOR_STARTUP_TIMEOUT:D${item.index}`;
+      const startup = tracker.markTimeout(reason);
+      state.startup = startup;
+      state.lastError = reason;
+      state.lastUpdate = Date.now();
+      this.units.set(item.index, state);
+      this.emit('unit_update', state);
+    }
+    this.broadcastStateNow();
+    return { ...this.getReadyReport(requiredSlots, timeoutMs), ready: false, startedAt, completedAt: Date.now() };
+  }
+
   isConnected(): boolean { return this.isDataStreamConnected(); }
   getLastError(): string { return this.lastError; }
 
@@ -1157,6 +1408,8 @@ export class FlameDetectorService extends EventEmitter {
   updateConfig(newConfig: FlameConfig): void {
     this.config = newConfig;
     this.units.clear();
+    this.startupTrackers.clear();
+    this.protocolDiagnosticFrames.clear();
     this.baselines.clear();
     this.initUnits();
   }

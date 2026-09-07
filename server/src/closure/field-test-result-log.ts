@@ -138,6 +138,15 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_FAULT_AT_PRECHECK: '产品预检时探测器故障',
   PRECHECK_READ_FAILED: '产品预检读取失败',
   PRODUCT_PRECHECK_NOT_COMPLETED: '产品预检未完成',
+  DETECTOR_STARTUP_FAILED: '探测器启动失败',
+  DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
+  DETECTOR_STARTUP_DISCONNECTED: '探测器启动时未连接',
+  DETECTOR_STARTUP_POWER_ON: '探测器已上电，等待通信',
+  DETECTOR_STARTUP_COMMUNICATION_READY: '通信已建立，等待模式切换',
+  DETECTOR_STARTUP_MODE_SWITCHING: '模式切换未确认',
+  DETECTOR_STARTUP_MODE_SWITCH_OK: '模式已切换，等待首帧同步',
+  DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '首帧已收到，等待通道同步',
+  MODE_SWITCH_FAILED_AFTER_3_ATTEMPTS: '模式切换重试 3 次仍失败',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
   NOISE_RMS_EXCEEDS_LIMIT: '噪声 RMS 超过上限',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
@@ -180,11 +189,27 @@ function valueText(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : '-';
 }
 
-function localDateTime(timestamp: number): string {
+function localDateTime(timestamp: number | null): string {
+  if (timestamp === null) return '-';
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return '-';
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function startupStateText(state: string | undefined): string {
+  const labels: Record<string, string> = {
+    DISCONNECTED: '未连接',
+    POWER_ON: '已上电',
+    COMMUNICATION_READY: '通信就绪',
+    MODE_SWITCHING: '模式切换中',
+    MODE_SWITCH_OK: '模式切换成功',
+    FIRST_FRAME_RECEIVED: '已收到首帧',
+    CHANNEL_SYNC_OK: '通道同步',
+    TEST_READY: '测试就绪',
+    FAILED: '失败',
+  };
+  return state ? labels[state] ?? state : '-';
 }
 
 function table(headers: string[], rows: string[][]): string[] {
@@ -329,6 +354,26 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       ];
     });
 
+    const startupRows = units.map((unit) => {
+      const startup = analysisByIndex.get(unit.index)?.startup;
+      return [
+        String(unit.index),
+        startupStateText(startup?.state),
+        localDateTime(startup?.powerOnAt ?? null),
+        localDateTime(startup?.communicationReadyAt ?? null),
+        localDateTime(startup?.modeSwitchOkAt ?? null),
+        localDateTime(startup?.firstFrameAt ?? null),
+        localDateTime(startup?.firstValidSampleAt ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe1 ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe2 ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe3 ?? null),
+        localDateTime(startup?.channelSyncAt ?? null),
+        localDateTime(startup?.testReadyAt ?? null),
+        String(startup?.modeSwitchAttempts ?? 0),
+        startup?.failureReason ?? '-',
+      ];
+    });
+
     const processRows = units.flatMap((unit) => {
       const analysis = analysisByIndex.get(unit.index);
       return STAGES.map(([stageId, label]) => {
@@ -363,6 +408,12 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       ...table(
         ['设备', '地址', '结果', '噪声RMS', '噪声峰峰值', '绝对值', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
         deviceRows,
+      ),
+      '',
+      '探测器启动诊断',
+      ...table(
+        ['设备', '状态', '上电', '通信回包', '模式切换成功', '首帧', '首个有效样本', 'P1 首值', 'P2 首值', 'P3 首值', '通道同步', '测试就绪', '模式尝试次数', '失败原因'],
+        startupRows,
       ),
       '',
       '工序检测明细',

@@ -223,6 +223,23 @@ function evaluateUnit(
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
+  // Startup diagnostics are deliberately evaluated before waveform metrics so a
+  // mode-switch or channel-sync failure cannot be misreported as a slow sampler
+  // or a threshold failure.
+  if (unit.startup?.state === 'FAILED') {
+    return result(base, metrics, 'FAIL', 'FAIL', unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED', precheck, missingProbes);
+  }
+  if (unit.startup && unit.startup.state !== 'TEST_READY') {
+    const reason = `DETECTOR_STARTUP_${unit.startup.state}`;
+    if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
+    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
+  }
+  if (analysisSnapshot?.detectorStartupBarrier && !analysisSnapshot.detectorStartupBarrier.ready) {
+    const reason = analysisSnapshot.detectorStartupBarrier.failureReason || 'DETECTOR_STARTUP_TIMEOUT';
+    if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
+    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
+  }
+
   // Product precheck is evidence collected during the signal-stabilization wait.
   // Keep its detailed reasons attached to the unit, but do not expose an operator
   // NG result while the mechanical/waveform inspection is still running. The same

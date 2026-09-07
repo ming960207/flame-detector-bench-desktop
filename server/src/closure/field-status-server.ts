@@ -16,7 +16,7 @@ import { PLCProcessMonitor } from '../plc-process-monitor.js';
 import type { PLCProcessStatus } from '../process-status.js';
 import { FlameDetectorService } from '../modbus/flame-detector-service.js';
 import { WSMessageType, type FlameDetectorState } from '../types.js';
-import type { AutoTestProgress, AutoTestReport } from '../modbus/flame-detector-service.js';
+import type { AutoTestProgress, AutoTestReport, DetectorReadyReport } from '../modbus/flame-detector-service.js';
 import { evaluateFieldDetectorBatch, type FieldDetectorBatchVerdict } from './field-detector-verdict.js';
 import { evaluateFieldFinalVerdict, type FieldFinalVerdict } from './field-final-verdict.js';
 import {
@@ -67,6 +67,7 @@ export interface FieldStatusSummary {
   productSelectionLocked: boolean;
   productPrecheck: ProductPrecheckReport | null;
   productPrecheckBusy: boolean;
+  detectorStartup?: DetectorReadyReport;
 }
 
 export interface FieldStatusSnapshot {
@@ -90,6 +91,9 @@ export interface FlameDetectorStatusSource {
   isTransportConnected?(): boolean;
   isDataStreamConnected?(): boolean;
   clearWaveformHistory?(): void;
+  prepareWaveformStartup?(batchId?: string): void;
+  waitForReady?(options?: { requiredSlots?: number[]; timeoutMs?: number }): Promise<DetectorReadyReport>;
+  getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
   stopWaveformStreaming?(): Promise<void>;
   runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null): Promise<ProductPrecheckReport>;
   on(event: 'flame_state' | 'error', listener: (value: any) => void): this;
@@ -259,6 +263,8 @@ export function createFieldStatusRuntime(
   let loggedBatchId: string | null = null;
   let positionBatchId: string | null = null;
   let detectorMutationBusy = false;
+  let detectorStartupBatchId: string | null = null;
+  let detectorStartupReport: DetectorReadyReport | undefined = detectors.getReadyReport?.();
   let inspectionPositions = new Map<InspectionPositionId, InspectionPositionResult>();
   const positionStartedAt = new Map<InspectionPositionId, number>();
 
@@ -295,6 +301,7 @@ export function createFieldStatusRuntime(
     productSelectionLocked: processLocksProductSelection(currentStatus),
     productPrecheck,
     productPrecheckBusy,
+    ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
   const broadcastSummary = () => wsServer.broadcastFieldSummary(summary());
 
@@ -386,6 +393,30 @@ export function createFieldStatusRuntime(
       productPrecheckBatchId = null;
       streamingStoppedBatchId = null;
       applyProductWaveformProfile();
+      detectorStartupBatchId = waveformAnalysisState.batchId;
+      const requiredSlots = detectors.getConfig?.().units.filter((unit) => unit.enabled).map((unit) => unit.index);
+      if (detectors.waitForReady && waveformAnalysisState.batchId) {
+        waveformAnalysis.setDetectorStartupBarrier(false);
+        detectors.prepareWaveformStartup?.(waveformAnalysisState.batchId ?? undefined);
+        detectorStartupReport = detectors.getReadyReport?.(requiredSlots) ?? detectorStartupReport;
+        const startupBatchId = waveformAnalysisState.batchId;
+        void detectors.waitForReady({ requiredSlots, timeoutMs: 15_000 }).then((report) => {
+          if (detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+          detectorStartupReport = report;
+          const failed = report.units.find((unit) => !unit.ready);
+          waveformAnalysis.setDetectorStartupBarrier(
+            report.ready,
+            report.ready ? undefined : failed?.startup.failureReason || `DETECTOR_STARTUP_TIMEOUT:D${failed?.index ?? '-'}`,
+          );
+          recomputeVerdicts();
+          broadcastSummary();
+        }).catch((error) => {
+          if (detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+          const reason = error instanceof Error ? error.message : String(error);
+          waveformAnalysis.setDetectorStartupBarrier(false, reason);
+          broadcastSummary();
+        });
+      }
     }
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
@@ -440,6 +471,7 @@ export function createFieldStatusRuntime(
     broadcastSummary();
   });
   detectors.on('flame_state', (state: FlameDetectorState) => {
+    detectorStartupReport = detectors.getReadyReport?.() ?? detectorStartupReport;
     waveformAnalysis.observeDetectors(state);
     waveformAnalysisState = waveformAnalysis.snapshot();
     recomputeVerdicts(state);
@@ -502,6 +534,14 @@ export function createFieldStatusRuntime(
     }
   });
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
+  app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
+    ready: false,
+    timeoutMs: 15_000,
+    startedAt: null,
+    completedAt: Date.now(),
+    requiredSlots: [],
+    units: [],
+  }));
   app.get('/api/flame/config', (_req, res) => {
     const current = detectors.getConfig?.() ?? config.flame;
     res.json({ success: true, config: current });

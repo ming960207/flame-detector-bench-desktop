@@ -1,6 +1,7 @@
 import { isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../types.js';
 import { summarizeWaveformChannels } from '../modbus/flame-data-decoder.js';
+import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
 
 export type WaveformAnalysisPhase = 'IDLE' | 'NOISE' | 'INTERFERENCE' | 'COMPLETE';
 export type WaveformAnalysisVerdict = 'PASS' | 'FAIL' | 'PENDING';
@@ -190,6 +191,7 @@ export interface WaveformAnalysisUnitResult {
   interferenceSampleCount: number;
   stages: Record<InterferenceStage, InterferenceStageResult>;
   sampledAt: number;
+  startup?: DetectorStartupDiagnostic;
   reason?: string;
 }
 
@@ -238,6 +240,10 @@ export interface FieldWaveformAnalysisSnapshot {
   updatedAt: number;
   thresholds: WaveformAnalysisConfig;
   units: WaveformAnalysisUnitResult[];
+  detectorStartupBarrier?: {
+    ready: boolean;
+    failureReason?: string;
+  };
 }
 
 const CHANNEL_KEYS: ChannelKey[] = ['probe1', 'probe2', 'probe3', 'probe4'];
@@ -249,6 +255,7 @@ interface LatestUnitState {
   syncOk: boolean;
   lastUpdate: number;
   seen: boolean;
+  startup?: DetectorStartupDiagnostic;
 }
 
 interface UnitAccumulator {
@@ -536,6 +543,7 @@ function publicUnitResult(
     interferenceSampleCount: interferenceSamples.length,
     stages,
     sampledAt: accumulator.latest.lastUpdate,
+    ...(accumulator.latest.startup ? { startup: { ...accumulator.latest.startup } } : {}),
   };
 
   if (!hasBatch) {
@@ -596,6 +604,10 @@ export class FieldWaveformAnalysis {
   private noiseWindowOpenedAt: number | null = null;
   private noiseCompleted = false;
   private automaticRunActive = false;
+  private detectorStartupReady = true;
+  private detectorStartupFailureReason: string | undefined;
+  private detectorStartupBarrierConfigured = false;
+  private readonly startupCapturePrimed = new Set<number>();
 
   constructor(config?: Partial<WaveformAnalysisConfig>) {
     this.config = normalizeConfig(config);
@@ -608,6 +620,18 @@ export class FieldWaveformAnalysis {
       ...config,
       quality: normalizeDetectionQualityConfig(config?.quality, this.config.quality),
     });
+  }
+
+  /**
+   * Formal production calls this at batch start and releases the gate only after
+   * every required detector has completed mode switching and channel sync.
+   */
+  setDetectorStartupBarrier(ready: boolean, failureReason?: string): void {
+    this.detectorStartupBarrierConfigured = true;
+    this.detectorStartupReady = ready;
+    this.detectorStartupFailureReason = ready ? undefined : failureReason;
+    if (!ready) this.startupCapturePrimed.clear();
+    this.updatedAt = Date.now();
   }
 
   observeProcess(status: PLCProcessStatus): void {
@@ -690,6 +714,7 @@ export class FieldWaveformAnalysis {
         || !unit.online
         || !unit.sourceReady
         || !unit.syncOk
+        || !this.detectorStartupReady
       ) continue;
 
       // The service's normalized samples remove the detector carrier/baseline
@@ -702,6 +727,10 @@ export class FieldWaveformAnalysis {
       const eventKey = `${state.timestamp}:${unit.lastUpdate}:${samples.length}:${sampleFingerprint(samples)}`;
       if (eventKey === accumulator.lastEventKey) continue;
       accumulator.lastEventKey = eventKey;
+      if (this.detectorStartupBarrierConfigured && !this.startupCapturePrimed.has(unit.index)) {
+        this.startupCapturePrimed.add(unit.index);
+        continue;
+      }
       if (this.capturePhase === 'NOISE') {
         accumulator.noiseSamples.push(...samples);
         accumulator.noiseRawSamples.push(...capturedRawSamples);
@@ -747,6 +776,10 @@ export class FieldWaveformAnalysis {
       updatedAt: this.updatedAt,
       thresholds: { ...this.config },
       units,
+      detectorStartupBarrier: {
+        ready: this.detectorStartupReady,
+        ...(this.detectorStartupFailureReason ? { failureReason: this.detectorStartupFailureReason } : {}),
+      },
     };
   }
 
@@ -765,6 +798,9 @@ export class FieldWaveformAnalysis {
     this.noiseEndedAt = null;
     this.noiseWindowOpenedAt = null;
     this.noiseCompleted = false;
+    this.detectorStartupReady = true;
+    this.detectorStartupFailureReason = undefined;
+    this.startupCapturePrimed.clear();
     this.startedAt = startedAt;
     for (let index = 1; index <= 6; index += 1) this.units.set(index, newAccumulator(index));
   }
@@ -816,5 +852,6 @@ function latestFromUnit(unit: FlameDetectorUnitState): LatestUnitState {
     syncOk: unit.syncOk,
     lastUpdate: unit.lastUpdate,
     seen: true,
+    ...(unit.startup ? { startup: { ...unit.startup } } : {}),
   };
 }

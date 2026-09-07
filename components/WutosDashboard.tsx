@@ -127,6 +127,21 @@ function signalCaptureLabel(status: PLCProcessStatus | null, analysis: SignalCap
   return '等待数据';
 }
 
+function detectorStartupLabel(unit: FlameDetectorUnitState | undefined): string | null {
+  const state = unit?.startup?.state;
+  if (!state || state === 'TEST_READY') return null;
+  const labels: Record<string, string> = {
+    DISCONNECTED: '未连接',
+    POWER_ON: '已上电',
+    COMMUNICATION_READY: '通信就绪',
+    MODE_SWITCHING: '模式切换中',
+    MODE_SWITCH_OK: '模式切换成功，等待首帧',
+    FIRST_FRAME_RECEIVED: '等待通道同步',
+    FAILED: '启动失败',
+  };
+  return labels[state] ?? state;
+}
+
 function verdictLabel(verdict: FieldFinalVerdict | null): string {
   if (verdict?.grade === 'A_PASS') return 'A类合格';
   if (verdict?.grade === 'B_PASS') return 'B类合格';
@@ -554,7 +569,7 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
   const probes = waveformKeys(samples, unit);
   const domain = waveformDomain(samples, probes);
   const state = unit?.fault ? 'fault' : unit?.fire ? 'fire' : unit?.online ? 'online' : 'offline';
-  const stateLabel = signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
+  const stateLabel = detectorStartupLabel(unit) ?? signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
   const p1 = probeFluctuation(unit, 'probe1');
   const p2 = probeFluctuation(unit, 'probe2');
   const p3 = probeFluctuation(unit, 'probe3');

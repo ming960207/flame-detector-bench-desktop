@@ -250,7 +250,10 @@ export class WSServer extends EventEmitter {
     const units = state.units.map((unit) => {
       const deltaUnit = deltaByIndex.get(unit.index);
       const lastAge = unit.lastUpdate > 0 ? Math.max(0, now - unit.lastUpdate) : -1;
-      return `D${unit.index}{on=${unit.online ? 1 : 0},ready=${unit.sourceReady ? 1 : 0},sync=${unit.syncOk ? 1 : 0},total=${historySampleTotal(unit) ?? '-'},delta=${deltaUnit ? deltaUnit.historyDelta.length : '-'},hist=${unit.historySamples?.length ?? 0},lastAgeMs=${lastAge},reset=${deltaUnit?.historyReset ? 1 : 0}}`;
+      const startup = unit.startup;
+      const firstFrameAge = startup?.firstFrameAt ? Math.max(0, now - startup.firstFrameAt) : -1;
+      const readyAge = startup?.testReadyAt ? Math.max(0, now - startup.testReadyAt) : -1;
+      return `D${unit.index}{on=${unit.online ? 1 : 0},ready=${unit.sourceReady ? 1 : 0},sync=${unit.syncOk ? 1 : 0},startup=${startup?.state ?? '-'},attempts=${startup?.modeSwitchAttempts ?? 0},streak=${startup?.channelValidStreak ?? 0},firstAgeMs=${firstFrameAge},readyAgeMs=${readyAge},total=${historySampleTotal(unit) ?? '-'},delta=${deltaUnit ? deltaUnit.historyDelta.length : '-'},hist=${unit.historySamples?.length ?? 0},lastAgeMs=${lastAge},reset=${deltaUnit?.historyReset ? 1 : 0}}`;
     }).join(' ');
     console.log(`[WaveformDiag][WS] mode=${mode} clients=${this.clients.size} resync=${this.flameClientsNeedingResync.size} maxBuffered=${maxBuffered} stateAgeMs=${Math.max(0, now - state.timestamp)} ${units}`);
   }
