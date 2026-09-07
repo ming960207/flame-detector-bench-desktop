@@ -1,4 +1,5 @@
 import type { FlameConfig } from './config.js';
+import type { FlameDetectorState } from './types.js';
 import { FlameDetectorService } from './modbus/flame-detector-service.js';
 import type { FlameDetectorDevice } from './modbus/flame-detector-device.js';
 import {
@@ -27,6 +28,7 @@ import {
 } from './relay-functional-test.js';
 
 const POSITION_ONE_CONTACT_SETTLE_MS = 800;
+const POST_PRECHECK_WAVEFORM_RECOVERY_MS = 500;
 
 export interface ProductAwareBatchContext {
   batchId: string;
@@ -116,6 +118,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   private relayConfig: RelayFunctionalTestConfig = DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG;
   private relayFeedback: RelayFeedbackSource = { readInputs: () => undefined };
   private pendingBatchStartedAt: number | null = null;
+  private precheckAnalysisBlocked = false;
+  private precheckAnalysisRecoveryUntil = 0;
   private readonly batchContexts = new Map<string, ProductAwareBatchContext>();
   private readonly productCodeReservations = new Map<string, Promise<ProductCodeAllocation>>();
 
@@ -126,6 +130,30 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     // Formal production must behave like the legacy field runtime: once each TCP
     // transport connects it immediately enters continuous waveform push mode.
     super(flameConfig);
+  }
+
+  /**
+   * Keep the physical push stream and history untouched during product precheck,
+   * while preventing the upper quantitative analyzer from treating the deliberate
+   * version-command waveform gap as a real noise sample. Consumers already skip
+   * states with sourceReady/syncOk=false. A short post-precheck recovery guard keeps
+   * the first resuming frames out of the noise window as well.
+   */
+  override emit(eventName: string | symbol, ...args: any[]): boolean {
+    if (
+      eventName === 'flame_state'
+      && (this.precheckAnalysisBlocked || Date.now() < this.precheckAnalysisRecoveryUntil)
+    ) {
+      const state = args[0] as FlameDetectorState | undefined;
+      if (state && Array.isArray(state.units)) {
+        const gatedState: FlameDetectorState = {
+          ...state,
+          units: state.units.map((unit) => ({ ...unit, sourceReady: false, syncOk: false })),
+        };
+        return super.emit(eventName, gatedState, ...args.slice(1));
+      }
+    }
+    return super.emit(eventName, ...args);
   }
 
   setRelayFunctionalTestConfig(config: RelayFunctionalTestConfig): void {
@@ -303,100 +331,107 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     productConfig: ProductDetectionConfig,
     batchId: string | null = null,
   ): Promise<ProductPrecheckReport> {
-    await new Promise((resolve) => setTimeout(resolve, POSITION_ONE_CONTACT_SETTLE_MS));
+    this.precheckAnalysisBlocked = true;
+    this.precheckAnalysisRecoveryUntil = 0;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, POSITION_ONE_CONTACT_SETTLE_MS));
 
-    const startedAt = Date.now();
-    const fallbackProductionDate = new Date(this.pendingBatchStartedAt ?? startedAt);
-    const profile = selectedProductProfile(productConfig);
-    const allocation = await this.ensureProductCodeAllocation(productConfig, batchId, fallbackProductionDate);
-    const productionDate = new Date(allocation.productionDate || fallbackProductionDate.getTime());
-    const contextKey = batchId ?? `precheck-${productionDate.getTime()}`;
-    const indexes = this.enabledDetectorIndexes();
+      const startedAt = Date.now();
+      const fallbackProductionDate = new Date(this.pendingBatchStartedAt ?? startedAt);
+      const profile = selectedProductProfile(productConfig);
+      const allocation = await this.ensureProductCodeAllocation(productConfig, batchId, fallbackProductionDate);
+      const productionDate = new Date(allocation.productionDate || fallbackProductionDate.getTime());
+      const contextKey = batchId ?? `precheck-${productionDate.getTime()}`;
+      const indexes = this.enabledDetectorIndexes();
 
-    // All product identity reads run first; relay simulation then reuses the same
-    // already-open detector clients. Neither path stops, clears or re-arms waveform.
-    const identityByDetector = await this.readPositionOneIdentity(indexes);
-    const relayFunctionalTest = await this.runRelayFunctionalTest(productConfig, batchId);
-    const currentByIndex = new Map(this.getCurrentState().units.map((unit) => [unit.index, unit]));
-    const sensitivityByDetector: Record<number, number | null> = {};
+      // All product identity reads run first; relay simulation then reuses the same
+      // already-open detector clients. Neither path stops, clears or re-arms waveform.
+      const identityByDetector = await this.readPositionOneIdentity(indexes);
+      const relayFunctionalTest = await this.runRelayFunctionalTest(productConfig, batchId);
+      const currentByIndex = new Map(this.getCurrentState().units.map((unit) => [unit.index, unit]));
+      const sensitivityByDetector: Record<number, number | null> = {};
 
-    const units: ProductPrecheckUnitResult[] = indexes.map((index) => {
-      const identity = identityByDetector[index] ?? {
-        softwareVersion: null,
-        probeCount: null,
-        sensitivity: null,
-        fireAlarm: null,
-        fault: null,
-      };
-      sensitivityByDetector[index] = identity.sensitivity;
-      const live = currentByIndex.get(index);
-      const reasons: string[] = [];
+      const units: ProductPrecheckUnitResult[] = indexes.map((index) => {
+        const identity = identityByDetector[index] ?? {
+          softwareVersion: null,
+          probeCount: null,
+          sensitivity: null,
+          fireAlarm: null,
+          fault: null,
+        };
+        sensitivityByDetector[index] = identity.sensitivity;
+        const live = currentByIndex.get(index);
+        const reasons: string[] = [];
 
-      if (identity.softwareVersion === null) {
-        uniquePush(reasons, 'SOFTWARE_VERSION_READ_FAILED');
-      } else if (!profile.expectedSoftwareVersion.trim()) {
-        uniquePush(reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
-      } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, identity.softwareVersion)) {
-        uniquePush(reasons, 'SOFTWARE_VERSION_MISMATCH');
-      }
-
-      if (identity.probeCount === null) uniquePush(reasons, 'PROBE_COUNT_READ_FAILED');
-      else if (identity.probeCount !== profile.expectedProbeCount) uniquePush(reasons, 'PROBE_COUNT_MISMATCH');
-      if (identity.sensitivity === null) uniquePush(reasons, 'SENSITIVITY_READ_FAILED');
-      if (identity.fault === true || live?.fault === true) uniquePush(reasons, 'DETECTOR_FAULT_AT_PRECHECK');
-
-      const relayUnit = relayFunctionalTest?.units.find((item) => item.detectorIndex === index);
-      if (relayUnit && relayUnit.verdict !== 'PASS') {
-        uniquePush(reasons, 'RELAY_FUNCTIONAL_TEST_FAILED');
-        for (const reason of [...relayUnit.alarm.reasons, ...relayUnit.fault.reasons]) {
-          uniquePush(reasons, `RELAY:${reason}`);
+        if (identity.softwareVersion === null) {
+          uniquePush(reasons, 'SOFTWARE_VERSION_READ_FAILED');
+        } else if (!profile.expectedSoftwareVersion.trim()) {
+          uniquePush(reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
+        } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, identity.softwareVersion)) {
+          uniquePush(reasons, 'SOFTWARE_VERSION_MISMATCH');
         }
-      }
 
-      return {
-        index,
-        address: live?.address ?? index,
+        if (identity.probeCount === null) uniquePush(reasons, 'PROBE_COUNT_READ_FAILED');
+        else if (identity.probeCount !== profile.expectedProbeCount) uniquePush(reasons, 'PROBE_COUNT_MISMATCH');
+        if (identity.sensitivity === null) uniquePush(reasons, 'SENSITIVITY_READ_FAILED');
+        if (identity.fault === true || live?.fault === true) uniquePush(reasons, 'DETECTOR_FAULT_AT_PRECHECK');
+
+        const relayUnit = relayFunctionalTest?.units.find((item) => item.detectorIndex === index);
+        if (relayUnit && relayUnit.verdict !== 'PASS') {
+          uniquePush(reasons, 'RELAY_FUNCTIONAL_TEST_FAILED');
+          for (const reason of [...relayUnit.alarm.reasons, ...relayUnit.fault.reasons]) {
+            uniquePush(reasons, `RELAY:${reason}`);
+          }
+        }
+
+        return {
+          index,
+          address: live?.address ?? index,
+          productType: productConfig.selectedType,
+          expectedSoftwareVersion: profile.expectedSoftwareVersion,
+          actualSoftwareVersion: identity.softwareVersion === null ? null : formatSoftwareVersion(identity.softwareVersion),
+          expectedProbeCount: profile.expectedProbeCount,
+          actualProbeCount: identity.probeCount,
+          fireAlarm: identity.fireAlarm ?? live?.fire ?? null,
+          fault: identity.fault ?? live?.fault ?? null,
+          sensitivityLevel: identity.sensitivity,
+          checkedAt: Date.now(),
+          verdict: reasons.length === 0 ? 'PASS' : 'FAIL',
+          reasons,
+        };
+      });
+
+      const completedAt = Date.now();
+      const report: ProductPrecheckReport = {
+        batchId,
         productType: productConfig.selectedType,
+        productLabel: profile.label,
+        productModel: profile.productModel,
         expectedSoftwareVersion: profile.expectedSoftwareVersion,
-        actualSoftwareVersion: identity.softwareVersion === null ? null : formatSoftwareVersion(identity.softwareVersion),
         expectedProbeCount: profile.expectedProbeCount,
-        actualProbeCount: identity.probeCount,
-        fireAlarm: identity.fireAlarm ?? live?.fire ?? null,
-        fault: identity.fault ?? live?.fault ?? null,
-        sensitivityLevel: identity.sensitivity,
-        checkedAt: Date.now(),
-        verdict: reasons.length === 0 ? 'PASS' : 'FAIL',
-        reasons,
+        productionDate: productionDate.getTime(),
+        productCodeAllocation: allocation,
+        relayFunctionalTest,
+        startedAt,
+        completedAt,
+        verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
+        units,
       };
-    });
 
-    const completedAt = Date.now();
-    const report: ProductPrecheckReport = {
-      batchId,
-      productType: productConfig.selectedType,
-      productLabel: profile.label,
-      productModel: profile.productModel,
-      expectedSoftwareVersion: profile.expectedSoftwareVersion,
-      expectedProbeCount: profile.expectedProbeCount,
-      productionDate: productionDate.getTime(),
-      productCodeAllocation: allocation,
-      relayFunctionalTest,
-      startedAt,
-      completedAt,
-      verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
-      units,
-    };
-
-    this.batchContexts.set(contextKey, {
-      batchId: contextKey,
-      productionDate: productionDate.getTime(),
-      productCodeAllocation: allocation,
-      relayFunctionalTest,
-      sensitivityByDetector,
-      updatedAt: completedAt,
-    });
-    if (batchId) this.batchContexts.set(batchId, this.batchContexts.get(contextKey)!);
-    this.pendingBatchStartedAt = null;
-    return report;
+      this.batchContexts.set(contextKey, {
+        batchId: contextKey,
+        productionDate: productionDate.getTime(),
+        productCodeAllocation: allocation,
+        relayFunctionalTest,
+        sensitivityByDetector,
+        updatedAt: completedAt,
+      });
+      if (batchId) this.batchContexts.set(batchId, this.batchContexts.get(contextKey)!);
+      this.pendingBatchStartedAt = null;
+      return report;
+    } finally {
+      this.precheckAnalysisBlocked = false;
+      this.precheckAnalysisRecoveryUntil = Date.now() + POST_PRECHECK_WAVEFORM_RECOVERY_MS;
+    }
   }
 }
