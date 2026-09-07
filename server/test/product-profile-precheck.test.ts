@@ -357,7 +357,7 @@ test('missing precheck is NG but batch product identity still survives into MQTT
   assert.equal(message.payload.detector_results[0]?.expected_probe_count, 2);
 });
 
-test('slots absent from the completed precheck do not participate in formal verdict', () => {
+test('slots absent from completed precheck remain explicit and fail formal verdict', () => {
   const active = unit(1);
   const disabledSlot = unit(2);
   disabledSlot.online = false;
@@ -372,7 +372,10 @@ test('slots absent from the completed precheck do not participate in formal verd
   };
   const report = precheck();
   const verdict = evaluateFieldDetectorBatch(state, snapshot(), report, dualProduct());
-  assert.equal(verdict.units.length, 1);
-  assert.equal(verdict.units[0]?.index, 1);
-  assert.equal(verdict.units.some((item) => item.index === 2), false);
+  assert.equal(verdict.units.length, 6);
+  assert.deepEqual(verdict.units.map((item) => item.index), [1, 2, 3, 4, 5, 6]);
+  assert.equal(verdict.units[1]?.reason, 'PRODUCT_PRECHECK_NOT_COMPLETED');
+  assert.equal(verdict.units[1]?.verdict, 'FAIL');
+  assert.equal(verdict.units[2]?.reason, 'DETECTOR_SLOT_MISSING');
+  assert.equal(verdict.verdict, 'FAIL');
 });
