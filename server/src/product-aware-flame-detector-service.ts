@@ -27,7 +27,6 @@ import {
 } from './relay-functional-test.js';
 
 const POSITION_ONE_CONTACT_SETTLE_MS = 800;
-const SOFTWARE_VERSION_PENDING = 'SOFTWARE_VERSION_PENDING';
 
 export interface ProductAwareBatchContext {
   batchId: string;
@@ -39,6 +38,7 @@ export interface ProductAwareBatchContext {
 }
 
 interface PositionOneIdentity {
+  softwareVersion: string | null;
   probeCount: number | null;
   sensitivity: number | null;
   fireAlarm: boolean | null;
@@ -118,7 +118,6 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   private pendingBatchStartedAt: number | null = null;
   private readonly batchContexts = new Map<string, ProductAwareBatchContext>();
   private readonly productCodeReservations = new Map<string, Promise<ProductCodeAllocation>>();
-  private readonly precheckReports = new Map<string, ProductPrecheckReport>();
 
   constructor(
     flameConfig: FlameConfig,
@@ -211,9 +210,22 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     return { fire: state.fire, fault: state.fault };
   }
 
+  /**
+   * Read the complete product identity while the station is intentionally waiting
+   * for waveform stabilization. The six TCP detector links are independent, so the
+   * six units run in parallel; each individual detector still performs its Modbus
+   * requests sequentially through RawTcpModbusClient's request queue.
+   *
+   * Software-version read is intentionally first. Field testing confirmed that the
+   * complete version command works while continuous waveform push is enabled, but
+   * the visible waveform can pause for about three seconds. Doing it first leaves
+   * the remaining identity/relay checks and the stabilization wait to absorb that
+   * display gap before quantitative noise capture begins.
+   */
   private async readPositionOneIdentity(indexes: number[]): Promise<Record<number, PositionOneIdentity>> {
     const entries = await Promise.all(indexes.map(async (index) => {
       const result: PositionOneIdentity = {
+        softwareVersion: null,
         probeCount: null,
         sensitivity: null,
         fireAlarm: null,
@@ -221,8 +233,9 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       };
       try {
         const device = this.detectorDevice(index);
-        try { result.probeCount = await device.readProbeCount(); } catch { /* captured below as null */ }
-        try { result.sensitivity = await device.readSensitivity(); } catch { /* captured below as null */ }
+        try { result.softwareVersion = await device.readSoftwareVersion(); } catch { /* explicit reason below */ }
+        try { result.probeCount = await device.readProbeCount(); } catch { /* explicit reason below */ }
+        try { result.sensitivity = await device.readSensitivity(); } catch { /* explicit reason below */ }
         try {
           const alarm = await device.readAlarmStatus();
           result.fireAlarm = alarm.fireAlarm;
@@ -282,9 +295,9 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   }
 
   /**
-   * First-position preparation. It runs inside the PLC signal-stabilization window
-   * while waveform push remains armed. Software version is intentionally deferred
-   * until the last two seconds of the EMC stage.
+   * Complete product precheck at detection position 1 during the signal-stabilizing
+   * wait. Continuous waveform push remains armed throughout. No product-precheck
+   * command is deferred to flash/EMC stages.
    */
   override async runProductPrecheck(
     productConfig: ProductDetectionConfig,
@@ -300,8 +313,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     const contextKey = batchId ?? `precheck-${productionDate.getTime()}`;
     const indexes = this.enabledDetectorIndexes();
 
-    // These register reads and the relay functional test share the existing detector
-    // clients. They never stop/clear/re-arm the waveform stream.
+    // All product identity reads run first; relay simulation then reuses the same
+    // already-open detector clients. Neither path stops, clears or re-arms waveform.
     const identityByDetector = await this.readPositionOneIdentity(indexes);
     const relayFunctionalTest = await this.runRelayFunctionalTest(productConfig, batchId);
     const currentByIndex = new Map(this.getCurrentState().units.map((unit) => [unit.index, unit]));
@@ -309,6 +322,7 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
 
     const units: ProductPrecheckUnitResult[] = indexes.map((index) => {
       const identity = identityByDetector[index] ?? {
+        softwareVersion: null,
         probeCount: null,
         sensitivity: null,
         fireAlarm: null,
@@ -316,7 +330,15 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       };
       sensitivityByDetector[index] = identity.sensitivity;
       const live = currentByIndex.get(index);
-      const reasons: string[] = [SOFTWARE_VERSION_PENDING];
+      const reasons: string[] = [];
+
+      if (identity.softwareVersion === null) {
+        uniquePush(reasons, 'SOFTWARE_VERSION_READ_FAILED');
+      } else if (!profile.expectedSoftwareVersion.trim()) {
+        uniquePush(reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
+      } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, identity.softwareVersion)) {
+        uniquePush(reasons, 'SOFTWARE_VERSION_MISMATCH');
+      }
 
       if (identity.probeCount === null) uniquePush(reasons, 'PROBE_COUNT_READ_FAILED');
       else if (identity.probeCount !== profile.expectedProbeCount) uniquePush(reasons, 'PROBE_COUNT_MISMATCH');
@@ -331,24 +353,24 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         }
       }
 
-      const hasFailure = reasons.some((reason) => reason !== SOFTWARE_VERSION_PENDING);
       return {
         index,
         address: live?.address ?? index,
         productType: productConfig.selectedType,
         expectedSoftwareVersion: profile.expectedSoftwareVersion,
-        actualSoftwareVersion: null,
+        actualSoftwareVersion: identity.softwareVersion === null ? null : formatSoftwareVersion(identity.softwareVersion),
         expectedProbeCount: profile.expectedProbeCount,
         actualProbeCount: identity.probeCount,
         fireAlarm: identity.fireAlarm ?? live?.fire ?? null,
         fault: identity.fault ?? live?.fault ?? null,
         sensitivityLevel: identity.sensitivity,
         checkedAt: Date.now(),
-        verdict: hasFailure ? 'FAIL' : 'PENDING',
+        verdict: reasons.length === 0 ? 'PASS' : 'FAIL',
         reasons,
       };
     });
 
+    const completedAt = Date.now();
     const report: ProductPrecheckReport = {
       batchId,
       productType: productConfig.selectedType,
@@ -360,8 +382,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       productCodeAllocation: allocation,
       relayFunctionalTest,
       startedAt,
-      completedAt: 0,
-      verdict: units.some((unit) => unit.verdict === 'FAIL') ? 'FAIL' : 'PENDING',
+      completedAt,
+      verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
       units,
     };
 
@@ -371,60 +393,10 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       productCodeAllocation: allocation,
       relayFunctionalTest,
       sensitivityByDetector,
-      updatedAt: Date.now(),
+      updatedAt: completedAt,
     });
-    if (batchId) {
-      this.batchContexts.set(batchId, this.batchContexts.get(contextKey)!);
-      this.precheckReports.set(batchId, report);
-    }
+    if (batchId) this.batchContexts.set(batchId, this.batchContexts.get(contextKey)!);
     this.pendingBatchStartedAt = null;
-    return report;
-  }
-
-  /**
-   * Side-channel version check for the final two seconds of EMC. This method only
-   * reads SW_VERSION on the already-open clients and mutates the existing precheck
-   * object in place. It never clears waveform history, changes send mode, or pauses
-   * the real EMC capture/decision window.
-   */
-  async finalizeProductPrecheckVersions(
-    productConfig: ProductDetectionConfig,
-    batchId: string,
-  ): Promise<ProductPrecheckReport | null> {
-    const report = this.precheckReports.get(batchId);
-    if (!report) return null;
-    if (!report.units.some((unit) => unit.reasons.includes(SOFTWARE_VERSION_PENDING))) return report;
-
-    const profile = selectedProductProfile(productConfig);
-    await Promise.all(report.units.map(async (unit) => {
-      unit.reasons = unit.reasons.filter((reason) => ![
-        SOFTWARE_VERSION_PENDING,
-        'SOFTWARE_VERSION_READ_FAILED',
-        'SOFTWARE_VERSION_NOT_CONFIGURED',
-        'SOFTWARE_VERSION_MISMATCH',
-      ].includes(reason));
-      try {
-        const rawVersion = await this.detectorDevice(unit.index).readSoftwareVersion();
-        unit.actualSoftwareVersion = formatSoftwareVersion(rawVersion);
-        if (!profile.expectedSoftwareVersion.trim()) {
-          uniquePush(unit.reasons, 'SOFTWARE_VERSION_NOT_CONFIGURED');
-        } else if (!softwareVersionMatches(profile.expectedSoftwareVersion, rawVersion)) {
-          uniquePush(unit.reasons, 'SOFTWARE_VERSION_MISMATCH');
-        }
-      } catch {
-        unit.actualSoftwareVersion = null;
-        uniquePush(unit.reasons, 'SOFTWARE_VERSION_READ_FAILED');
-      }
-      unit.checkedAt = Date.now();
-      unit.verdict = unit.reasons.length === 0 ? 'PASS' : 'FAIL';
-    }));
-
-    report.completedAt = Date.now();
-    report.verdict = report.units.length > 0 && report.units.every((unit) => unit.verdict === 'PASS')
-      ? 'PASS'
-      : 'FAIL';
-    const context = this.batchContexts.get(batchId);
-    if (context) context.updatedAt = Date.now();
     return report;
   }
 }
