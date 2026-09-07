@@ -368,6 +368,16 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
           </label>
         </div>
 
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 34, marginTop: 9, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10.5 }}>
+          <input
+            type="checkbox"
+            checked={draftProfile.skipSoftwareVersionCheck}
+            disabled={locked}
+            onChange={(event) => updateDraftProfile({ skipSoftwareVersionCheck: event.target.checked })}
+          />
+          跳过软件版本判定（仍发送版本读取指令并记录实际版本）
+        </label>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10.5 }}>
             <input
@@ -416,6 +426,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 11, paddingTop: 10, borderTop: `1px solid ${palette.borderSoft}`, fontSize: 10.5 }}>
           <span style={{ color: palette.muted }}>已保存版本 <b style={{ color: palette.title }}>{profile?.expectedSoftwareVersion ? formatSoftwareVersion(profile.expectedSoftwareVersion) : '未配置'}</b></span>
+          <span style={{ color: palette.muted }}>版本判定 <b style={{ color: profile?.skipSoftwareVersionCheck ? palette.warn : palette.pass }}>{profile?.skipSoftwareVersionCheck ? '已跳过' : '参与判定'}</b></span>
           <span style={{ color: palette.muted }}>已保存探头 <b style={{ color: palette.title }}>{profile?.expectedProbeCount ?? '-'} 路</b></span>
           <span style={{ color: palette.muted }}>继电器结果 <b style={{ color: relayTone }}>{relayText}</b></span>
           <span style={{ color: palette.muted }}>编号规则 <b style={{ color: savedCodeMissing.length ? palette.warn : palette.pass }}>{savedCodeMissing.length ? '未完整配置' : '已配置'}</b></span>
