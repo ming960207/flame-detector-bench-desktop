@@ -24,6 +24,7 @@ import { type ClosureCommandResult, type ClosureState } from '../closure/types.j
 const MAX_CLIENT_BUFFERED_BYTES = 4 * 1024 * 1024;
 const MAX_INCOMING_MESSAGE_BYTES = 1024 * 1024;
 const REALTIME_UI_PUBLISH_INTERVAL_MS = 200;
+const WAVEFORM_DIAGNOSTIC_INTERVAL_MS = 1000;
 const CLIENT_MESSAGE_TYPES = new Set<WSMessageType>([
   WSMessageType.SET_DO,
   WSMessageType.SET_DO_MULTI,
@@ -98,6 +99,7 @@ export class WSServer extends EventEmitter {
   private pendingFlameState: FlameDetectorState | null = null;
   private flamePublishTimer: NodeJS.Timeout | null = null;
   private lastFlamePublishedAt = 0;
+  private lastFlameDiagnosticAt = 0;
   private pendingFieldSummary: unknown;
   private fieldSummaryPublishTimer: NodeJS.Timeout | null = null;
   private lastFieldSummaryPublishedAt = 0;
@@ -238,6 +240,21 @@ export class WSServer extends EventEmitter {
     this.hasFlameHistoryBaseline = this.flameHistoryTotals.size === state.units.length;
   }
 
+  private logFlameDiagnostic(state: FlameDetectorState, delta: FlameDetectorWaveformDelta | null, mode: 'snapshot' | 'delta'): void {
+    const now = Date.now();
+    if (now - this.lastFlameDiagnosticAt < WAVEFORM_DIAGNOSTIC_INTERVAL_MS) return;
+    this.lastFlameDiagnosticAt = now;
+    const deltaByIndex = new Map((delta?.units ?? []).map((unit) => [unit.index, unit]));
+    let maxBuffered = 0;
+    for (const client of this.clients) maxBuffered = Math.max(maxBuffered, Number(client.bufferedAmount) || 0);
+    const units = state.units.map((unit) => {
+      const deltaUnit = deltaByIndex.get(unit.index);
+      const lastAge = unit.lastUpdate > 0 ? Math.max(0, now - unit.lastUpdate) : -1;
+      return `D${unit.index}{on=${unit.online ? 1 : 0},ready=${unit.sourceReady ? 1 : 0},sync=${unit.syncOk ? 1 : 0},total=${historySampleTotal(unit) ?? '-'},delta=${deltaUnit ? deltaUnit.historyDelta.length : '-'},hist=${unit.historySamples?.length ?? 0},lastAgeMs=${lastAge},reset=${deltaUnit?.historyReset ? 1 : 0}}`;
+    }).join(' ');
+    console.log(`[WaveformDiag][WS] mode=${mode} clients=${this.clients.size} resync=${this.flameClientsNeedingResync.size} maxBuffered=${maxBuffered} stateAgeMs=${Math.max(0, now - state.timestamp)} ${units}`);
+  }
+
   private sendFlameSnapshot(ws: WebSocket, state: FlameDetectorState, timestamp = Date.now()): void {
     if (ws.readyState !== WebSocket.OPEN) return;
     if (ws.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
@@ -282,15 +299,18 @@ export class WSServer extends EventEmitter {
     const timestamp = this.lastFlamePublishedAt;
     if (!this.hasFlameHistoryBaseline) {
       this.rememberFlameHistoryTotals(state);
+      this.logFlameDiagnostic(state, null, 'snapshot');
       this.broadcastFlameSnapshot(state, timestamp);
       return;
     }
     const delta = createFlameWaveformDelta(state, this.flameHistoryTotals);
     this.rememberFlameHistoryTotals(state);
     if (!delta) {
+      this.logFlameDiagnostic(state, null, 'snapshot');
       this.broadcastFlameSnapshot(state, timestamp);
       return;
     }
+    this.logFlameDiagnostic(state, delta, 'delta');
     this.broadcastFlameWaveformDelta(delta);
   }
 
@@ -378,6 +398,7 @@ export class WSServer extends EventEmitter {
     this.pendingFlameState = null;
     this.pendingFieldSummary = undefined;
     this.lastFlamePublishedAt = 0;
+    this.lastFlameDiagnosticAt = 0;
     this.lastFieldSummaryPublishedAt = 0;
     for (const client of this.clients) client.close();
     this.clients.clear();
