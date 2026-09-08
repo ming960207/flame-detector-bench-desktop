@@ -23,7 +23,6 @@ import {
   FlameDetectorDevice,
   getRawTcpSocket,
   isRawTcpClient,
-  SEND_MODE_BROADCAST_FRAME_HEX,
   SEND_MODE_BROADCAST_VALUE,
   SEND_MODE_FILTERED_VALUE,
   type FlameDetectorClient,
@@ -940,7 +939,8 @@ export class FlameDetectorService extends EventEmitter {
     try {
       const device = this.getDevice(unit, client);
       await device.sendBroadcastSendMode({
-        address: unit.address,
+        // 现场 TCP 串口服务器要求用 FF 广播帧启动连续波形；每个设备
+        // 已由独立 TCP 端口隔离，传入设备地址会得到 ACK 但不产生波形流。
         mode: sendMode,
         attempts: 1,
         retryDelayMs: 0,
