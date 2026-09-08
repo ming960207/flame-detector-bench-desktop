@@ -26,7 +26,12 @@ import type {
 
 const PATCHED = Symbol.for('product-aware-relay-verification-policy-patched');
 const BASELINE_PATCHED = Symbol.for('relay-functional-test-runtime-baseline-policy-patched');
+const VERIFY_DELAYS_MS = [80, 160, 220] as const;
 type InternalService = Record<PropertyKey, any>;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function hex16(value: number): string {
   return `0x${(Number(value) & 0xFFFF).toString(16).toUpperCase().padStart(4, '0')}`;
@@ -86,21 +91,8 @@ function stripInvalidRelayFailureReasons(report: ProductPrecheckReport): void {
 
 /**
  * 现场 DIO 的 0/1 是输入模块原始电平，不等于“继电器正常/动作”。
- *
- * 旧逻辑依赖配置中的 alarmNormalLevel/faultNormalLevel；一旦 NO/NC、失电安全接法
- * 或某个槽位接线极性不同，就会把正常高电平误判成 ACTIVE_AT_BASELINE。
- * 这里在每次继电器功能检测真正开始前读取一次本批 DIO 原始状态，并把它作为
- * 本次运行期 baseline。后续原协调器仍使用 relayInputIsActive()，但它比较的是
- * “当前原始电平 != 本批 baseline”，因此：
- *   - 动作：相对 baseline 发生变化；
- *   - 对侧继电器正常：保持 baseline；
- *   - 复位：必须回到 baseline。
- *
- * 同一层运行时补充四灯实时状态：B000/B001 直接驱动火警/故障灯，经过本批
- * baseline 解释后的 DIO 驱动火警继电器/故障继电器灯。这样 UI 不再把固定
- * normalLevel 或最终 PASS/FAIL 当成“当前灯是否点亮”。
- *
- * baseline 只修改当前进程内的运行期 config，不写回 system-config.json，下一批会重新学习。
+ * 每次正式继电器检测前学习本批实际 baseline；动作看相对 baseline 的变化，
+ * 复位要求回到 baseline。运行期 baseline 不写回 system-config.json。
  */
 function patchRelayRuntimeBaseline(): void {
   const proto = RelayFunctionalTestCoordinator.prototype as unknown as InternalService;
@@ -184,6 +176,64 @@ function patchRelayRuntimeBaseline(): void {
   };
 }
 
+async function verifySimulationState(
+  device: FlameDetectorDevice,
+  detectorIndex: number,
+  kind: string,
+  requested: ReturnType<typeof requestedAlarmFaultSimulationState>,
+): Promise<{ matched: boolean; details?: any; error?: unknown }> {
+  let lastDetails: any;
+  let lastError: unknown;
+  for (const delay of VERIFY_DELAYS_MS) {
+    await sleep(delay);
+    try {
+      const readback = await readAlarmFaultSimulation(device);
+      console.log(
+        `[继电器检测][D${detectorIndex}][${kind}] A000/A001 回读：`
+        + `A000=${hex16(readback.rawFire)} A001=${hex16(readback.rawFault)} `
+        + `fire=${readback.fire ? 1 : 0} fault=${readback.fault ? 1 : 0}`,
+      );
+      const latched = await readLatchedAlarmFaultState(device);
+      console.log(
+        `[继电器检测][D${detectorIndex}][${kind}] B000/B001 回读：`
+        + `B000=${hex16(latched.rawFire)} B001=${hex16(latched.rawFault)} `
+        + `fire=${latched.fire ? 1 : 0} fault=${latched.fault ? 1 : 0}`,
+      );
+      updateRelayLiveInternal(detectorIndex, { fire: latched.fire, fault: latched.fault }, `${kind}_VERIFY`);
+      lastDetails = { requested, readback, latched };
+      if (alarmFaultSimulationMatches(requested, readback, latched)) return { matched: true, details: lastDetails };
+    } catch (error) {
+      lastError = error;
+      console.warn(`[继电器检测][D${detectorIndex}][${kind}] 状态回读暂未确认，继续短时验证：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { matched: false, details: lastDetails, error: lastError };
+}
+
+async function resetStateCleared(
+  device: FlameDetectorDevice,
+  detectorIndex: number,
+): Promise<{ cleared: boolean; error?: unknown }> {
+  let lastError: unknown;
+  for (const delay of VERIFY_DELAYS_MS) {
+    await sleep(delay);
+    try {
+      const latched = await readLatchedAlarmFaultState(device);
+      console.log(
+        `[继电器检测][D${detectorIndex}][复位] 即时 B000/B001：`
+        + `B000=${hex16(latched.rawFire)} B001=${hex16(latched.rawFault)} `
+        + `fire=${latched.fire ? 1 : 0} fault=${latched.fault ? 1 : 0}`,
+      );
+      updateRelayLiveInternal(detectorIndex, { fire: latched.fire, fault: latched.fault }, 'RESET_IMMEDIATE');
+      if (!latched.fire && !latched.fault) return { cleared: true };
+    } catch (error) {
+      lastError = error;
+      console.warn(`[继电器检测][D${detectorIndex}][复位] B000/B001 暂未确认，继续短时验证：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { cleared: false, error: lastError };
+}
+
 function patchRuntime(): void {
   const proto = ProductAwareFlameDetectorService.prototype as unknown as InternalService;
   if (proto[PATCHED]) return;
@@ -197,53 +247,90 @@ function patchRuntime(): void {
   ): Promise<void> {
     const requested = requestedAlarmFaultSimulationState(state.fire, state.fault);
     const kind = relayKind(state);
+    const device = this.detectorDevice(detectorIndex) as FlameDetectorDevice;
     console.log(
       `[继电器检测][D${detectorIndex}][${kind}] FC10 写 A000/A001 请求：`
       + `A000=${hex16(requested.rawFire)} A001=${hex16(requested.rawFault)}`,
     );
 
-    await originalSimulate.call(this, detectorIndex, state);
-    console.log(`[继电器检测][D${detectorIndex}][${kind}] FC10 写 A000/A001 ACK 已收到。`);
+    let commandError: unknown;
+    try {
+      await originalSimulate.call(this, detectorIndex, state);
+      console.log(`[继电器检测][D${detectorIndex}][${kind}] FC10 写 A000/A001 ACK 已收到。`);
+    } catch (error) {
+      commandError = error;
+      console.warn(`[继电器检测][D${detectorIndex}][${kind}] FC10 ACK 未确认，先回读 A/B 状态判断命令是否实际生效：${error instanceof Error ? error.message : String(error)}`);
+    }
 
-    const device = this.detectorDevice(detectorIndex) as FlameDetectorDevice;
-    const readback = await readAlarmFaultSimulation(device);
-    console.log(
-      `[继电器检测][D${detectorIndex}][${kind}] A000/A001 回读：`
-      + `A000=${hex16(readback.rawFire)} A001=${hex16(readback.rawFault)} `
-      + `fire=${readback.fire ? 1 : 0} fault=${readback.fault ? 1 : 0}`,
-    );
+    let verification = await verifySimulationState(device, detectorIndex, kind, requested);
+    if (verification.matched) {
+      console.log(`[继电器检测][D${detectorIndex}][${kind}] ${commandError ? 'ACK丢失但内部状态已确认；' : ''}模拟命令有效性确认通过，允许进入实体 DIO 判定。`);
+      return;
+    }
 
-    const latched = await readLatchedAlarmFaultState(device);
-    console.log(
-      `[继电器检测][D${detectorIndex}][${kind}] B000/B001 回读：`
-      + `B000=${hex16(latched.rawFire)} B001=${hex16(latched.rawFault)} `
-      + `fire=${latched.fire ? 1 : 0} fault=${latched.fault ? 1 : 0}`,
-    );
+    if (commandError) {
+      console.warn(`[继电器检测][D${detectorIndex}][${kind}] 首次 ACK 丢失且状态未建立，执行一次受限重发。`);
+      try {
+        await originalSimulate.call(this, detectorIndex, state);
+        commandError = undefined;
+        console.log(`[继电器检测][D${detectorIndex}][${kind}] 受限重发 ACK 已收到。`);
+      } catch (error) {
+        commandError = error;
+        console.warn(`[继电器检测][D${detectorIndex}][${kind}] 受限重发 ACK 仍未确认：${error instanceof Error ? error.message : String(error)}`);
+      }
+      verification = await verifySimulationState(device, detectorIndex, kind, requested);
+      if (verification.matched) {
+        console.log(`[继电器检测][D${detectorIndex}][${kind}] 重发后内部状态确认通过，允许进入实体 DIO 判定。`);
+        return;
+      }
+    }
 
-    if (!alarmFaultSimulationMatches(requested, readback, latched)) {
-      const error = new RelaySimulationVerificationError({ requested, readback, latched });
-      console.error(`[继电器检测][D${detectorIndex}][${kind}] ${error.code}：写命令有回包，但模拟状态未建立。`);
+    if (verification.details) {
+      const error = new RelaySimulationVerificationError(verification.details);
+      console.error(`[继电器检测][D${detectorIndex}][${kind}] ${error.code}：模拟状态最终未建立。`);
       throw error;
     }
-    console.log(`[继电器检测][D${detectorIndex}][${kind}] 模拟命令有效性确认通过，允许进入实体 DIO 判定。`);
+    throw verification.error ?? commandError ?? new Error('RELAY_SIMULATION_VERIFICATION_UNAVAILABLE');
   };
 
   const originalReset = proto.reset;
-  proto.reset = async function loggedReset(this: InternalService, detectorIndex: number): Promise<void> {
+  proto.reset = async function verifiedReset(this: InternalService, detectorIndex: number): Promise<void> {
+    const device = this.detectorDevice(detectorIndex) as FlameDetectorDevice;
     console.log(`[继电器检测][D${detectorIndex}][复位] 写 F000=0x1234 请求。`);
-    await originalReset.call(this, detectorIndex);
-    console.log(`[继电器检测][D${detectorIndex}][复位] F000=0x1234 ACK 已收到。`);
+    let commandError: unknown;
     try {
-      const device = this.detectorDevice(detectorIndex) as FlameDetectorDevice;
-      const latched = await readLatchedAlarmFaultState(device);
-      console.log(
-        `[继电器检测][D${detectorIndex}][复位] 即时 B000/B001：`
-        + `B000=${hex16(latched.rawFire)} B001=${hex16(latched.rawFault)} `
-        + `fire=${latched.fire ? 1 : 0} fault=${latched.fault ? 1 : 0}`,
-      );
-      updateRelayLiveInternal(detectorIndex, { fire: latched.fire, fault: latched.fault }, 'RESET_IMMEDIATE');
+      await originalReset.call(this, detectorIndex);
+      console.log(`[继电器检测][D${detectorIndex}][复位] F000=0x1234 ACK 已收到。`);
     } catch (error) {
-      console.warn(`[继电器检测][D${detectorIndex}][复位] 即时 B000/B001 回读失败，后续复位确认仍会继续：${error instanceof Error ? error.message : String(error)}`);
+      commandError = error;
+      console.warn(`[继电器检测][D${detectorIndex}][复位] ACK 未确认，先通过 B000/B001 判断复位是否已经实际生效：${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let verification = await resetStateCleared(device, detectorIndex);
+    if (verification.cleared) {
+      if (commandError) console.log(`[继电器检测][D${detectorIndex}][复位] ACK丢失但 B000/B001 已清零，按复位成功继续。`);
+      return;
+    }
+
+    if (commandError) {
+      console.warn(`[继电器检测][D${detectorIndex}][复位] 首次 ACK 丢失且内部状态未清零，执行一次受限重发。`);
+      try {
+        await originalReset.call(this, detectorIndex);
+        commandError = undefined;
+        console.log(`[继电器检测][D${detectorIndex}][复位] 受限重发 ACK 已收到。`);
+      } catch (error) {
+        commandError = error;
+        console.warn(`[继电器检测][D${detectorIndex}][复位] 受限重发 ACK 仍未确认：${error instanceof Error ? error.message : String(error)}`);
+      }
+      verification = await resetStateCleared(device, detectorIndex);
+      if (verification.cleared) return;
+      if (commandError) throw commandError;
+    }
+
+    // ACK 已收到但即时内部状态尚未清零时，不抢先判失败；协调器原有的
+    // resetTimeoutMs 稳定验证仍会继续，并最终决定 PASS/FAIL/TEST_INVALID。
+    if (verification.error) {
+      console.warn(`[继电器检测][D${detectorIndex}][复位] 即时回读仍不稳定，交由后续复位窗口继续确认：${verification.error instanceof Error ? verification.error.message : String(verification.error)}`);
     }
   };
 
@@ -266,8 +353,6 @@ function patchRuntime(): void {
       precheckError = error;
     }
 
-    // 原实现 finally 会解除 analysis gate；恢复阶段重新拉起 gate，确保新的有效首帧
-    // 尚未全部回来时，噪声窗口绝不会开始消费这些控制命令造成的空洞/残帧。
     this.precheckAnalysisBlocked = true;
     this.precheckAnalysisRecoveryUntil = 0;
     let recoveryError: unknown;
