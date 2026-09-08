@@ -5,17 +5,16 @@
  */
 
 .wutos-detector-card__status-lights {
-  position: absolute !important;
-  z-index: 12 !important;
-  top: 2.2% !important;
-  left: 50% !important;
+  position: relative !important;
+  z-index: 1 !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: clamp(5px, .42cqw, 8px) !important;
+  align-self: center !important;
   min-width: 0 !important;
+  margin: 3% 0 1% !important;
   padding: 2px 5px !important;
-  transform: translateX(-50%) !important;
   border: 1px solid rgba(50, 126, 174, .28) !important;
   border-radius: 999px !important;
   background: rgba(2, 18, 34, .78) !important;

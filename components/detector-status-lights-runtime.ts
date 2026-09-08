@@ -50,6 +50,8 @@ function ensureLightGroup(index: number): HTMLElement | null {
   let group = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__status-lights');
   if (group) {
     group.querySelectorAll<HTMLElement>('.wutos-detector-state-led').forEach(sanitizeLightElement);
+    const metrics = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__metrics');
+    if (metrics && group.nextElementSibling !== metrics) card.insertBefore(group, metrics);
     return group;
   }
 
@@ -67,7 +69,9 @@ function ensureLightGroup(index: number): HTMLElement | null {
     sanitizeLightElement(light);
     group.appendChild(light);
   }
-  card.appendChild(group);
+  const metrics = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__metrics');
+  if (metrics) card.insertBefore(group, metrics);
+  else card.appendChild(group);
   return group;
 }
 
