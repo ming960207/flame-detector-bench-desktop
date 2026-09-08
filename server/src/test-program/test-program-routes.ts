@@ -77,7 +77,7 @@ export function mountTestProgramRoutes(app: Express, options: EmbeddedTestProgra
   app.get('/api/test-program/archives/:runId/report', (req, res) => {
     const report = archiveStore.report(req.params.runId);
     if (report === null) return res.status(404).json({ code: 'TEST_PROGRAM_REPORT_NOT_FOUND' });
-    return res.type('text/markdown').send(report);
+    return res.type(archiveStore.reportContentType(req.params.runId) === 'html' ? 'html' : 'text/markdown').send(report);
   });
   app.all('/api/test-program/*', (_req, res) => res.status(405).json({ code: 'TEST_PROGRAM_EQUIPMENT_WRITE_DISABLED' }));
 
