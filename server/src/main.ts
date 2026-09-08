@@ -17,6 +17,11 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
   assertSupportedRuntimeMode(config.closureMode);
 
   if (config.closureMode === 'field') {
+    // Install detector startup semantics before the field runtime creates any
+    // FlameDetectorService instance. This keeps ACK handling independent from PLC
+    // stages and prevents premature FF re-sends from interrupting waveform startup.
+    await import('./modbus/flame-detector-waveform-startup-policy.js');
+
     const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
       import('./product-aware-field-runtime.js'),
       import('./unified-services.js'),
