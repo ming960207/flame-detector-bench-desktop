@@ -20,12 +20,14 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
     // Install detector startup/recovery semantics before the field runtime creates
     // ProductAwareFlameDetectorService / FieldWaveformAnalysis. Import order matters:
     // startup policy stabilizes FF recovery, relay policy wraps control commands,
-    // stage policy gates fresh frames without re-arming healthy streams, and the
-    // analysis policy adds post-recovery settling plus production sample floors.
+    // stage policy gates fresh frames without re-arming healthy streams, the
+    // analysis policy adds post-recovery settling/sample floors, and the final
+    // production-noise policy removes RMS from business verdict/report semantics.
     await import('./modbus/flame-detector-waveform-startup-policy.js');
     await import('./product-aware-relay-verification-policy.js');
     await import('./inspection-waveform-freshness-policy.js');
     await import('./inspection-analysis-policy.js');
+    await import('./no-rms-production-policy.js');
 
     const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
       import('./product-aware-field-runtime.js'),
