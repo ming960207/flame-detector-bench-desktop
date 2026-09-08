@@ -4,7 +4,7 @@ import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict
 import type { ProductionInspectionRecord } from './production-inspection-record.js';
 
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
-export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格';
+export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格' | '待判定';
 
 export interface ProductLabelPrintJob {
   id: string;
@@ -57,11 +57,14 @@ function jobId(batchId: string, slot: number): string {
 
 function labelVerdict(record: ProductionInspectionRecord, slot: number, detectorVerdict: FieldDetectorBatchVerdict): LabelVerdict {
   const product = record.products.find((item) => item.slot === slot);
-  if (!product || product.verdict === '不合格') return '不合格';
+  if (!product) return '待判定';
+  if (product.verdict === '不合格') return '不合格';
+  if (product.verdict === '未检测') return '待判定';
   const detector = detectorVerdict.units.find((item) => item.index === slot);
   if (detector?.grade === 'A_PASS') return 'A类合格';
   if (detector?.grade === 'B_PASS') return 'B类合格';
-  return '不合格';
+  if (detector?.verdict === 'FAIL') return '不合格';
+  return '待判定';
 }
 
 function summary(jobs: ProductLabelPrintJob[]): LabelPrintQueueSummary {
@@ -154,6 +157,8 @@ export class LabelPrintQueueStore {
         if (this.state.jobs.some((job) => job.id === id)) continue;
         const verdict = labelVerdict(record, product.slot, detectorVerdict);
         const hasCode = Boolean(product.productCode);
+        const resultFinal = verdict !== '待判定';
+        const printable = hasCode && resultFinal;
         const job: ProductLabelPrintJob = {
           id,
           batchId: record.batchId,
@@ -166,12 +171,16 @@ export class LabelPrintQueueStore {
           isolation: verdict === '不合格',
           productionDate: record.productionDate,
           noiseValues: [...product.amplitude.values],
-          status: hasCode ? 'WAITING' : 'BLOCKED',
+          status: printable ? 'WAITING' : 'BLOCKED',
           attempts: 0,
           reprintCount: 0,
           workerId: null,
           leaseUntil: null,
-          lastError: hasCode ? null : 'PRODUCT_CODE_NOT_GENERATED',
+          lastError: !hasCode
+            ? 'PRODUCT_CODE_NOT_GENERATED'
+            : !resultFinal
+              ? 'PRODUCT_RESULT_NOT_FINAL'
+              : null,
           createdAt: now,
           updatedAt: now,
           printedAt: null,
@@ -276,6 +285,9 @@ export class LabelPrintQueueStore {
       if (!job.productCode) {
         job.status = 'BLOCKED';
         job.lastError = 'PRODUCT_CODE_NOT_GENERATED';
+      } else if (job.verdict === '待判定') {
+        job.status = 'BLOCKED';
+        job.lastError = 'PRODUCT_RESULT_NOT_FINAL';
       } else {
         if (job.status === 'PRINTED') job.reprintCount += 1;
         job.status = 'WAITING';
