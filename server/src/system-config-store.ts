@@ -14,6 +14,7 @@ const CONFIG_FILE_PATH = process.env.APP_DATA_DIR
   : join(__dirname, '..', 'system-config.json');
 
 const BASE_SNAPSHOT = Symbol('system-config-base-snapshot');
+const REPLACE_RETRY_DELAYS_MS = [40, 80, 160, 320, 500] as const;
 
 type SnapshottedSystemConfigStore = SystemConfigStore & {
   [BASE_SNAPSHOT]?: SystemConfigStore;
@@ -67,6 +68,60 @@ function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorCode(error: unknown): string {
+  return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : '';
+}
+
+function retryableWindowsReplaceError(error: unknown): boolean {
+  return ['EPERM', 'EACCES', 'EBUSY', 'EEXIST', 'ENOTEMPTY'].includes(errorCode(error));
+}
+
+async function retryContention<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= REPLACE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!retryableWindowsReplaceError(error) || attempt >= REPLACE_RETRY_DELAYS_MS.length) throw error;
+      await sleep(REPLACE_RETRY_DELAYS_MS[attempt]!);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Windows 上 Defender、索引服务或短暂的读句柄可能让“临时文件 rename 覆盖目标文件”
+ * 返回 EPERM/EACCES。先保留正常的原子 rename，并针对这类瞬时竞争做短退避重试；
+ * 若目标仍被允许写入但不允许 rename，则退化为直接覆盖写。配置仓库自身的 mutationQueue
+ * 已保证单进程内不会并发写，因此降级路径不会重新引入本进程的写覆盖竞争。
+ */
+async function replaceConfigFile(
+  temporaryPath: string,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  try {
+    await retryContention(() => fs.rename(temporaryPath, filePath));
+    return;
+  } catch (renameError) {
+    if (!retryableWindowsReplaceError(renameError)) throw renameError;
+    console.warn(
+      `[SystemConfigStore] 原子替换被 Windows 文件占用阻止(${errorCode(renameError) || 'UNKNOWN'})，`
+      + '改用受队列保护的直接覆盖写。',
+    );
+  }
+
+  await retryContention(() => fs.writeFile(filePath, content, 'utf-8'));
+  try { await fs.unlink(temporaryPath); } catch { /* rename may have won or cleanup can be best effort */ }
+}
+
 /**
  * One repository owns all read-modify-write mutations for system-config.json.
  * The queue is process-local by design: the packaged application runs one unified
@@ -101,7 +156,7 @@ export class SystemConfigRepository {
     const content = `${JSON.stringify(store, null, 2)}\n`;
     try {
       await fs.writeFile(temporaryPath, content, 'utf-8');
-      await fs.rename(temporaryPath, this.filePath);
+      await replaceConfigFile(temporaryPath, this.filePath, content);
     } catch (error: any) {
       try { await fs.unlink(temporaryPath); } catch { /* no temporary file */ }
       console.error('[SystemConfigStore] 保存配置失败:', error.message);
