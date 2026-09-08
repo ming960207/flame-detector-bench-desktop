@@ -18,6 +18,16 @@ export interface ProductProfileConfig {
   /** 勾选后仍发送版本读取指令并记录实际版本，但版本结果不参与 PASS/FAIL 判定。 */
   skipSoftwareVersionCheck: boolean;
   expectedProbeCount: number;
+  /** 真实参与定量判定的物理通道；不能再通过“探头数量=前N路”推断。 */
+  activeChannels?: ChannelKey[];
+  /** 噪声判定通道。 */
+  noiseProbes?: ChannelKey[];
+  /** 趋势一致性判定通道。 */
+  consistencyProbes?: ChannelKey[];
+  /** 干扰比的分子/分母通道。 */
+  interferenceRatio?: { numerator: ChannelKey; denominator: ChannelKey };
+  /** 是否把原始绝对幅值作为 NG 条件；默认关闭，仅记录诊断值。 */
+  judgeNoiseAbsolute?: boolean;
   /** 具体型号是否执行真实火警/故障继电器功能测试。关闭时记录表按业务规则填“合格”，后台标 DEFAULT_PASS。 */
   relayFunctionalTestEnabled: boolean;
   /** 产品编号规则。规则缺失只影响编号生成，不得阻塞正式检测流程。 */
@@ -68,6 +78,43 @@ export const PRODUCT_TYPE_ORDER: readonly ProductType[] = [
   'FOUR_WAVELENGTH',
   'IMAGE_DETECTOR',
 ] as const;
+
+const CHANNEL_KEYS: readonly ChannelKey[] = ['probe1', 'probe2', 'probe3', 'probe4'];
+
+function defaultActiveChannels(type: ProductType, expectedProbeCount: number): ChannelKey[] {
+  if (type === 'DUAL_WAVELENGTH' || expectedProbeCount === 2) return ['probe2', 'probe3'];
+  const count = Math.max(1, Math.min(4, Math.floor(Number(expectedProbeCount) || 3)));
+  return CHANNEL_KEYS.slice(0, count);
+}
+
+function defaultInterferenceRatio(type: ProductType, activeChannels: ChannelKey[]): { numerator: ChannelKey; denominator: ChannelKey } {
+  if (type === 'DUAL_WAVELENGTH' || (activeChannels.includes('probe2') && activeChannels.includes('probe3'))) {
+    return { numerator: 'probe2', denominator: 'probe3' };
+  }
+  return {
+    numerator: activeChannels[1] ?? activeChannels[0] ?? 'probe2',
+    denominator: activeChannels[0] ?? 'probe1',
+  };
+}
+
+function normalizedChannels(value: unknown, fallback: ChannelKey[]): ChannelKey[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const allowed = new Set(CHANNEL_KEYS);
+  const result = [...new Set(value.filter((item): item is ChannelKey => allowed.has(item as ChannelKey)))];
+  return result.length > 0 ? result : [...fallback];
+}
+
+function normalizedRatio(
+  value: unknown,
+  fallback: { numerator: ChannelKey; denominator: ChannelKey },
+): { numerator: ChannelKey; denominator: ChannelKey } {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const numerator = CHANNEL_KEYS.includes(source.numerator as ChannelKey) ? source.numerator as ChannelKey : fallback.numerator;
+  const denominator = CHANNEL_KEYS.includes(source.denominator as ChannelKey) ? source.denominator as ChannelKey : fallback.denominator;
+  return { numerator, denominator };
+}
 
 /**
  * Product/model/probe mappings are data, not code. Edit server/product-profiles.json
@@ -131,6 +178,14 @@ export function normalizeProductDetectionConfig(
     const fixedProbeCount = Number.isInteger(requestedProbeCount) && requestedProbeCount >= 1 && requestedProbeCount <= 4
       ? requestedProbeCount
       : base.expectedProbeCount;
+    const defaultActive = defaultActiveChannels(type, fixedProbeCount);
+    const baseActive = normalizedChannels(base.activeChannels, defaultActive);
+    const activeChannels = normalizedChannels(raw.activeChannels, baseActive);
+    const noiseProbes = normalizedChannels(raw.noiseProbes, normalizedChannels(base.noiseProbes, activeChannels));
+    const consistencyProbes = normalizedChannels(raw.consistencyProbes, normalizedChannels(base.consistencyProbes, activeChannels));
+    const baseRatio = normalizedRatio(base.interferenceRatio, defaultInterferenceRatio(type, activeChannels));
+    const interferenceRatio = normalizedRatio(raw.interferenceRatio, baseRatio);
+
     profiles[type] = {
       label: base.label,
       productModel: cleanProductModel(raw.productModel, base.productModel),
@@ -139,6 +194,13 @@ export function normalizeProductDetectionConfig(
         ? raw.skipSoftwareVersionCheck
         : Boolean(base.skipSoftwareVersionCheck),
       expectedProbeCount: fixedProbeCount,
+      activeChannels,
+      noiseProbes,
+      consistencyProbes,
+      interferenceRatio,
+      judgeNoiseAbsolute: typeof raw.judgeNoiseAbsolute === 'boolean'
+        ? raw.judgeNoiseAbsolute
+        : Boolean(base.judgeNoiseAbsolute),
       relayFunctionalTestEnabled: typeof raw.relayFunctionalTestEnabled === 'boolean'
         ? raw.relayFunctionalTestEnabled
         : base.relayFunctionalTestEnabled,
@@ -156,28 +218,56 @@ export function selectedProductProfile(config: ProductDetectionConfig): ProductP
   return config.profiles[config.selectedType];
 }
 
-export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] {
+export function expectedProbeChannels(expectedProbeCount: number, configuredChannels?: ChannelKey[]): ChannelKey[] {
+  if (configuredChannels?.length) return normalizedChannels(configuredChannels, defaultActiveChannels('THREE_WAVELENGTH', expectedProbeCount));
+  if (expectedProbeCount === 2) return ['probe2', 'probe3'];
   const count = Math.max(1, Math.min(4, Math.floor(Number(expectedProbeCount) || 3)));
-  return (['probe1', 'probe2', 'probe3', 'probe4'] as ChannelKey[]).slice(0, count);
+  return CHANNEL_KEYS.slice(0, count);
 }
 
 /**
- * A dual-wavelength product must be analyzed as a real two-channel system,
- * rather than by removing P3 from a three-channel operator selection. If the
- * old selection was P2/P3, simple filtering would leave only P2 and make trend
- * agreement impossible. Explicitly use P1+P2 for noise/trend and P2/P1 for the
- * interference ratio. Three/four-probe products keep their configured rules;
- * the detector verdict separately checks every expected probe for no-data.
+ * Apply the selected product's physical-channel map to the quantitative analyzer.
+ * Real-hardware evidence for 90.22.09.15 dual-wavelength units shows that P2/P3 are
+ * the two optical channels while P1 remains near a fixed single-digit carrier value.
+ * Therefore a two-channel product must never be inferred as P1/P2 by array slicing.
+ *
+ * Raw absolute amplitude is still recorded for diagnostics. Unless a product profile
+ * explicitly opts in, it is not a product-NG criterion; the production noise rule is
+ * based on fluctuation/RMS after baseline removal.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
-  expectedProbeCount: number,
+  profileOrProbeCount: ProductProfileConfig | number,
 ): Partial<WaveformAnalysisConfig> | undefined {
-  if (!source || expectedProbeCount !== 2) return source;
+  if (!source) return source;
+
+  const profile = typeof profileOrProbeCount === 'number' ? undefined : profileOrProbeCount;
+  const expectedProbeCount = typeof profileOrProbeCount === 'number'
+    ? profileOrProbeCount
+    : profileOrProbeCount.expectedProbeCount;
+  const inferredType: ProductType = expectedProbeCount === 2 ? 'DUAL_WAVELENGTH' : 'THREE_WAVELENGTH';
+  const activeChannels = expectedProbeChannels(expectedProbeCount, profile?.activeChannels);
+  const noiseProbes = normalizedChannels(profile?.noiseProbes, activeChannels);
+  const consistencyProbes = normalizedChannels(profile?.consistencyProbes, activeChannels);
+  const interferenceRatio = normalizedRatio(
+    profile?.interferenceRatio,
+    defaultInterferenceRatio(inferredType, activeChannels),
+  );
+  const judgeNoiseAbsolute = profile?.judgeNoiseAbsolute === true;
+  const quality = source.quality
+    ? {
+      ...source.quality,
+      a: { ...source.quality.a, ...(judgeNoiseAbsolute ? {} : { maxNoiseAbsolute: 0 }) },
+      b: { ...source.quality.b, ...(judgeNoiseAbsolute ? {} : { maxNoiseAbsolute: 0 }) },
+    }
+    : source.quality;
+
   return {
     ...source,
-    noiseProbes: ['probe1', 'probe2'],
-    consistencyProbes: ['probe1', 'probe2'],
-    interferenceRatio: { numerator: 'probe2', denominator: 'probe1' },
+    ...(judgeNoiseAbsolute ? {} : { maxNoiseAbsolute: 0 }),
+    noiseProbes,
+    consistencyProbes,
+    interferenceRatio,
+    quality,
   };
 }
