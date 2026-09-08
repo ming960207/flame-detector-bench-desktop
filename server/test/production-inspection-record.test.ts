@@ -122,6 +122,17 @@ function precheck(relayEnabled = false) {
   } as any;
 }
 
+function relayEnabledProductConfig() {
+  return normalizeProductDetectionConfig({
+    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
+    selectedType: 'THREE_WAVELENGTH',
+    profiles: {
+      ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
+      THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },
+    },
+  });
+}
+
 test('record keeps code status separate and marks bench-external items as not applicable', () => {
   const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
   const record = buildProductionInspectionRecord({
@@ -149,15 +160,8 @@ test('record keeps code status separate and marks bench-external items as not ap
   assert.match(html, /不适用/);
 });
 
-test('enabled relay test gates the slot verdict independently', () => {
-  const productConfig = normalizeProductDetectionConfig({
-    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
-    selectedType: 'THREE_WAVELENGTH',
-    profiles: {
-      ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
-      THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },
-    },
-  });
+test('enabled relay test gates the slot verdict independently after valid internal evidence', () => {
+  const productConfig = relayEnabledProductConfig();
   const checked = precheck(true);
   checked.relayFunctionalTest.units[1].fault.verdict = 'FAIL';
   checked.relayFunctionalTest.units[1].fault.reasons = ['FAULT_RELAY_NOT_ACTUATED'];
@@ -174,21 +178,38 @@ test('enabled relay test gates the slot verdict independently', () => {
   assert.equal(record.conclusion, '不合格');
 });
 
-test('required relay test cannot pass when real relay evidence is missing', () => {
-  const productConfig = normalizeProductDetectionConfig({
-    ...DEFAULT_PRODUCT_DETECTION_CONFIG,
-    selectedType: 'THREE_WAVELENGTH',
-    profiles: {
-      ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles,
-      THREE_WAVELENGTH: { ...DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.THREE_WAVELENGTH, relayFunctionalTestEnabled: true },
-    },
-  });
+test('required relay test with missing evidence is not tested rather than product NG', () => {
+  const productConfig = relayEnabledProductConfig();
   const record = buildProductionInspectionRecord({
     batchId: 'batch-1', productConfig, precheck: precheck(false), detectorVerdict: detectorVerdict(), waveformAnalysis: analysis(),
     recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG, productionDate: Date.now(),
   });
-  assert.equal(record.products[0]?.fireAction.status, '不合格');
-  assert.equal(record.products[0]?.faultAction.status, '不合格');
-  assert.equal(record.products[0]?.verdict, '不合格');
-  assert.equal(record.conclusion, '不合格');
+  assert.equal(record.products[0]?.fireAction.status, '未检测');
+  assert.equal(record.products[0]?.faultAction.status, '未检测');
+  assert.equal(record.products[0]?.verdict, '未检测');
+  assert.equal(record.conclusion, '未检测');
+});
+
+test('TEST_INVALID relay evidence stays 未检测 and never turns a good product into NG', () => {
+  const productConfig = relayEnabledProductConfig();
+  const checked = precheck(true);
+  checked.relayFunctionalTest.verdict = 'TEST_INVALID';
+  for (const unit of checked.relayFunctionalTest.units) {
+    unit.verdict = 'TEST_INVALID';
+    unit.alarm.verdict = 'TEST_INVALID';
+    unit.alarm.reasons = ['ALARM_SIMULATION_INVALID:RELAY_SIMULATION_NOT_EFFECTIVE'];
+    unit.fault.verdict = 'TEST_INVALID';
+    unit.fault.reasons = ['FAULT_SKIPPED_AFTER_TEST_INVALID'];
+  }
+
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-1', productConfig, precheck: checked, detectorVerdict: detectorVerdict(), waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG, productionDate: Date.now(),
+  });
+
+  assert.equal(record.products[0]?.fireAction.status, '未检测');
+  assert.equal(record.products[0]?.faultAction.status, '未检测');
+  assert.equal(record.products[0]?.fireAction.source, 'NOT_TESTED');
+  assert.equal(record.products[0]?.verdict, '未检测');
+  assert.equal(record.conclusion, '未检测');
 });
