@@ -60,13 +60,27 @@ export interface MESPublicStatus {
 
 const DEFAULT_MES_BASE_URL = 'http://10.11.2.144:5051';
 const DEFAULT_OUTBOX_FILE = join(process.env.APP_DATA_DIR || process.cwd(), 'mes-upload-outbox.json');
+const REFERENCE_MES_CONFIG_FILE = 'D:\\code\\小工具\\MES对接\\relay-client\\mes_config.json';
 const MES_RETRY_INTERVAL_MS = 30_000;
 
+function referenceMESConfig(): { baseUrl?: string; apiKey?: string } {
+  try {
+    const source = JSON.parse(readFileSync(REFERENCE_MES_CONFIG_FILE, 'utf8')) as Record<string, unknown>;
+    return {
+      baseUrl: typeof source.mes_gateway === 'string' ? source.mes_gateway.trim() : undefined,
+      apiKey: typeof source.mes_api_key === 'string' ? source.mes_api_key.trim() : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function defaultMESConfig(): MESConfig {
+  const reference = referenceMESConfig();
   return {
     enabled: process.env.MES_ENABLED === 'true',
-    baseUrl: process.env.MES_BASE_URL || DEFAULT_MES_BASE_URL,
-    apiKey: process.env.MES_API_KEY || '',
+    baseUrl: process.env.MES_BASE_URL || reference.baseUrl || DEFAULT_MES_BASE_URL,
+    apiKey: process.env.MES_API_KEY || reference.apiKey || '',
     operatorName: process.env.MES_OPERATOR_NAME || '',
     requestTimeoutMs: 15_000,
   };
