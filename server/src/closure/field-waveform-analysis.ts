@@ -6,9 +6,11 @@ import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
 export type WaveformAnalysisPhase = 'IDLE' | 'NOISE' | 'INTERFERENCE' | 'COMPLETE';
 export type WaveformAnalysisVerdict = 'PASS' | 'FAIL' | 'PENDING';
 
-// M25.2 marks the PLC noise window, but the detector signal needs another
-// short settling interval before the upper computer starts baseline sampling.
-const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 5_000;
+// M25.2 marks the PLC noise window, but the detector signal needs an additional
+// 10-second settling interval before the upper computer starts baseline sampling.
+// The PLC window remains unchanged; this intentionally reduces effective noise
+// sampling by 5 seconds to keep the signal stable before measurement.
+const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 
 export interface DetectionSNRRange {
   min: number;
