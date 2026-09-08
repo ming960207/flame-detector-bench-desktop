@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { LabelPrintQueueStore } from '../src/label-print-queue.js';
-import type { ProductionInspectionRecord, ProductionInspectionProductResult } from '../src/production-inspection-record.js';
+import type { InspectionItemStatus, ProductionInspectionRecord, ProductionInspectionProductResult } from '../src/production-inspection-record.js';
 
-function product(slot: number, code: string | null, verdict: '合格' | '不合格', noiseValues = [150, 180]): ProductionInspectionProductResult {
+function product(slot: number, code: string | null, verdict: InspectionItemStatus, noiseValues = [150, 180]): ProductionInspectionProductResult {
   const pass = { status: '合格' as const, source: 'AUTO' as const };
   const defaultPass = { status: '合格' as const, source: 'DEFAULT_PASS' as const, reason: 'TEST' };
   return {
@@ -25,10 +25,15 @@ function product(slot: number, code: string | null, verdict: '合格' | '不合�
     highTemp: defaultPass,
     lowTemp: defaultPass,
     verdict,
-  };
+  } as ProductionInspectionProductResult;
 }
 
 function record(products: ProductionInspectionProductResult[]): ProductionInspectionRecord {
+  const conclusion: InspectionItemStatus = products.some((item) => item.verdict === '不合格')
+    ? '不合格'
+    : products.some((item) => item.verdict === '未检测')
+      ? '未检测'
+      : '合格';
   return {
     schemaVersion: 1,
     batchId: 'batch-label-1',
@@ -40,7 +45,7 @@ function record(products: ProductionInspectionProductResult[]): ProductionInspec
     formVersion: 'A/0',
     quantity: 6,
     products,
-    conclusion: products.some((item) => item.verdict === '不合格') ? '不合格' : '合格',
+    conclusion,
     generatedAt: Date.now(),
   };
 }
@@ -100,6 +105,26 @@ test('missing product code becomes BLOCKED without consuming the printable queue
   await store.markPrinted(first!.id, 'worker-a');
   const secondPrintable = await store.claimNext('worker-a');
   assert.equal(secondPrintable?.slot, 3, '编号缺失 D2 必须被跳过且不能阻塞后续槽位');
+});
+
+test('未检测/TEST_INVALID product result is blocked and cannot print PASS or NG label', async () => {
+  const { store } = await fixture();
+  const products = Array.from({ length: 6 }, (_, offset) => product(
+    offset + 1,
+    `CODE-${offset + 1}`,
+    offset === 0 ? '未检测' : '合格',
+  ));
+  const created = await store.enqueueProductionRecord(record(products), detectorVerdict());
+  assert.equal(created[0]?.verdict, '待判定');
+  assert.equal(created[0]?.status, 'BLOCKED');
+  assert.equal(created[0]?.isolation, false);
+  assert.equal(created[0]?.lastError, 'PRODUCT_RESULT_NOT_FINAL');
+
+  const firstPrintable = await store.claimNext('worker-a');
+  assert.equal(firstPrintable?.slot, 2, 'D1 未检测必须跳过，不能误打合格或 NG 标签');
+  const retried = await store.retry(created[0]!.id);
+  assert.equal(retried?.status, 'BLOCKED');
+  assert.equal(retried?.lastError, 'PRODUCT_RESULT_NOT_FINAL');
 });
 
 test('physical print failure pauses queue until explicit retry and printed label can be reprinted', async () => {
