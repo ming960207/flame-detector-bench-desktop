@@ -31,7 +31,7 @@ export const DEFAULT_RELAY_DIO_CONFIG: RelayDioConfig = Object.freeze({
   functionCode: 4,
   startAddress: 0,
   inputCount: 16,
-  requestTimeoutMs: 1000,
+  requestTimeoutMs: 1500,
 });
 
 export interface RelayFeedbackMapping {

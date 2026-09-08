@@ -6,6 +6,10 @@ import {
 } from '../src/relay-feedback-dio.js';
 import { DEFAULT_RELAY_DIO_CONFIG } from '../src/relay-functional-test.js';
 
+test('DIO feedback waits 1.5 seconds for a relay reply by default', () => {
+  assert.equal(DEFAULT_RELAY_DIO_CONFIG.requestTimeoutMs, 1500);
+});
+
 test('DIO Modbus TCP input source maps FC04 register values to X channels', async () => {
   const calls: Array<[string, number, number]> = [];
   const client: ModbusTcpClientLike = {
