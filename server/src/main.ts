@@ -19,9 +19,11 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
   if (config.closureMode === 'field') {
     // Install detector startup/recovery semantics before the field runtime creates
     // ProductAwareFlameDetectorService. Import order matters: the relay policy wraps
-    // the already-stabilized waveform watchdog implementation.
+    // the already-stabilized waveform watchdog implementation; the inspection policy
+    // then adds stage-level fresh-frame gating on top of the same service instance.
     await import('./modbus/flame-detector-waveform-startup-policy.js');
     await import('./product-aware-relay-verification-policy.js');
+    await import('./inspection-waveform-freshness-policy.js');
 
     const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
       import('./product-aware-field-runtime.js'),
