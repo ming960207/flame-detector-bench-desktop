@@ -41,7 +41,7 @@ export const SEND_MODE_BROADCAST_RETRY_DELAY_MS = 100;
 export const SEND_MODE_BROADCAST_RESPONSE_TIMEOUT_MS = 700;
 export const SEND_MODE_BROADCAST_ADDRESS = 0xFF;
 
-/** Build the raw RTU mode frame; continuous waveform startup uses FF broadcast. */
+/** Build the raw RTU mode frame; known devices must use their actual address. */
 export function buildSendModeFrame(address = SEND_MODE_BROADCAST_ADDRESS, mode = SEND_MODE_BROADCAST_VALUE): Buffer {
   const targetAddress = Number.isInteger(address) && address >= 1 && address <= 247
     ? address
