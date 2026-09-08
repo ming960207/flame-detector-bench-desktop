@@ -1,5 +1,5 @@
 export type RelayFunctionalTestMode = 'FAST_BATCH' | 'DIAGNOSTIC';
-export type RelayFunctionalTestVerdict = 'PASS' | 'FAIL' | 'SKIPPED' | 'PENDING';
+export type RelayFunctionalTestVerdict = 'PASS' | 'FAIL' | 'TEST_INVALID' | 'SKIPPED' | 'PENDING';
 export type RelayFunctionalTestPhase =
   | 'BASELINE'
   | 'ALARM_COMMAND'
