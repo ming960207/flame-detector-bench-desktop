@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { OfflineClosureApp } from './components/OfflineClosureApp';
 import { FieldProcessStatusApp } from './components/FieldProcessStatusApp';
 import { TestProgramApp } from './components/TestProgramApp';
+import './components/detector-status-lights-runtime';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
