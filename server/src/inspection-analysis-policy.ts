@@ -25,7 +25,7 @@ function gateNoiseCaptureUntilStable(
 ): FlameDetectorState {
   const internal = analysis as InternalAnalysis;
   if (internal.capturePhase !== 'NOISE') {
-    if (!allProductionUnitsReady(state)) readySince.delete(analysis);
+    readySince.delete(analysis);
     return state;
   }
 
