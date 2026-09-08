@@ -6,6 +6,7 @@ import { createServer, type Server } from 'node:net';
 import test from 'node:test';
 import { DetectorStartupTracker } from '../src/modbus/detector-startup.js';
 import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
+import { SEND_MODE_BROADCAST_FRAME_HEX } from '../src/modbus/flame-detector-device.js';
 import { calculateModbusCRC16 } from '../src/modbus/flame-data-decoder.js';
 import { normalizeFlameConfig } from '../src/closure/field-status-server.js';
 
@@ -178,7 +179,41 @@ async function listenModeServer(index: number, receivedAt: number[], requests: B
   return { server, port: address.port };
 }
 
-test('waveform handshake uses the configured detector address', async () => {
+function waveformFrame27(): Buffer {
+  const frame = Buffer.alloc(27);
+  frame[0] = 0x5A;
+  frame[1] = 0xA5;
+  for (let offset = 2; offset < 26; offset += 2) frame.writeInt16LE(offset, offset);
+  return frame;
+}
+
+async function listenWaveformServer(requests: Buffer[] = []): Promise<{ server: Server; port: number }> {
+  const expected = Buffer.from(SEND_MODE_BROADCAST_FRAME_HEX, 'hex');
+  const server = createServer((socket) => {
+    let buffer = Buffer.alloc(0);
+    let responded = false;
+    socket.on('data', (data) => {
+      requests.push(Buffer.from(data));
+      buffer = Buffer.concat([buffer, Buffer.from(data)]);
+      const offset = buffer.indexOf(expected);
+      if (responded || offset < 0) return;
+      responded = true;
+      socket.write(Buffer.concat([modeAck(), waveformFrame27()]));
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('TEST_SERVER_ADDRESS_UNAVAILABLE');
+  return { server, port: address.port };
+}
+
+test('waveform handshake uses the FF broadcast frame', async () => {
   const receivedAt: number[] = [];
   const requests: Buffer[] = [];
   const listener = await listenModeServer(0, receivedAt, requests);
@@ -197,7 +232,36 @@ test('waveform handshake uses the configured detector address', async () => {
     await service.connect();
     await service.startWaveformStreaming();
     assert.ok(requests.length > 0, 'the detector mode command was not sent');
-    assert.equal(requests[0]?.[0], 0x01);
+    assert.equal(requests[0]?.toString('hex').toUpperCase(), SEND_MODE_BROADCAST_FRAME_HEX);
+  } finally {
+    await service.disconnect();
+    await new Promise<void>((resolve) => listener.server.close(() => resolve()));
+  }
+});
+
+test('FF broadcast handshake reaches the TCP waveform decoder', async () => {
+  const requests: Buffer[] = [];
+  const listener = await listenWaveformServer(requests);
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: listener.port,
+    waveformModeSwitchLowerLimitGateEnabled: false,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: listener.port }],
+  }, {
+    deferWaveformUntilInspection: true,
+    lockPath: join(tmpdir(), `flame-detector-waveform-${randomUUID()}.lock`),
+  });
+
+  try {
+    await service.connect();
+    await service.startWaveformStreaming();
+    const deadline = Date.now() + 1_000;
+    while ((service.getCurrentState().units[0]?.historySampleTotal ?? 0) < 4 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(requests[0]?.subarray(0, 13).toString('hex').toUpperCase(), SEND_MODE_BROADCAST_FRAME_HEX);
+    assert.equal(service.getCurrentState().units[0]?.historySampleTotal, 4);
   } finally {
     await service.disconnect();
     await new Promise<void>((resolve) => listener.server.close(() => resolve()));

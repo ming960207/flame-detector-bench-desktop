@@ -940,7 +940,6 @@ export class FlameDetectorService extends EventEmitter {
     try {
       const device = this.getDevice(unit, client);
       await device.sendBroadcastSendMode({
-        address: unit.address,
         mode: sendMode,
         attempts: 1,
         retryDelayMs: 0,
