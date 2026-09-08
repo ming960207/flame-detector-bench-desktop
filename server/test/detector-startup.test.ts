@@ -155,10 +155,11 @@ function modeAck(): Buffer {
   return Buffer.concat([body, Buffer.from([crc & 0xFF, (crc >>> 8) & 0xFF])]);
 }
 
-async function listenModeServer(index: number, receivedAt: number[]): Promise<{ server: Server; port: number }> {
+async function listenModeServer(index: number, receivedAt: number[], requests: Buffer[] = []): Promise<{ server: Server; port: number }> {
   const server = createServer((socket) => {
     let acknowledged = false;
-    socket.on('data', () => {
+    socket.on('data', (data) => {
+      requests.push(Buffer.from(data));
       if (acknowledged) return;
       acknowledged = true;
       receivedAt[index] = Date.now();
@@ -176,6 +177,32 @@ async function listenModeServer(index: number, receivedAt: number[]): Promise<{ 
   if (!address || typeof address === 'string') throw new Error('TEST_SERVER_ADDRESS_UNAVAILABLE');
   return { server, port: address.port };
 }
+
+test('waveform handshake uses the configured detector address', async () => {
+  const receivedAt: number[] = [];
+  const requests: Buffer[] = [];
+  const listener = await listenModeServer(0, receivedAt, requests);
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: listener.port,
+    waveformModeSwitchLowerLimitGateEnabled: false,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: listener.port }],
+  }, {
+    deferWaveformUntilInspection: true,
+    lockPath: join(tmpdir(), `flame-detector-address-${randomUUID()}.lock`),
+  });
+
+  try {
+    await service.connect();
+    await service.startWaveformStreaming();
+    assert.ok(requests.length > 0, 'the detector mode command was not sent');
+    assert.equal(requests[0]?.[0], 0x01);
+  } finally {
+    await service.disconnect();
+    await new Promise<void>((resolve) => listener.server.close(() => resolve()));
+  }
+});
 
 test('six detector mode commands are issued concurrently instead of waiting for previous ACKs', async () => {
   const receivedAt: number[] = [];
