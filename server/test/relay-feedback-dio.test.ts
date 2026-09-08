@@ -4,7 +4,27 @@ import {
   DioModbusTcpInputSource,
   type ModbusTcpClientLike,
 } from '../src/relay-feedback-dio.js';
-import { DEFAULT_RELAY_DIO_CONFIG } from '../src/relay-functional-test.js';
+import {
+  DEFAULT_RELAY_DIO_CONFIG,
+  DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG,
+} from '../src/relay-functional-test.js';
+
+test('现场继电器测试默认参数与 DIO 接线一致', () => {
+  assert.deepEqual(DEFAULT_RELAY_DIO_CONFIG, {
+    host: '192.168.0.7',
+    port: 8234,
+    unitId: 1,
+    functionCode: 4,
+    startAddress: 0,
+    inputCount: 16,
+    requestTimeoutMs: 1500,
+  });
+  assert.equal(DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG.enabled, true);
+  assert.deepEqual(
+    DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG.mappings.map(({ alarmInputAddress, faultInputAddress }) => [alarmInputAddress, faultInputAddress]),
+    [['X1', 'X2'], ['X3', 'X4'], ['X5', 'X6'], ['X7', 'X8'], ['X9', 'X10'], ['X11', 'X12']],
+  );
+});
 
 test('DIO Modbus TCP input source maps FC04 register values to X channels', async () => {
   const calls: Array<[string, number, number]> = [];
@@ -40,7 +60,7 @@ test('DIO Modbus TCP input source maps FC04 register values to X channels', asyn
 });
 
 test('DIO Modbus TCP source returns an explicit configuration error without host', async () => {
-  const source = new DioModbusTcpInputSource(DEFAULT_RELAY_DIO_CONFIG);
+  const source = new DioModbusTcpInputSource({ ...DEFAULT_RELAY_DIO_CONFIG, host: '' });
 
   await assert.rejects(
     source.readInputs(),

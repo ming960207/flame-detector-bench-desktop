@@ -25,13 +25,13 @@ export interface RelayDioConfig {
 }
 
 export const DEFAULT_RELAY_DIO_CONFIG: RelayDioConfig = Object.freeze({
-  host: '',
-  port: 502,
+  host: '192.168.0.7',
+  port: 8234,
   unitId: 1,
   functionCode: 4,
   startAddress: 0,
   inputCount: 16,
-  requestTimeoutMs: 1000,
+  requestTimeoutMs: 1500,
 });
 
 export interface RelayFeedbackMapping {
@@ -95,8 +95,8 @@ export interface RelayFunctionalTestReport {
 }
 
 export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = Object.freeze({
-  // 未配置 DIO 反馈模块前保持关闭；现场完成 12 路映射后再打开总开关。
-  enabled: false,
+  // 默认使用现场 DIO 反馈模块和 12 路继电器映射。
+  enabled: true,
   dio: DEFAULT_RELAY_DIO_CONFIG,
   mode: 'FAST_BATCH',
   feedbackTimeoutMs: 2000,
@@ -105,8 +105,8 @@ export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = O
   sampleIntervalMs: 200,
   mappings: Array.from({ length: 6 }, (_, index) => ({
     detectorIndex: index + 1,
-    alarmInputAddress: '',
-    faultInputAddress: '',
+    alarmInputAddress: `X${index * 2 + 1}`,
+    faultInputAddress: `X${index * 2 + 2}`,
     alarmNormalLevel: false,
     faultNormalLevel: false,
   })),

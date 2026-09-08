@@ -7,7 +7,7 @@
       "expectedSoftwareVersion": "90.22.09.15",
       "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 2,
-      "relayFunctionalTestEnabled": false,
+      "relayFunctionalTestEnabled": true,
       "productCodeRule": {
         "enabled": true,
         "productNameCode": "4102",
