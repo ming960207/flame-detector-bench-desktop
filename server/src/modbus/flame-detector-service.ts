@@ -58,8 +58,7 @@ const AUTO_TEST_MAX_ATTEMPTS = 4;
 const WAVEFORM_STALE_TIMEOUT_MS = 10000;
 const WAVEFORM_STATE_BROADCAST_INTERVAL_MS = 50;
 const PRECHECK_DRAIN_DELAY_MS = 150;
-const READY_BARRIER_TIMEOUT_MS = 15_000;
-const READY_BARRIER_POLL_INTERVAL_MS = 50;
+const STARTUP_DIAGNOSTIC_TIMEOUT_MS = 15_000;
 const PROTOCOL_DIAGNOSTIC_FRAME_LIMIT = 5;
 
 interface SocketBinding {
@@ -1315,7 +1314,7 @@ export class FlameDetectorService extends EventEmitter {
       .sort((left, right) => left.index - right.index);
   }
 
-  getReadyReport(requiredSlots = this.config.units.filter((unit) => unit.enabled).map((unit) => unit.index), timeoutMs = READY_BARRIER_TIMEOUT_MS): DetectorReadyReport {
+  getReadyReport(requiredSlots = this.config.units.filter((unit) => unit.enabled).map((unit) => unit.index), timeoutMs = STARTUP_DIAGNOSTIC_TIMEOUT_MS): DetectorReadyReport {
     const startedAt = Math.min(
       ...requiredSlots.map((index) => this.startupTrackers.get(index)?.snapshot().powerOnAt ?? Date.now()),
       Date.now(),
@@ -1367,22 +1366,6 @@ export class FlameDetectorService extends EventEmitter {
     }
     void this.initializeConnectedTcpUnits();
     this.broadcastStateNow();
-  }
-
-  async waitForReady(options: { requiredSlots?: number[]; timeoutMs?: number } = {}): Promise<DetectorReadyReport> {
-    const requiredSlots = options.requiredSlots?.length
-      ? [...new Set(options.requiredSlots.filter((index) => Number.isInteger(index) && index >= 1 && index <= 6))]
-      : this.config.units.filter((unit) => unit.enabled).map((unit) => unit.index);
-    const timeoutMs = Number.isFinite(options.timeoutMs) && Number(options.timeoutMs) > 0
-      ? Math.floor(Number(options.timeoutMs))
-      : READY_BARRIER_TIMEOUT_MS;
-    const startedAt = Date.now();
-    while (!this.disposed) {
-      const report = this.getReadyReport(requiredSlots, timeoutMs);
-      if (report.ready) return { ...report, startedAt };
-      await new Promise((resolve) => setTimeout(resolve, READY_BARRIER_POLL_INTERVAL_MS));
-    }
-    return { ...this.getReadyReport(requiredSlots, timeoutMs), ready: false, startedAt, completedAt: Date.now() };
   }
 
   isConnected(): boolean { return this.isDataStreamConnected(); }

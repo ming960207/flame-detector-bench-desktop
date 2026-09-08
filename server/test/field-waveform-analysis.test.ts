@@ -96,6 +96,33 @@ test('noise capture waits 10 seconds for signal stabilization before opening', (
   assert.equal(snapshot.noiseStartedAt, 11_000);
 });
 
+test('a ready detector contributes noise samples while another detector has no signal', () => {
+  const analysis = new FieldWaveformAnalysis();
+  const samples = [
+    { probe1: 10, probe2: 20, probe3: 30 },
+    { probe1: 12, probe2: 22, probe3: 32 },
+  ];
+  const unavailable = {
+    ...detectorUnit(11_100, []),
+    online: false,
+    sourceReady: false,
+    syncOk: false,
+  };
+  const ready = {
+    ...detectorUnit(11_100, samples),
+    index: 2,
+    address: 2,
+    address_r: 2,
+  };
+
+  analysis.observeProcess(status(1_000));
+  analysis.observeProcess(status(11_000));
+  analysis.observeDetectors({ units: [unavailable, ready], onlineCount: 1, fireCount: 0, faultCount: 0, timestamp: 11_100 });
+
+  const readyResult = analysis.snapshot().units.find((unit) => unit.index === 2);
+  assert.equal(readyResult?.noiseSampleCount, samples.length);
+});
+
 test('noise window diagnostics log boundaries, gaps, and compact probe summaries', () => {
   const logs: string[] = [];
   const analysis = new FieldWaveformAnalysis(undefined, (message) => logs.push(message));
