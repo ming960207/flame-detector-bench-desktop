@@ -26,9 +26,13 @@ function sleep(ms: number): Promise<void> {
 
 function stageStarts(previous: PLCProcessStatus | undefined, current: PLCProcessStatus): string[] {
   const result: string[] = [];
+  // Heat recovery is tied to the actual moving-heat-source bit because HEAT also
+  // contains the earlier stabilization/noise window. FLASH/EMC use the normalized
+  // processStage, which is the authoritative state already consumed by the analyzer
+  // and avoids guessing a deployment-specific M-bit for EMC.
   if (current.io?.steps?.stepM10_4 === true && previous?.io?.steps?.stepM10_4 !== true) result.push('heat');
-  if (current.io?.steps?.stepM11_0 === true && previous?.io?.steps?.stepM11_0 !== true) result.push('flash');
-  if (current.io?.steps?.stepM11_2 === true && previous?.io?.steps?.stepM11_2 !== true) result.push('emc');
+  if (current.processStage === 'FLASH' && previous?.processStage !== 'FLASH') result.push('flash');
+  if (current.processStage === 'EMC' && previous?.processStage !== 'EMC') result.push('emc');
   return result;
 }
 
