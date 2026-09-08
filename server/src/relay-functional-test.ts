@@ -108,7 +108,7 @@ export const DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG: RelayFunctionalTestConfig = O
     alarmInputAddress: `X${index * 2 + 1}`,
     faultInputAddress: `X${index * 2 + 2}`,
     alarmNormalLevel: false,
-    faultNormalLevel: false,
+    faultNormalLevel: true,
   })),
 });
 

@@ -324,42 +324,42 @@
         "alarmInputAddress": "X1",
         "faultInputAddress": "X2",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       },
       {
         "detectorIndex": 2,
         "alarmInputAddress": "X3",
         "faultInputAddress": "X4",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       },
       {
         "detectorIndex": 3,
         "alarmInputAddress": "X5",
         "faultInputAddress": "X6",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       },
       {
         "detectorIndex": 4,
         "alarmInputAddress": "X7",
         "faultInputAddress": "X8",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       },
       {
         "detectorIndex": 5,
         "alarmInputAddress": "X9",
         "faultInputAddress": "X10",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       },
       {
         "detectorIndex": 6,
         "alarmInputAddress": "X11",
         "faultInputAddress": "X12",
         "alarmNormalLevel": false,
-        "faultNormalLevel": false
+        "faultNormalLevel": true
       }
     ]
   },

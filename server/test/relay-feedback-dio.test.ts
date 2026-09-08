@@ -24,6 +24,8 @@ test('现场继电器测试默认参数与 DIO 接线一致', () => {
     DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG.mappings.map(({ alarmInputAddress, faultInputAddress }) => [alarmInputAddress, faultInputAddress]),
     [['X1', 'X2'], ['X3', 'X4'], ['X5', 'X6'], ['X7', 'X8'], ['X9', 'X10'], ['X11', 'X12']],
   );
+  assert.equal(DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG.mappings.every((mapping) => mapping.alarmNormalLevel === false), true);
+  assert.equal(DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG.mappings.every((mapping) => mapping.faultNormalLevel === true), true);
 });
 
 test('DIO Modbus TCP input source maps FC04 register values to X channels', async () => {

@@ -244,10 +244,6 @@ export interface FieldWaveformAnalysisSnapshot {
   updatedAt: number;
   thresholds: WaveformAnalysisConfig;
   units: WaveformAnalysisUnitResult[];
-  detectorStartupBarrier?: {
-    ready: boolean;
-    failureReason?: string;
-  };
 }
 
 const CHANNEL_KEYS: ChannelKey[] = ['probe1', 'probe2', 'probe3', 'probe4'];
@@ -658,10 +654,6 @@ export class FieldWaveformAnalysis {
   private noiseCompleted = false;
   private noiseNextTrendLogAt: number | null = null;
   private automaticRunActive = false;
-  private detectorStartupReady = true;
-  private detectorStartupFailureReason: string | undefined;
-  private detectorStartupBarrierConfigured = false;
-  private readonly startupCapturePrimed = new Set<number>();
 
   constructor(config?: Partial<WaveformAnalysisConfig>, logger?: WaveformAnalysisLogger) {
     this.config = normalizeConfig(config);
@@ -723,18 +715,6 @@ export class FieldWaveformAnalysis {
       ...config,
       quality: normalizeDetectionQualityConfig(config?.quality, this.config.quality),
     });
-  }
-
-  /**
-   * Formal production calls this at batch start and releases the gate only after
-   * every required detector has completed mode switching and channel sync.
-   */
-  setDetectorStartupBarrier(ready: boolean, failureReason?: string): void {
-    this.detectorStartupBarrierConfigured = true;
-    this.detectorStartupReady = ready;
-    this.detectorStartupFailureReason = ready ? undefined : failureReason;
-    if (!ready) this.startupCapturePrimed.clear();
-    this.updatedAt = Date.now();
   }
 
   observeProcess(status: PLCProcessStatus): void {
@@ -839,7 +819,6 @@ export class FieldWaveformAnalysis {
         || !unit.online
         || !unit.sourceReady
         || !unit.syncOk
-        || !this.detectorStartupReady
       ) {
         if (capturingNoise) accumulator.noiseRejectedFrameCount += 1;
         continue;
@@ -855,11 +834,6 @@ export class FieldWaveformAnalysis {
       const eventKey = `${state.timestamp}:${unit.lastUpdate}:${samples.length}:${sampleFingerprint(samples)}`;
       if (eventKey === accumulator.lastEventKey) continue;
       accumulator.lastEventKey = eventKey;
-      if (this.detectorStartupBarrierConfigured && !this.startupCapturePrimed.has(unit.index)) {
-        this.startupCapturePrimed.add(unit.index);
-        if (capturingNoise) accumulator.noiseRejectedFrameCount += 1;
-        continue;
-      }
       if (this.capturePhase === 'NOISE') {
         accumulator.noiseSamples.push(...samples);
         accumulator.noiseRawSamples.push(...capturedRawSamples);
@@ -922,10 +896,6 @@ export class FieldWaveformAnalysis {
       updatedAt: this.updatedAt,
       thresholds: { ...this.config },
       units,
-      detectorStartupBarrier: {
-        ready: this.detectorStartupReady,
-        ...(this.detectorStartupFailureReason ? { failureReason: this.detectorStartupFailureReason } : {}),
-      },
     };
   }
 
@@ -945,9 +915,6 @@ export class FieldWaveformAnalysis {
     this.noiseWindowOpenedAt = null;
     this.noiseCompleted = false;
     this.noiseNextTrendLogAt = null;
-    this.detectorStartupReady = true;
-    this.detectorStartupFailureReason = undefined;
-    this.startupCapturePrimed.clear();
     this.startedAt = startedAt;
     for (let index = 1; index <= 6; index += 1) this.units.set(index, newAccumulator(index));
   }
