@@ -232,8 +232,9 @@ export function expectedProbeChannels(expectedProbeCount: number, configuredChan
  * Therefore a two-channel product must never be inferred as P1/P2 by array slicing.
  *
  * Raw absolute amplitude is still recorded for diagnostics. Unless a product profile
- * explicitly opts in, it is not a product-NG criterion; the production noise rule is
- * based on fluctuation/RMS after baseline removal.
+ * explicitly opts in, it is not a product-NG criterion. Noise has no lower reject
+ * bound: a quieter detector is better, so production only enforces the configured
+ * upper fluctuation/RMS limits after baseline removal.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
@@ -264,6 +265,7 @@ export function productAwareWaveformConfig(
 
   return {
     ...source,
+    minNoiseRms: 0,
     ...(judgeNoiseAbsolute ? {} : { maxNoiseAbsolute: 0 }),
     noiseProbes,
     consistencyProbes,
