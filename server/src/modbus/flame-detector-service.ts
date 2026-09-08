@@ -1416,6 +1416,9 @@ export class FlameDetectorService extends EventEmitter {
       this.stopBroadcastModeRequests(unit.index);
       this.broadcastModeRetryAttempts.delete(unit.index);
       this.broadcastModeUnits.delete(unit.index);
+      this.pushBuffers.delete(unit.index);
+      this.modbusPushBuffers.delete(unit.index);
+      this.lastPushAt.delete(unit.index);
       const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
       state.startup = startup;
       if (!this.modeRetryAllowed()) state.startup = tracker.markWaitingForLowerLimit();

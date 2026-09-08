@@ -4,7 +4,7 @@
     "DUAL_WAVELENGTH": {
       "label": "双波长",
       "productModel": "GHT-1050-02",
-      "expectedSoftwareVersion": "",
+      "expectedSoftwareVersion": "90.22.09.15",
       "skipSoftwareVersionCheck": false,
       "expectedProbeCount": 2,
       "relayFunctionalTestEnabled": false,

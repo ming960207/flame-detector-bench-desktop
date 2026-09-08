@@ -220,6 +220,7 @@ test('product normalization accepts configured probe counts', () => {
 test('product model defaults come from the profile configuration and default to GHT-1050-02', () => {
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.selectedType, 'DUAL_WAVELENGTH');
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.productModel, 'GHT-1050-02');
+  assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.expectedSoftwareVersion, '90.22.09.15');
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.expectedProbeCount, 2);
 });
 

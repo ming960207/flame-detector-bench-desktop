@@ -109,6 +109,32 @@ test('disabling the lower-limit gate allows immediate waveform mode initializati
   await service.disconnect();
 });
 
+test('preparing a new waveform batch drops stale parser bytes and last-push state', () => {
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: 31_001,
+    waveformModeSwitchLowerLimitGateEnabled: false,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
+  }, {
+    deferWaveformUntilInspection: true,
+  });
+  const internal = service as unknown as {
+    pushBuffers: Map<number, Buffer>;
+    modbusPushBuffers: Map<number, Buffer>;
+    lastPushAt: Map<number, number>;
+  };
+  internal.pushBuffers.set(1, Buffer.from([0x5A]));
+  internal.modbusPushBuffers.set(1, Buffer.from([1, 0x03]));
+  internal.lastPushAt.set(1, Date.now());
+
+  service.prepareWaveformStartup('batch-reset-parser');
+
+  assert.equal(internal.pushBuffers.has(1), false);
+  assert.equal(internal.modbusPushBuffers.has(1), false);
+  assert.equal(internal.lastPushAt.has(1), false);
+});
+
 test('lower-limit gate setting survives flame configuration normalization', () => {
   const current = {
     mode: 'TCP' as const,
