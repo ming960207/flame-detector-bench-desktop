@@ -12,6 +12,7 @@ import {
   autoStatus,
   fixedNotApplicableItems,
   measuredValue,
+  notTested,
   recordConclusion,
   relayTestNotApplicable,
   type InspectionItemStatus,
@@ -19,6 +20,7 @@ import {
   type ProductionInspectionRecord,
   type ProductionInspectionRecordConfig,
 } from './production-inspection-record.js';
+import type { RelayActionResult } from './relay-functional-test.js';
 
 export interface ProductionInspectionRecordBuildInput {
   batchId: string;
@@ -32,6 +34,14 @@ export interface ProductionInspectionRecordBuildInput {
 
 function reasonText(reasons: string[]): string | undefined {
   return reasons.length > 0 ? reasons.join(';') : undefined;
+}
+
+function relayActionStatus(enabled: boolean, action: RelayActionResult | undefined, label: 'ALARM' | 'FAULT') {
+  if (!enabled) return relayTestNotApplicable();
+  if (!action || action.verdict === 'TEST_INVALID' || action.verdict === 'PENDING' || action.verdict === 'SKIPPED') {
+    return notTested(reasonText(action?.reasons ?? []) ?? `${label}_RELAY_TEST_INVALID_OR_MISSING`);
+  }
+  return autoStatus(action.verdict === 'PASS', reasonText(action.reasons));
 }
 
 function stageInterferencePassed(snapshot: FieldWaveformAnalysisSnapshot, index: number): boolean {
@@ -81,12 +91,10 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
     const codeItem = allocation?.items.find((item) => item.slot === slot);
     const fixed = fixedNotApplicableItems();
 
-    const fireAction = profile.relayFunctionalTestEnabled
-      ? autoStatus(relayUnit?.alarm.verdict === 'PASS', reasonText(relayUnit?.alarm.reasons ?? ['RELAY_RESULT_MISSING']))
-      : relayTestNotApplicable();
-    const faultAction = profile.relayFunctionalTestEnabled
-      ? autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
-      : relayTestNotApplicable();
+    // TEST_INVALID means the bench could not establish valid relay-test evidence.
+    // It must be recorded as 未检测, never converted into a measured product NG.
+    const fireAction = relayActionStatus(profile.relayFunctionalTestEnabled, relayUnit?.alarm, 'ALARM');
+    const faultAction = relayActionStatus(profile.relayFunctionalTestEnabled, relayUnit?.fault, 'FAULT');
 
     const amplitudes = amplitudeValues(input.waveformAnalysis, slot, profile.expectedProbeCount);
     const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot, profile.expectedProbeCount);
