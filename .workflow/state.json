@@ -1,0 +1,21 @@
+{
+  "version": "3.1",
+  "project_name": "火焰探测器检测台：上位机界面原型版",
+  "status": "idle",
+  "current_milestone": null,
+  "current_task_id": null,
+  "milestones": [],
+  "_milestone_schema": "{ id, name, type: 'standard'|'adhoc', status, phases[], phase_slugs{}, roadmap_ref, created_at }",
+  "artifacts": [],
+  "last_updated": "2026-09-08T00:00:00+08:00",
+  "accumulated_context": {
+    "key_decisions": [
+      "以 brownfield 方式初始化 workflow，保留现有代码和运行边界",
+      "使用本地 .workflow/ 作为项目知识、规范和状态入口"
+    ],
+    "blockers": [],
+    "deferred": []
+  },
+  "transition_history": [],
+  "milestone_history": []
+}
