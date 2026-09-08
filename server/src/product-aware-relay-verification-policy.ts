@@ -1,4 +1,5 @@
 import { ProductAwareFlameDetectorService } from './product-aware-flame-detector-service.js';
+import { RelayFunctionalTestCoordinator } from './relay-functional-test-coordinator.js';
 import {
   alarmFaultSimulationMatches,
   readAlarmFaultSimulation,
@@ -12,9 +13,13 @@ import {
 } from './modbus/flame-detector-waveform-control-window.js';
 import type { FlameDetectorDevice } from './modbus/flame-detector-device.js';
 import type { ProductPrecheckReport } from './product-profile.js';
-import type { RelayFunctionalTestReport, RelayFunctionalTestUnitResult } from './relay-functional-test.js';
+import type {
+  RelayFunctionalTestConfig,
+  RelayFunctionalTestReport,
+} from './relay-functional-test.js';
 
 const PATCHED = Symbol.for('product-aware-relay-verification-policy-patched');
+const BASELINE_PATCHED = Symbol.for('relay-functional-test-runtime-baseline-policy-patched');
 type InternalService = Record<PropertyKey, any>;
 
 function hex16(value: number): string {
@@ -71,6 +76,69 @@ function stripInvalidRelayFailureReasons(report: ProductPrecheckReport): void {
     );
   }
   report.verdict = report.units.length > 0 && report.units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL';
+}
+
+/**
+ * 现场 DIO 的 0/1 是输入模块原始电平，不等于“继电器正常/动作”。
+ *
+ * 旧逻辑依赖配置中的 alarmNormalLevel/faultNormalLevel；一旦 NO/NC、失电安全接法
+ * 或某个槽位接线极性不同，就会把正常高电平误判成 ACTIVE_AT_BASELINE。
+ * 这里在每次继电器功能检测真正开始前读取一次本批 DIO 原始状态，并把它作为
+ * 本次运行期 baseline。后续原协调器仍使用 relayInputIsActive()，但它比较的是
+ * “当前原始电平 != 本批 baseline”，因此：
+ *   - 动作：相对 baseline 发生变化；
+ *   - 对侧继电器正常：保持 baseline；
+ *   - 复位：必须回到 baseline。
+ *
+ * baseline 只修改当前进程内的运行期 config，不写回 system-config.json，下一批会重新学习。
+ */
+function patchRelayRuntimeBaseline(): void {
+  const proto = RelayFunctionalTestCoordinator.prototype as unknown as InternalService;
+  if (proto[BASELINE_PATCHED]) return;
+  proto[BASELINE_PATCHED] = true;
+
+  const originalRun = proto.run;
+  proto.run = async function runWithRuntimeDioBaseline(
+    this: InternalService,
+    batchId: string | null = null,
+  ): Promise<RelayFunctionalTestReport> {
+    const relayConfig = this.config as RelayFunctionalTestConfig | undefined;
+    const feedback = this.feedback as { readInputs?: () => Record<string, boolean> | undefined | Promise<Record<string, boolean> | undefined> } | undefined;
+
+    if (relayConfig?.enabled && feedback?.readInputs) {
+      try {
+        const inputs = await feedback.readInputs();
+        if (inputs) {
+          for (const mapping of relayConfig.mappings) {
+            const configuredAlarm = mapping.alarmNormalLevel;
+            const configuredFault = mapping.faultNormalLevel;
+            const alarmRaw = inputs[mapping.alarmInputAddress];
+            const faultRaw = inputs[mapping.faultInputAddress];
+
+            if (typeof alarmRaw === 'boolean') mapping.alarmNormalLevel = alarmRaw;
+            if (typeof faultRaw === 'boolean') mapping.faultNormalLevel = faultRaw;
+
+            const alarmText = typeof alarmRaw === 'boolean' ? (alarmRaw ? 1 : 0) : '?';
+            const faultText = typeof faultRaw === 'boolean' ? (faultRaw ? 1 : 0) : '?';
+            console.log(
+              `[继电器检测][BASELINE_AUTO][D${mapping.detectorIndex}] `
+              + `alarm=${mapping.alarmInputAddress || '-'} baselineRaw=${alarmText} configuredNormal=${configuredAlarm ? 1 : 0}; `
+              + `fault=${mapping.faultInputAddress || '-'} baselineRaw=${faultText} configuredNormal=${configuredFault ? 1 : 0}; `
+              + '本批后续动作/复位均按相对 baseline 变化判定。',
+            );
+          }
+        } else {
+          console.warn('[继电器检测][BASELINE_AUTO] DIO 未返回输入，本次由协调器原有基线校验继续处理。');
+        }
+      } catch (error) {
+        console.warn(
+          `[继电器检测][BASELINE_AUTO] 预读 DIO 基线失败，本次由协调器原有错误链继续处理：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    return originalRun.call(this, batchId) as Promise<RelayFunctionalTestReport>;
+  };
 }
 
 function patchRuntime(): void {
@@ -179,6 +247,7 @@ function patchRuntime(): void {
   };
 }
 
+patchRelayRuntimeBaseline();
 patchRuntime();
 
 export {};
