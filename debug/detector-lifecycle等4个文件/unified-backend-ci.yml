@@ -1,0 +1,50 @@
+name: Unified backend CI
+
+on:
+  push:
+    branches:
+      - refactor/unified-backend
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Restore Rollup Linux optional dependency
+        run: npm install --no-save --package-lock=false @rollup/rollup-linux-x64-gnu@4.53.3
+
+      - name: Install server dependencies
+        run: npm ci --prefix server
+
+      - name: Validate Electron main process
+        run: node --check desktop/main.cjs
+
+      - name: Build unified server
+        run: npm run build:server
+
+      - name: Test product precheck rules
+        run: npm run test:product --prefix server
+
+      - name: Build desktop web
+        run: npm run build:web

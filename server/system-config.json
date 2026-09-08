@@ -301,5 +301,137 @@
     "lineId": "LINE_A1",
     "deviceId": "flame_detector_bench"
   },
-  "lastUpdated": 1787538793146
+  "lastUpdated": 1788855911475,
+  "relayFunctionalTestConfig": {
+    "enabled": true,
+    "dio": {
+      "host": "192.168.0.7",
+      "port": 8234,
+      "unitId": 1,
+      "functionCode": 4,
+      "startAddress": 0,
+      "inputCount": 16,
+      "requestTimeoutMs": 1500
+    },
+    "mode": "FAST_BATCH",
+    "feedbackTimeoutMs": 2000,
+    "resetTimeoutMs": 3000,
+    "stableSamples": 3,
+    "sampleIntervalMs": 200,
+    "mappings": [
+      {
+        "detectorIndex": 1,
+        "alarmInputAddress": "X1",
+        "faultInputAddress": "X2",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      },
+      {
+        "detectorIndex": 2,
+        "alarmInputAddress": "X3",
+        "faultInputAddress": "X4",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      },
+      {
+        "detectorIndex": 3,
+        "alarmInputAddress": "X5",
+        "faultInputAddress": "X6",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      },
+      {
+        "detectorIndex": 4,
+        "alarmInputAddress": "X7",
+        "faultInputAddress": "X8",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      },
+      {
+        "detectorIndex": 5,
+        "alarmInputAddress": "X9",
+        "faultInputAddress": "X10",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      },
+      {
+        "detectorIndex": 6,
+        "alarmInputAddress": "X11",
+        "faultInputAddress": "X12",
+        "alarmNormalLevel": false,
+        "faultNormalLevel": false
+      }
+    ]
+  },
+  "productionInspectionRecordConfig": {
+    "inspector": "",
+    "standard": "GB15631－2008",
+    "formNumber": "WUTOS/IMS-JL836",
+    "formVersion": "A/0"
+  },
+  "productDetectionConfig": {
+    "selectedType": "DUAL_WAVELENGTH",
+    "profiles": {
+      "DUAL_WAVELENGTH": {
+        "label": "双波长",
+        "productModel": "GHT-1050-02",
+        "expectedSoftwareVersion": "90.22.09.15",
+        "skipSoftwareVersionCheck": false,
+        "expectedProbeCount": 2,
+        "relayFunctionalTestEnabled": true,
+        "productCodeRule": {
+          "enabled": true,
+          "productNameCode": "4102",
+          "softwareVersionCode": "03",
+          "hardwareVersionCode": "02",
+          "producerCode": "01"
+        }
+      },
+      "THREE_WAVELENGTH": {
+        "label": "三波长",
+        "productModel": "GHT-1050-03",
+        "expectedSoftwareVersion": "",
+        "skipSoftwareVersionCheck": false,
+        "expectedProbeCount": 3,
+        "relayFunctionalTestEnabled": false,
+        "productCodeRule": {
+          "enabled": true,
+          "productNameCode": "4103",
+          "softwareVersionCode": "01",
+          "hardwareVersionCode": "01",
+          "producerCode": "01"
+        }
+      },
+      "FOUR_WAVELENGTH": {
+        "label": "四波长",
+        "productModel": "GHT-1050-04",
+        "expectedSoftwareVersion": "",
+        "skipSoftwareVersionCheck": false,
+        "expectedProbeCount": 4,
+        "relayFunctionalTestEnabled": false,
+        "productCodeRule": {
+          "enabled": true,
+          "productNameCode": "",
+          "softwareVersionCode": "01",
+          "hardwareVersionCode": "01",
+          "producerCode": "01"
+        }
+      },
+      "IMAGE_DETECTOR": {
+        "label": "图探型",
+        "productModel": "GHT-1050-05",
+        "expectedSoftwareVersion": "",
+        "skipSoftwareVersionCheck": false,
+        "expectedProbeCount": 3,
+        "relayFunctionalTestEnabled": false,
+        "productCodeRule": {
+          "enabled": true,
+          "productNameCode": "",
+          "softwareVersionCode": "01",
+          "hardwareVersionCode": "01",
+          "producerCode": "01"
+        }
+      }
+    }
+  }
 }
