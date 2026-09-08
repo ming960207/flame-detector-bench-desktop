@@ -23,7 +23,7 @@
   border: 1px solid rgba(50, 126, 174, .28) !important;
   border-radius: 999px !important;
   background: rgba(2, 18, 34, .78) !important;
-  box-shadow: 0 0 8px rgba(0, 130, 220, .18) !important;
+  box-shadow: none !important;
   pointer-events: none !important;
   font-size: 0 !important;
   line-height: 0 !important;
