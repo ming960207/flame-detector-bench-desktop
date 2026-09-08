@@ -128,8 +128,10 @@ function resetLatchedLights(): void {
 }
 
 function updateRelaySession(active: boolean, batchId: string | null): void {
-  const startsNewSession = active && (!relaySessionActive || (batchId !== null && batchId !== relaySessionBatchId));
-  if (startsNewSession) resetLatchedLights();
+  // Keep the current test's latches after active becomes false. Clear them only
+  // when the next test starts (active rising edge) or a new test batch appears.
+  const startsNewTest = active && (!relaySessionActive || batchId !== relaySessionBatchId);
+  if (startsNewTest) resetLatchedLights();
   if (active) relaySessionBatchId = batchId;
   relaySessionActive = active;
 }
