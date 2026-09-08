@@ -17,6 +17,36 @@ type StatusLightPayload = {
   units: StatusLightUnit[];
 };
 
+type RelayActionEvidence = {
+  commandAccepted?: boolean;
+  internalStateReached?: boolean;
+  physicalStateReached?: boolean;
+  internalRecovered?: boolean;
+  physicalRecovered?: boolean;
+  reasons?: string[];
+};
+
+type RelayUnitEvidence = {
+  detectorIndex: number;
+  baseline?: {
+    alarmPhysical?: boolean | null;
+    faultPhysical?: boolean | null;
+  };
+  alarm?: RelayActionEvidence;
+  fault?: RelayActionEvidence;
+};
+
+type ProductConfigPayload = {
+  precheck?: {
+    batchId?: string | null;
+    verdict?: 'PASS' | 'FAIL' | 'PENDING';
+    relayFunctionalTest?: {
+      phase?: string;
+      units?: RelayUnitEvidence[];
+    } | null;
+  } | null;
+};
+
 type LightKind = 'fire' | 'fault' | 'alarm-relay' | 'fault-relay';
 
 const LIGHTS: ReadonlyArray<{ kind: LightKind; title: string; field: keyof Pick<StatusLightUnit, 'fire' | 'fault' | 'alarmRelay' | 'faultRelay'> }> = [
@@ -121,6 +151,8 @@ let requestBusy = false;
 let lastSuccessAt = 0;
 let relaySessionActive = false;
 let relaySessionBatchId: string | null = null;
+let cachedProductConfig: ProductConfigPayload | null = null;
+let lastProductConfigFetchAt = 0;
 const latchedLightKinds = new Map<number, Set<LightKind>>();
 
 function resetLatchedLights(): void {
@@ -150,13 +182,68 @@ function isLatched(index: number, kind: LightKind): boolean {
   return latchedLightKinds.get(index)?.has(kind) ?? false;
 }
 
+function relayEvidenceObserved(unit: RelayUnitEvidence): boolean {
+  if (unit.baseline?.alarmPhysical != null || unit.baseline?.faultPhysical != null) return true;
+  return Boolean(
+    unit.alarm?.physicalStateReached
+    || unit.alarm?.physicalRecovered
+    || unit.fault?.physicalStateReached
+    || unit.fault?.physicalRecovered,
+  );
+}
+
+function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductConfigPayload | null): StatusLightPayload {
+  const precheck = configPayload?.precheck;
+  const evidenceUnits = precheck?.relayFunctionalTest?.units;
+  if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
+
+  const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.detectorIndex, unit]));
+  return {
+    ...payload,
+    active: payload.active || precheck?.verdict === 'PENDING',
+    batchId: payload.batchId ?? precheck?.batchId ?? null,
+    units: payload.units.map((unit) => {
+      const evidence = evidenceByIndex.get(unit.index);
+      if (!evidence) return unit;
+      const relayObserved = unit.relayObserved || relayEvidenceObserved(evidence);
+      return {
+        ...unit,
+        // The formal relay test deliberately resets every detector after each
+        // action. Therefore current live fire/fault can already be false when the
+        // UI next polls. Preserve successful internal/physical observations as
+        // evidence and let the existing LED latch keep them visible for the batch.
+        fire: unit.fire || Boolean(evidence.alarm?.internalStateReached),
+        fault: unit.fault || Boolean(evidence.fault?.internalStateReached),
+        alarmRelay: unit.alarmRelay || Boolean(evidence.alarm?.physicalStateReached),
+        faultRelay: unit.faultRelay || Boolean(evidence.fault?.physicalStateReached),
+        relayObserved,
+      };
+    }),
+  };
+}
+
+async function productConfigEvidence(): Promise<ProductConfigPayload | null> {
+  const now = Date.now();
+  if (cachedProductConfig && now - lastProductConfigFetchAt < 500) return cachedProductConfig;
+  try {
+    const response = await fetch(`${backendHttpUrl()}/api/product-config`, { cache: 'no-store' });
+    if (!response.ok) return cachedProductConfig;
+    cachedProductConfig = await response.json() as ProductConfigPayload;
+    lastProductConfigFetchAt = now;
+    return cachedProductConfig;
+  } catch {
+    return cachedProductConfig;
+  }
+}
+
 async function refreshStatusLights(): Promise<void> {
   if (!document.querySelector('.wutos-detector-grid') || requestBusy) return;
   requestBusy = true;
   try {
     const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`STATUS_LIGHTS_HTTP_${response.status}`);
-    const payload = await response.json() as StatusLightPayload;
+    const rawPayload = await response.json() as StatusLightPayload;
+    const payload = mergeRelayEvidence(rawPayload, await productConfigEvidence());
     updateRelaySession(Boolean(payload.active), payload.batchId ?? null);
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
     for (let index = 1; index <= 6; index += 1) {
