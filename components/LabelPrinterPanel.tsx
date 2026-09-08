@@ -10,6 +10,13 @@ interface Props {
   backendHttpUrl: string;
 }
 
+interface MESStatusView {
+  enabled: boolean;
+  apiKeyConfigured: boolean;
+  pendingJobs: number;
+  lastError?: string;
+}
+
 const colors = {
   panel: '#061b28',
   panel2: '#071620',
@@ -69,10 +76,46 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
   const state = useSyncExternalStore(labelPrinterRuntime.subscribe, labelPrinterRuntime.getSnapshot);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [mesStatus, setMESStatus] = useState<MESStatusView | null>(null);
+  const [mesBusy, setMESBusy] = useState(false);
 
   useEffect(() => {
     labelPrinterRuntime.start(backendHttpUrl);
   }, [backendHttpUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`${backendHttpUrl}/api/production-config`)
+      .then(async (response) => {
+        const payload = await response.json() as { mes?: MESStatusView };
+        if (!response.ok) throw new Error('MES 配置读取失败');
+        if (!cancelled) setMESStatus(payload.mes ?? null);
+      })
+      .catch((error) => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : String(error));
+      });
+    return () => { cancelled = true; };
+  }, [backendHttpUrl]);
+
+  const toggleMES = async (enabled: boolean) => {
+    setMESBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch(`${backendHttpUrl}/api/production-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mesConfig: { enabled } }),
+      });
+      const payload = await response.json() as { success?: boolean; mes?: MESStatusView; error?: string; code?: string };
+      if (!response.ok || !payload.success) throw new Error(payload.error || payload.code || 'MES 配置保存失败');
+      setMESStatus(payload.mes ?? null);
+      setMessage(enabled ? '已开启 MES 自动上传' : '已关闭 MES 自动上传');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMESBusy(false);
+    }
+  };
 
   const run = async (action: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -124,6 +167,19 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
           onChange={(event) => labelPrinterRuntime.updateConfig({ autoPrint: event.target.checked })}
         />
         自动打印
+      </label>
+      <label
+        title={mesStatus?.enabled && !mesStatus.apiKeyConfigured ? '已勾选，但后端尚未配置 MES API Key' : '测试报告生成后，自动上传产品编号并关联报告附件'}
+        style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: mesStatus?.enabled && !mesStatus.apiKeyConfigured ? colors.warn : colors.text, cursor: mesBusy ? 'wait' : 'pointer' }}
+      >
+        <input
+          type="checkbox"
+          checked={mesStatus?.enabled ?? false}
+          disabled={mesBusy}
+          onChange={(event) => void toggleMES(event.target.checked)}
+        />
+        上传 MES
+        {mesStatus?.pendingJobs ? <span style={{ color: colors.warn, fontSize: 10 }}>待传 {mesStatus.pendingJobs}</span> : null}
       </label>
     </header>
 

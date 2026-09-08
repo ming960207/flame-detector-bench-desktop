@@ -24,6 +24,7 @@ import {
   DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
   normalizeProductionInspectionRecordConfig,
 } from './production-inspection-record.js';
+import { defaultMESConfig, MESPublisher, normalizeMESConfig } from './mes-publisher.js';
 import { ProductionRunCoordinator } from './production-run-coordinator.js';
 import { LabelPrintQueueStore } from './label-print-queue.js';
 import { requireDesktopMutation } from './request-security.js';
@@ -65,6 +66,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     systemConfig?.productionInspectionRecordConfig,
     DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
   );
+  let mesConfig = normalizeMESConfig(systemConfig?.mesConfig, defaultMESConfig());
 
   const source = new PLCProcessMonitor(config.plcs[0]!);
   const relayFeedback = new DioModbusTcpInputSource(relayConfig.dio);
@@ -82,6 +84,8 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
 
   const productionRuns = new ProductionRunCoordinator(() => runtime.snapshot(), detectors);
   const labelPrintQueue = new LabelPrintQueueStore();
+  const recordStore = productionRuns.getStore();
+  const mesPublisher = new MESPublisher(mesConfig);
   productionRuns.setRecordConfig(inspectionRecordConfig);
   source.on('status', (status) => productionRuns.observeStatus(status));
   productionRuns.on('archive', (archive) => {
@@ -94,6 +98,10 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       .catch((error) => {
         console.error('[标签打印] 生成批次标签任务失败:', error instanceof Error ? error.message : String(error));
       });
+  });
+  productionRuns.on('archive', (archive) => {
+    if (!mesPublisher.getPublicStatus().enabled) return;
+    void mesPublisher.publishArchive(archive, recordStore);
   });
 
   const productionConfigPayload = () => {
@@ -108,6 +116,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       dioReady: relayDioConfigReady(relayConfig.dio),
       mappingReady: missingMappings.length === 0,
       recordConfig: inspectionRecordConfig,
+      mes: mesPublisher.getPublicStatus(),
       labelPrinting: {
         template: 'FLAME_DETECTOR_60X40_HORIZONTAL',
         productName: '点型红外火焰探测器',
@@ -133,18 +142,23 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
         : {};
       const nextRelay = normalizeRelayFunctionalTestConfig(input.relayConfig, relayConfig);
       const nextRecord = normalizeProductionInspectionRecordConfig(input.recordConfig, inspectionRecordConfig);
+      const nextMES = normalizeMESConfig(input.mesConfig, mesConfig);
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({
         ...store,
         relayFunctionalTestConfig: nextRelay,
         productionInspectionRecordConfig: nextRecord,
+        // API Key 只从后端运行环境读取，不回写到前端可触达的持久化配置。
+        mesConfig: { ...nextMES, apiKey: '' },
         lastUpdated: Date.now(),
       });
       relayConfig = nextRelay;
       inspectionRecordConfig = nextRecord;
+      mesConfig = nextMES;
       detectors.setRelayFunctionalTestConfig(nextRelay);
       await relayFeedback.updateConfig(nextRelay.dio);
       productionRuns.setRecordConfig(nextRecord);
+      mesPublisher.updateConfig(nextMES);
       return res.json({ success: true, ...productionConfigPayload() });
     } catch (error) {
       return res.status(500).json({ code: 'PRODUCTION_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
@@ -175,7 +189,6 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     }
   });
 
-  const recordStore = productionRuns.getStore();
   runtime.app.get('/api/production-records', async (req, res) => {
     try {
       const limit = Number(req.query.limit) || 50;
@@ -297,10 +310,12 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
 
   const port = await runtime.listen();
   console.log(`[现场状态] 已启动完整产品检测运行时：http://127.0.0.1:${port}`);
+  if (mesConfig.enabled) void mesPublisher.flush();
   return Object.assign(runtime, {
     productionRuns,
     labelPrintQueue,
     async close(): Promise<void> {
+      mesPublisher.close();
       await relayFeedback.disconnect();
       await closeRuntime();
     },

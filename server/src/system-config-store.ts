@@ -5,6 +5,7 @@ import type { FlameConfig, PLCDeviceConfigLocal } from './config.js';
 import type { ProductDetectionConfig } from './product-profile.js';
 import type { RelayFunctionalTestConfig } from './relay-functional-test.js';
 import type { ProductionInspectionRecordConfig } from './production-inspection-record.js';
+import type { MESConfig } from './mes-publisher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -31,6 +32,7 @@ export interface SystemConfigStore {
   productDetectionConfig?: ProductDetectionConfig;
   relayFunctionalTestConfig?: RelayFunctionalTestConfig;
   productionInspectionRecordConfig?: ProductionInspectionRecordConfig;
+  mesConfig?: MESConfig;
   lastUpdated: number;
 }
 
