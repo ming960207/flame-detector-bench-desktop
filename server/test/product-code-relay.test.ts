@@ -30,7 +30,7 @@ test('product code uses 18 digits/characters and independent monthly key', () =>
   const date = new Date(2026, 7, 31, 8, 0, 0);
   const result = generateProductCode(rule, date, 1);
   assert.equal(result.status, 'GENERATED');
-  assert.equal(result.code, '410205801010100001');
+  assert.equal(result.code, '410205801020100001');
   assert.equal(result.code?.length, 18);
   assert.equal(productMonthlySerialKey('GHT-1050-02', date), 'GHT-1050-02@202608');
 });

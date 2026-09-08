@@ -92,6 +92,7 @@ export interface FlameDetectorStatusSource {
   isDataStreamConnected?(): boolean;
   clearWaveformHistory?(): void;
   prepareWaveformStartup?(batchId?: string): void;
+  waitForReady?(options?: { requiredSlots?: number[]; timeoutMs?: number }): Promise<DetectorReadyReport>;
   getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
   stopWaveformStreaming?(): Promise<void>;
   runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null): Promise<ProductPrecheckReport>;
@@ -265,7 +266,9 @@ export function createFieldStatusRuntime(
   let loggedBatchId: string | null = null;
   let positionBatchId: string | null = null;
   let detectorMutationBusy = false;
+  let detectorStartupBatchId: string | null = null;
   let detectorStartupReport: DetectorReadyReport | undefined = detectors.getReadyReport?.();
+  let detectorStartupWaitGeneration = 0;
   let inspectionPositions = new Map<InspectionPositionId, InspectionPositionResult>();
   const positionStartedAt = new Map<InspectionPositionId, number>();
 
@@ -305,6 +308,30 @@ export function createFieldStatusRuntime(
     ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
   const broadcastSummary = () => wsServer.broadcastFieldSummary(summary());
+
+  const beginDetectorStartupBarrier = (): void => {
+    if (!detectors.waitForReady || !waveformAnalysisState.batchId) return;
+    const startupBatchId = waveformAnalysisState.batchId;
+    const generation = ++detectorStartupWaitGeneration;
+    const requiredSlots = detectors.getConfig?.().units.filter((unit) => unit.enabled).map((unit) => unit.index);
+    detectorStartupReport = detectors.getReadyReport?.(requiredSlots) ?? detectorStartupReport;
+    void detectors.waitForReady({ requiredSlots, timeoutMs: 15_000 }).then((report) => {
+      if (generation !== detectorStartupWaitGeneration || detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+      detectorStartupReport = report;
+      const failed = report.units.find((unit) => !unit.ready);
+      waveformAnalysis.setDetectorStartupBarrier(
+        report.ready,
+        report.ready ? undefined : failed?.startup.failureReason || 'DETECTOR_STARTUP_TIMEOUT',
+      );
+      recomputeVerdicts();
+      broadcastSummary();
+    }).catch((error) => {
+      if (generation !== detectorStartupWaitGeneration || detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      waveformAnalysis.setDetectorStartupBarrier(false, reason);
+      broadcastSummary();
+    });
+  };
 
   const runProductPrecheck = async (batchId: string | null): Promise<void> => {
     if (productPrecheckBusy || !detectors.runProductPrecheck) return;
@@ -394,9 +421,11 @@ export function createFieldStatusRuntime(
       productPrecheckBatchId = null;
       streamingStoppedBatchId = null;
       applyProductWaveformProfile();
-      if (waveformAnalysisState.batchId) {
+      detectorStartupBatchId = waveformAnalysisState.batchId;
+      if (detectors.waitForReady && waveformAnalysisState.batchId) {
+        waveformAnalysis.setDetectorStartupBarrier(false);
         detectors.prepareWaveformStartup?.(waveformAnalysisState.batchId ?? undefined);
-        detectorStartupReport = detectors.getReadyReport?.() ?? detectorStartupReport;
+        beginDetectorStartupBarrier();
       }
     }
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();

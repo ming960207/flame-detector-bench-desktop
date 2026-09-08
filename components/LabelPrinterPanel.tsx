@@ -160,7 +160,7 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
           {isWifi ? 'WiFi / 局域网' : 'USB'}
         </span>
       </div>
-      <label title="关闭时不自动打印；开启后只自动打印开启之后生成的标签" style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: colors.text, cursor: 'pointer' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: colors.text, cursor: 'pointer' }}>
         <input
           type="checkbox"
           checked={state.config.autoPrint}

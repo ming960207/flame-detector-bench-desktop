@@ -234,6 +234,12 @@ function evaluateUnit(
     if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
     return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
   }
+  if (analysisSnapshot?.detectorStartupBarrier && !analysisSnapshot.detectorStartupBarrier.ready) {
+    const reason = analysisSnapshot.detectorStartupBarrier.failureReason || 'DETECTOR_STARTUP_TIMEOUT';
+    if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
+    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
+  }
+
   // Product precheck is evidence collected during the signal-stabilization wait.
   // Keep its detailed reasons attached to the unit, but do not expose an operator
   // NG result while the mechanical/waveform inspection is still running. The same

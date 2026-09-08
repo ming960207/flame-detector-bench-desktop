@@ -273,11 +273,9 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   });
   runtime.app.post('/api/label-print/claim', requireDesktopMutation, async (req, res) => {
     try {
-      const body = req.body as Record<string, unknown> | undefined;
-      const workerId = requestText(body?.workerId, 96);
+      const workerId = requestText((req.body as Record<string, unknown> | undefined)?.workerId, 96);
       if (!workerId) return res.status(400).json({ code: 'LABEL_PRINT_WORKER_REQUIRED' });
-      const createdAfter = Number(body?.createdAfter);
-      const job = await labelPrintQueue.claimNext(workerId, undefined, Number.isFinite(createdAfter) ? createdAfter : 0);
+      const job = await labelPrintQueue.claimNext(workerId);
       return res.json({ job });
     } catch (error) {
       return res.status(500).json({ code: 'LABEL_PRINT_CLAIM_FAILED', error: error instanceof Error ? error.message : String(error) });

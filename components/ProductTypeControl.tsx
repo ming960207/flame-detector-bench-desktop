@@ -423,7 +423,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
             {[
               ['ABCC', 'productNameCode', 4, '4102'],
               ['EE', 'softwareVersionCode', 2, '01'],
-              ['FF', 'hardwareVersionCode', 2, '01'],
+              ['FF', 'hardwareVersionCode', 2, '02'],
               ['GG', 'producerCode', 2, '01'],
             ].map(([label, key, maxLength, placeholder]) => <label key={String(key)} style={{ color: palette.muted, fontSize: 9.5 }}>
               {label}
