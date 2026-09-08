@@ -21,6 +21,8 @@ export interface RelayFeedbackSource {
 interface UnitWorkState {
   result: RelayFunctionalTestUnitResult;
   commandStartedAt: number | null;
+  testInvalid: boolean;
+  resetRequired: boolean;
 }
 
 function emptyAction(): RelayActionResult {
@@ -62,49 +64,122 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function errorText(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    const message = error instanceof Error ? error.message : String(error.code);
+    return `${error.code}:${message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function actionPrefix(kind: 'alarm' | 'fault'): 'ALARM' | 'FAULT' {
+  return kind === 'alarm' ? 'ALARM' : 'FAULT';
+}
+
+function isKnownProductRelayFailure(reason: string): boolean {
+  return [
+    'ALARM_ACTIVE_AT_BASELINE',
+    'FAULT_ACTIVE_AT_BASELINE',
+    'ALARM_RELAY_ACTIVE_AT_BASELINE',
+    'FAULT_RELAY_ACTIVE_AT_BASELINE',
+    'ALARM_RELAY_NOT_ACTUATED',
+    'FAULT_RELAY_NOT_ACTUATED',
+    'ALARM_TRIGGERED_FAULT_RELAY',
+    'FAULT_TRIGGERED_ALARM_RELAY',
+    'ALARM_RELAY_STUCK_AFTER_RESET',
+    'FAULT_RELAY_STUCK_AFTER_RESET',
+  ].includes(reason);
+}
+
 /**
  * 继电器功能检测协调器。
  *
- * 实机结论（2026-08-31）：虽然 A000/A001 可同时写成 0000/0001，且寄存器可读回，
- * 但实体输出只响应火警，故障继电器不会同时动作。因此生产 FAST_BATCH 必须按功能分阶段：
- * 6 台并行火警 -> 验证 -> 6 台并行复位 -> 6 台并行故障 -> 验证 -> 6 台并行复位。
- *
- * DIAGNOSTIC 则必须真正逐槽位完成一整套火警/故障循环后再进入下一槽位，
- * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
- *
- * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
- * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
+ * 生产 FAST_BATCH：6 台并行火警 -> 验证 -> 复位 -> 6 台并行故障 -> 验证 -> 复位。
+ * 关键判定边界：只有“内部模拟状态已经建立 + DIO 可读取”后，实体触点不动作才是产品 FAIL；
+ * 模拟状态无法建立、DIO 不可读、复位无法确认等均属于 TEST_INVALID，禁止把基础设施/控制失败误判为产品 NG。
  */
 export class RelayFunctionalTestCoordinator {
+  private readonly dioLogSignatures = new Map<string, string>();
+  private readonly internalLogSignatures = new Map<string, string>();
+
   constructor(
     private readonly detectors: RelayDetectorPort,
     private readonly feedback: RelayFeedbackSource,
     private readonly config: RelayFunctionalTestConfig,
   ) {}
 
-  private async physicalState(index: number): Promise<{ alarm: boolean | null; fault: boolean | null; error?: string }> {
+  private logInternal(context: string, index: number, internal: { fire: boolean; fault: boolean }): void {
+    const key = `${context}:D${index}`;
+    const signature = `${internal.fire ? 1 : 0}/${internal.fault ? 1 : 0}`;
+    if (this.internalLogSignatures.get(key) === signature) return;
+    this.internalLogSignatures.set(key, signature);
+    console.log(`[继电器检测][${context}][D${index}][B000/B001] fire=${internal.fire ? 1 : 0} fault=${internal.fault ? 1 : 0}`);
+  }
+
+  private logDio(
+    context: string,
+    index: number,
+    inputs: Record<string, boolean> | undefined,
+    alarm: boolean | null,
+    fault: boolean | null,
+    error?: string,
+  ): void {
+    const mapping = relayFeedbackMappingFor(this.config, index);
+    const raw = inputs
+      ? Object.keys(inputs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .map((key) => `${key}=${inputs[key] ? 1 : 0}`).join(',')
+      : '-';
+    const mappingText = mapping
+      ? `alarm=${mapping.alarmInputAddress}(normal=${mapping.alarmNormalLevel ? 1 : 0})->${alarm === null ? '?' : alarm ? 1 : 0} `
+        + `fault=${mapping.faultInputAddress}(normal=${mapping.faultNormalLevel ? 1 : 0})->${fault === null ? '?' : fault ? 1 : 0}`
+      : 'mapping=missing';
+    const signature = `${raw}|${mappingText}|${error ?? ''}`;
+    const key = `${context}:D${index}`;
+    if (this.dioLogSignatures.get(key) === signature) return;
+    this.dioLogSignatures.set(key, signature);
+    const line = `[继电器检测][${context}][D${index}][DIO] raw={${raw}} ${mappingText}${error ? ` error=${error}` : ''}`;
+    if (error) console.error(line);
+    else console.log(line);
+  }
+
+  private markInvalid(state: UnitWorkState, kind: 'alarm' | 'fault', reason: string): void {
+    const action = state.result[kind];
+    action.verdict = 'TEST_INVALID';
+    state.testInvalid = true;
+    uniquePush(action.reasons, reason);
+  }
+
+  private async physicalState(
+    index: number,
+    context: string,
+  ): Promise<{ alarm: boolean | null; fault: boolean | null; error?: string }> {
     const mapping = relayFeedbackMappingFor(this.config, index);
     let inputs: Record<string, boolean> | undefined;
     try {
       inputs = await this.feedback.readInputs();
     } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
-        ? error.code
-        : error instanceof Error ? error.message : String(error);
-      return { alarm: null, fault: null, error: code || 'DIO_READ_FAILED' };
+      const code = errorText(error) || 'DIO_READ_FAILED';
+      this.logDio(context, index, undefined, null, null, code);
+      return { alarm: null, fault: null, error: code };
     }
-    if (!mapping || !inputs) return { alarm: null, fault: null };
-    return {
-      alarm: relayInputIsActive(inputs[mapping.alarmInputAddress], mapping.alarmNormalLevel),
-      fault: relayInputIsActive(inputs[mapping.faultInputAddress], mapping.faultNormalLevel),
-    };
+    if (!mapping || !inputs) {
+      const error = !mapping ? 'DIO_MAPPING_MISSING' : 'DIO_INPUTS_UNAVAILABLE';
+      this.logDio(context, index, inputs, null, null, error);
+      return { alarm: null, fault: null, error };
+    }
+    const alarm = relayInputIsActive(inputs[mapping.alarmInputAddress], mapping.alarmNormalLevel);
+    const fault = relayInputIsActive(inputs[mapping.faultInputAddress], mapping.faultNormalLevel);
+    this.logDio(context, index, inputs, alarm, fault);
+    return { alarm, fault };
   }
 
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
+    console.log('[继电器检测][BASELINE] 开始读取 B000/B001 与 DIO 正常态。');
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       try {
         const internal = await this.detectors.readLatched(index);
-        const physical = await this.physicalState(index);
+        this.logInternal('BASELINE', index, internal);
+        const physical = await this.physicalState(index, 'BASELINE');
         state.result.baseline = {
           alarmInternal: internal.fire,
           faultInternal: internal.fault,
@@ -116,12 +191,13 @@ export class RelayFunctionalTestCoordinator {
         if (physical.alarm === true) uniquePush(state.result.alarm.reasons, 'ALARM_RELAY_ACTIVE_AT_BASELINE');
         if (physical.fault === true) uniquePush(state.result.fault.reasons, 'FAULT_RELAY_ACTIVE_AT_BASELINE');
         if (physical.error) {
-          uniquePush(state.result.alarm.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-          uniquePush(state.result.fault.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          this.markInvalid(state, 'alarm', `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          this.markInvalid(state, 'fault', `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
         }
-      } catch {
-        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
-        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
+      } catch (error) {
+        const reason = `RELAY_BASELINE_READ_FAILED:${errorText(error)}`;
+        this.markInvalid(state, 'alarm', reason);
+        this.markInvalid(state, 'fault', reason);
       }
     }));
   }
@@ -130,16 +206,29 @@ export class RelayFunctionalTestCoordinator {
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
+    const prefix = actionPrefix(kind);
+    console.log(`[继电器检测][${prefix}_COMMAND] 开始${kind === 'alarm' ? '火警' : '故障'}模拟。`);
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
+      if (state.testInvalid) {
+        action.verdict = 'TEST_INVALID';
+        uniquePush(action.reasons, `${prefix}_SKIPPED_AFTER_TEST_INVALID`);
+        console.warn(`[继电器检测][${prefix}_COMMAND][D${index}] 已存在 TEST_INVALID，停止该槽位后续模拟命令。`);
+        return;
+      }
+
       state.commandStartedAt = Date.now();
+      state.resetRequired = true;
       try {
         await this.detectors.simulate(index, kind === 'alarm'
           ? { fire: true, fault: false }
           : { fire: false, fault: true });
         action.commandAccepted = true;
-      } catch {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
+        console.log(`[继电器检测][${prefix}_COMMAND][D${index}] FC10 写入、A000/A001 回读及 B000/B001 内部状态验证通过。`);
+      } catch (error) {
+        const message = errorText(error);
+        this.markInvalid(state, kind, `${prefix}_SIMULATION_INVALID:${message}`);
+        console.error(`[继电器检测][${prefix}_COMMAND][D${index}] TEST_INVALID：模拟命令无法建立可验证内部状态，停止该槽位后续功能判定。${message}`);
       }
     }));
   }
@@ -148,13 +237,15 @@ export class RelayFunctionalTestCoordinator {
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
+    const prefix = actionPrefix(kind);
+    const context = `${prefix}_VERIFY`;
     const deadline = Date.now() + this.config.feedbackTimeoutMs;
     const stable = new Map<number, number>();
 
     while (Date.now() <= deadline) {
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         const action = state.result[kind];
-        if (!action.commandAccepted) return;
+        if (!action.commandAccepted || action.verdict === 'TEST_INVALID') return;
         if (
           action.internalStateReached
           && action.physicalStateReached
@@ -164,9 +255,10 @@ export class RelayFunctionalTestCoordinator {
 
         try {
           const internal = await this.detectors.readLatched(index);
-          const physical = await this.physicalState(index);
+          this.logInternal(context, index, internal);
+          const physical = await this.physicalState(index, context);
           if (physical.error) {
-            uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+            this.markInvalid(state, kind, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
             stable.set(index, 0);
             return;
           }
@@ -189,23 +281,27 @@ export class RelayFunctionalTestCoordinator {
             stable.set(index, next);
             if (next >= this.config.stableSamples && action.responseTimeMs === null) {
               action.responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
+              console.log(`[继电器检测][${context}][D${index}] 内部状态+DIO 实体反馈稳定 ${next} 次，响应 ${action.responseTimeMs}ms。`);
             }
           } else {
             stable.set(index, 0);
           }
-        } catch {
+        } catch (error) {
+          this.markInvalid(state, kind, `${prefix}_VERIFY_READ_FAILED:${errorText(error)}`);
           stable.set(index, 0);
         }
       }));
 
       const done = [...work.entries()].every(([index, state]) => {
         const action = state.result[kind];
-        return !action.commandAccepted || (
-          action.internalStateReached
-          && action.physicalStateReached
-          && action.oppositeRelayStayedNormal
-          && (stable.get(index) ?? 0) >= this.config.stableSamples
-        );
+        return !action.commandAccepted
+          || action.verdict === 'TEST_INVALID'
+          || (
+            action.internalStateReached
+            && action.physicalStateReached
+            && action.oppositeRelayStayedNormal
+            && (stable.get(index) ?? 0) >= this.config.stableSamples
+          );
       });
       if (done) break;
       await sleep(this.config.sampleIntervalMs);
@@ -213,13 +309,14 @@ export class RelayFunctionalTestCoordinator {
 
     for (const state of work.values()) {
       const action = state.result[kind];
-      if (!action.commandAccepted) continue;
+      if (!action.commandAccepted || action.verdict === 'TEST_INVALID') continue;
       if (!action.internalStateReached) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_INTERNAL_STATE_NOT_SET' : 'FAULT_INTERNAL_STATE_NOT_SET');
+        this.markInvalid(state, kind, `${prefix}_INTERNAL_STATE_NOT_SET`);
+        continue;
       }
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalStateReached && !feedbackReadFailed) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_NOT_ACTUATED' : 'FAULT_RELAY_NOT_ACTUATED');
+        uniquePush(action.reasons, `${prefix}_RELAY_NOT_ACTUATED`);
       }
       if (!action.oppositeRelayStayedNormal) {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_TRIGGERED_FAULT_RELAY' : 'FAULT_TRIGGERED_ALARM_RELAY');
@@ -228,18 +325,26 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    const prefix = actionPrefix(kind);
+    console.log(`[继电器检测][${prefix}_RESET] 对实际执行过模拟命令的槽位写 F000=1234。`);
     await Promise.all([...work.entries()].map(async ([index, state]) => {
+      if (!state.resetRequired) return;
       const action = state.result[kind];
       try {
         await this.detectors.reset(index);
         action.resetAccepted = true;
-      } catch {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
+        state.resetRequired = false;
+        console.log(`[继电器检测][${prefix}_RESET][D${index}] F000=1234 写入已确认。`);
+      } catch (error) {
+        this.markInvalid(state, kind, `${prefix}_RESET_COMMAND_FAILED:${errorText(error)}`);
+        console.error(`[继电器检测][${prefix}_RESET][D${index}] 复位命令失败：${errorText(error)}`);
       }
     }));
   }
 
   private async waitForReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    const prefix = actionPrefix(kind);
+    const context = `${prefix}_RESET_VERIFY`;
     const deadline = Date.now() + this.config.resetTimeoutMs;
     const stable = new Map<number, number>();
 
@@ -250,9 +355,10 @@ export class RelayFunctionalTestCoordinator {
 
         try {
           const internal = await this.detectors.readLatched(index);
-          const physical = await this.physicalState(index);
+          this.logInternal(context, index, internal);
+          const physical = await this.physicalState(index, context);
           if (physical.error) {
-            uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+            this.markInvalid(state, kind, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
             stable.set(index, 0);
             return;
           }
@@ -264,7 +370,8 @@ export class RelayFunctionalTestCoordinator {
           stable.set(index, internalRecovered && physicalRecovered
             ? (stable.get(index) ?? 0) + 1
             : 0);
-        } catch {
+        } catch (error) {
+          this.markInvalid(state, kind, `${prefix}_RESET_VERIFY_READ_FAILED:${errorText(error)}`);
           stable.set(index, 0);
         }
       }));
@@ -285,11 +392,12 @@ export class RelayFunctionalTestCoordinator {
       const action = state.result[kind];
       if (!action.resetAccepted) continue;
       if (!action.internalRecovered) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_INTERNAL_FAILED' : 'FAULT_RESET_INTERNAL_FAILED');
+        this.markInvalid(state, kind, `${prefix}_RESET_INTERNAL_FAILED`);
+        continue;
       }
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalRecovered && !feedbackReadFailed) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_STUCK_AFTER_RESET' : 'FAULT_RELAY_STUCK_AFTER_RESET');
+        uniquePush(action.reasons, `${prefix}_RELAY_STUCK_AFTER_RESET`);
       }
     }
   }
@@ -307,8 +415,6 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async runDiagnostic(work: Map<number, UnitWorkState>): Promise<void> {
-    // One complete slot at a time. This is intentionally slower and is only for
-    // commissioning/maintenance where exact slot-to-DI wiring attribution matters.
     for (const [index, state] of work.entries()) {
       const single = new Map<number, UnitWorkState>([[index, state]]);
       await this.runActionCycle(single, 'alarm');
@@ -317,18 +423,19 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private addCleanupReason(state: UnitWorkState, reason: string): void {
-    uniquePush(state.result.alarm.reasons, reason);
-    uniquePush(state.result.fault.reasons, reason);
+    this.markInvalid(state, 'alarm', reason);
+    this.markInvalid(state, 'fault', reason);
   }
 
   private async emergencyCleanup(work: Map<number, UnitWorkState>): Promise<void> {
+    console.log('[继电器检测][EMERGENCY_CLEANUP] 最终强制复位所有参与槽位。');
     const resetAccepted = new Set<number>();
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       try {
         await this.detectors.reset(index);
         resetAccepted.add(index);
-      } catch {
-        this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
+      } catch (error) {
+        this.addCleanupReason(state, `EMERGENCY_RESET_COMMAND_FAILED:${errorText(error)}`);
       }
     }));
 
@@ -342,7 +449,8 @@ export class RelayFunctionalTestCoordinator {
         if (!resetAccepted.has(index) || recovered.has(index)) return;
         try {
           const internal = await this.detectors.readLatched(index);
-          const physical = await this.physicalState(index);
+          this.logInternal('EMERGENCY_RESET_VERIFY', index, internal);
+          const physical = await this.physicalState(index, 'EMERGENCY_RESET_VERIFY');
           if (physical.error) {
             feedbackErrors.set(index, physical.error);
             stable.set(index, 0);
@@ -364,8 +472,7 @@ export class RelayFunctionalTestCoordinator {
     }
 
     for (const [index, state] of work.entries()) {
-      if (!resetAccepted.has(index)) continue;
-      if (recovered.has(index)) continue;
+      if (!resetAccepted.has(index) || recovered.has(index)) continue;
       const feedbackError = feedbackErrors.get(index);
       if (feedbackError) this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
       else this.addCleanupReason(state, 'EMERGENCY_RESET_NOT_CONFIRMED');
@@ -373,6 +480,11 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private finalizeAction(action: RelayActionResult): void {
+    if (action.reasons.some(isKnownProductRelayFailure)) {
+      action.verdict = 'FAIL';
+      return;
+    }
+    if (action.verdict === 'TEST_INVALID') return;
     action.verdict = action.commandAccepted
       && action.internalStateReached
       && action.physicalStateReached
@@ -404,7 +516,12 @@ export class RelayFunctionalTestCoordinator {
     }
 
     const work = new Map<number, UnitWorkState>(
-      indexes.map((index) => [index, { result: emptyUnit(index), commandStartedAt: null }]),
+      indexes.map((index) => [index, {
+        result: emptyUnit(index),
+        commandStartedAt: null,
+        testInvalid: false,
+        resetRequired: false,
+      }]),
     );
 
     try {
@@ -412,7 +529,7 @@ export class RelayFunctionalTestCoordinator {
       if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
       else await this.runFastBatch(work);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorText(error);
       for (const state of work.values()) this.addCleanupReason(state, `RELAY_TEST_ABORTED:${message}`);
     } finally {
       await this.emergencyCleanup(work);
@@ -421,17 +538,32 @@ export class RelayFunctionalTestCoordinator {
     const units = [...work.values()].map(({ result }) => {
       this.finalizeAction(result.alarm);
       this.finalizeAction(result.fault);
-      result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      result.verdict = result.alarm.verdict === 'FAIL' || result.fault.verdict === 'FAIL'
+        ? 'FAIL'
+        : result.alarm.verdict === 'TEST_INVALID' || result.fault.verdict === 'TEST_INVALID'
+          ? 'TEST_INVALID'
+          : result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS'
+            ? 'PASS'
+            : 'FAIL';
       return result;
     });
 
+    const verdict = units.some((unit) => unit.verdict === 'FAIL')
+      ? 'FAIL'
+      : units.some((unit) => unit.verdict === 'TEST_INVALID')
+        ? 'TEST_INVALID'
+        : units.length > 0 && units.every((unit) => unit.verdict === 'PASS')
+          ? 'PASS'
+          : 'FAIL';
+
+    console.log(`[继电器检测][COMPLETE] batch=${batchId ?? '-'} verdict=${verdict} ${units.map((unit) => `D${unit.detectorIndex}=${unit.verdict}`).join(' ')}`);
     return {
       batchId,
       mode: this.config.mode,
       phase: 'COMPLETE',
       startedAt,
       completedAt: Date.now(),
-      verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
+      verdict,
       units,
     };
   }
