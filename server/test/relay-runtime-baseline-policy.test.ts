@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import '../src/product-aware-relay-verification-policy.js';
 import { RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
+import { relayLiveStateSnapshot } from '../src/relay-live-state.js';
 import { normalizeRelayFunctionalTestConfig } from '../src/relay-functional-test.js';
 
 test('runtime DIO baseline handles mixed NO/NC levels and still detects a real no-change relay failure', async () => {
@@ -103,4 +104,20 @@ test('runtime DIO baseline handles mixed NO/NC levels and still detects a real n
   assert.equal(d2.fault.verdict, 'FAIL');
   assert.ok(d2.fault.reasons.includes('FAULT_RELAY_NOT_ACTUATED'));
   assert.equal(report.verdict, 'FAIL');
+
+  const live = relayLiveStateSnapshot();
+  assert.equal(live.batchId, 'mixed-baseline');
+  assert.equal(live.active, false, 'indicator telemetry must leave active mode when relay test completes');
+  const liveD1 = live.units.find((unit) => unit.detectorIndex === 1)!;
+  const liveD2 = live.units.find((unit) => unit.detectorIndex === 2)!;
+  assert.deepEqual(
+    { fire: liveD1.fire, fault: liveD1.fault, alarmRelay: liveD1.alarmRelay, faultRelay: liveD1.faultRelay },
+    { fire: false, fault: false, alarmRelay: false, faultRelay: false },
+    'D1 four status LEDs must return to the observed reset state',
+  );
+  assert.deepEqual(
+    { fire: liveD2.fire, fault: liveD2.fault, alarmRelay: liveD2.alarmRelay, faultRelay: liveD2.faultRelay },
+    { fire: false, fault: false, alarmRelay: false, faultRelay: false },
+    'D2 four status LEDs must return to the observed reset state even when its fault relay test failed',
+  );
 });
