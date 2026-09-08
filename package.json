@@ -9,7 +9,7 @@
     "build": "vite build",
     "build:web": "vite build --mode desktop",
     "build:web:test": "vite build --mode test",
-    "build:server": "npm run build --prefix server",
+    "build:server": "npm --prefix server run build",
     "desktop": "electron .",
     "build:latest": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\update-latest-release.ps1",
     "build:single-exe": "npm run build:latest",
