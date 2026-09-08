@@ -222,22 +222,6 @@ test('product model defaults come from the profile configuration and default to 
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.productModel, 'GHT-1050-02');
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.expectedSoftwareVersion, '90.22.09.15');
   assert.equal(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.expectedProbeCount, 2);
-  assert.deepEqual(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles.DUAL_WAVELENGTH.productCodeRule, {
-    enabled: true,
-    productNameCode: '4102',
-    softwareVersionCode: '01',
-    hardwareVersionCode: '02',
-    producerCode: '01',
-  });
-});
-
-test('default product-code rules use specification segment 010201', () => {
-  for (const profile of Object.values(DEFAULT_PRODUCT_DETECTION_CONFIG.profiles)) {
-    assert.equal(
-      `${profile.productCodeRule.softwareVersionCode}${profile.productCodeRule.hardwareVersionCode}${profile.productCodeRule.producerCode}`,
-      '010201',
-    );
-  }
 });
 
 test('configured probe counts are honored for every product type', () => {

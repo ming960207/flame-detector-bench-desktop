@@ -5,7 +5,7 @@ export interface ProductCodeRule {
   productNameCode: string;
   /** EE：2 位软件版本编码，当前默认 01。 */
   softwareVersionCode: string;
-  /** FF：2 位硬件版本编码，当前默认 02。 */
+  /** FF：2 位硬件版本编码，当前默认 01。 */
   hardwareVersionCode: string;
   /** GG：2 位生产部门编码，当前默认 01。 */
   producerCode: string;
@@ -34,7 +34,7 @@ export const DEFAULT_PRODUCT_CODE_RULE: Readonly<ProductCodeRule> = Object.freez
   enabled: true,
   productNameCode: '',
   softwareVersionCode: '01',
-  hardwareVersionCode: '02',
+  hardwareVersionCode: '01',
   producerCode: '01',
 });
 
@@ -54,9 +54,7 @@ export function normalizeProductCodeRule(
     enabled: typeof source.enabled === 'boolean' ? source.enabled : fallback.enabled,
     productNameCode: cleanSegment(source.productNameCode ?? fallback.productNameCode, 4),
     softwareVersionCode: cleanSegment(source.softwareVersionCode ?? fallback.softwareVersionCode, 2) || '01',
-    hardwareVersionCode: cleanSegment(source.hardwareVersionCode ?? fallback.hardwareVersionCode, 2)
-      || fallback.hardwareVersionCode
-      || '02',
+    hardwareVersionCode: cleanSegment(source.hardwareVersionCode ?? fallback.hardwareVersionCode, 2) || '01',
     producerCode: cleanSegment(source.producerCode ?? fallback.producerCode, 2) || '01',
   };
 }
