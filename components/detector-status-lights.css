@@ -43,10 +43,7 @@
   border: 2px solid rgba(130, 177, 205, .58) !important;
   border-radius: 50% !important;
   background: radial-gradient(circle at 35% 30%, #45657d 0 14%, #18354b 34%, #091a29 76%) !important;
-  box-shadow:
-    inset 0 0 5px rgba(0, 0, 0, .9),
-    0 0 0 1px rgba(55, 111, 145, .24),
-    0 0 5px rgba(23, 119, 183, .18) !important;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, .9) !important;
   opacity: .9 !important;
   pointer-events: auto !important;
   font-size: 0 !important;
@@ -69,11 +66,7 @@
 .wutos-detector-state-led.is-alarm-relay.is-active {
   border-color: rgba(255, 176, 162, 1) !important;
   background: radial-gradient(circle at 34% 28%, #fff5ee 0 9%, #ff8b77 22%, #ff413b 55%, #a71016 100%) !important;
-  box-shadow:
-    0 0 8px rgba(255, 66, 55, 1),
-    0 0 16px rgba(255, 66, 55, .82),
-    0 0 24px rgba(255, 66, 55, .42),
-    inset 0 0 4px rgba(255, 242, 232, .82) !important;
+  box-shadow: inset 0 0 4px rgba(255, 242, 232, .82) !important;
   opacity: 1 !important;
   transform: scale(1.08) !important;
 }
@@ -82,11 +75,7 @@
 .wutos-detector-state-led.is-fault-relay.is-active {
   border-color: rgba(255, 230, 137, 1) !important;
   background: radial-gradient(circle at 34% 28%, #fffbe8 0 9%, #ffe171 23%, #ffb329 56%, #9d6000 100%) !important;
-  box-shadow:
-    0 0 8px rgba(255, 190, 48, 1),
-    0 0 16px rgba(255, 180, 34, .8),
-    0 0 24px rgba(255, 166, 24, .38),
-    inset 0 0 4px rgba(255, 249, 218, .84) !important;
+  box-shadow: inset 0 0 4px rgba(255, 249, 218, .84) !important;
   opacity: 1 !important;
   transform: scale(1.08) !important;
 }
