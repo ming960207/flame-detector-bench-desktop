@@ -84,7 +84,6 @@ const DECISION_TEXT: Record<string, string> = {
   DETECTOR_FAULT: '探测器故障',
   DETECTOR_STARTUP_FAILED: '探测器启动失败',
   DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
-  DETECTOR_STARTUP_WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
   MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
   SIGNAL_NOT_READY: '光源未就绪',
   SYNC_NOT_OK: '同步异常',

@@ -132,7 +132,6 @@ function detectorStartupLabel(unit: FlameDetectorUnitState | undefined): string 
   if (!state || state === 'TEST_READY') return null;
   const labels: Record<string, string> = {
     DISCONNECTED: '未连接',
-    WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
     POWER_ON: '已上电',
     COMMUNICATION_READY: '通信就绪',
     MODE_SWITCHING: '模式切换中',

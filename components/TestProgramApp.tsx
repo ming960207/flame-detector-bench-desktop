@@ -263,7 +263,6 @@ const DECISION_TEXT: Record<string, string> = {
   SNR31_ABOVE_LIMIT: 'P3/P1 信噪比高于上限',
   DETECTOR_OFFLINE: '探测器离线',
   DETECTOR_FAULT: '探测器故障',
-  DETECTOR_STARTUP_WAITING_FOR_VERTICAL_LOWER_LIMIT: '等待垂直电机下限位',
   DETECTOR_STARTUP_FAILED: '探测器启动失败',
   DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
   MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',

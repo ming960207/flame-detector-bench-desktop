@@ -8,7 +8,6 @@ import { DetectorStartupTracker } from '../src/modbus/detector-startup.js';
 import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
 import { SEND_MODE_BROADCAST_FRAME_HEX } from '../src/modbus/flame-detector-device.js';
 import { calculateModbusCRC16 } from '../src/modbus/flame-data-decoder.js';
-import { normalizeFlameConfig } from '../src/closure/field-status-server.js';
 
 test('detector startup becomes TEST_READY only after five consecutive valid frames', () => {
   let now = 1_000;
@@ -73,49 +72,11 @@ test('valid frames without a confirmed mode switch never become test ready', () 
   assert.equal(ready.testReadyAt, 3_000);
 });
 
-test('startup can wait for the vertical lower limit without becoming a terminal failure', () => {
-  const tracker = new DetectorStartupTracker(4, 1, () => 4_000);
-  tracker.markPowerOn();
-  tracker.markCommunicationReady();
-  assert.equal(tracker.markWaitingForLowerLimit().state, 'WAITING_FOR_VERTICAL_LOWER_LIMIT');
-  assert.equal(tracker.markModeSwitching(4).state, 'MODE_SWITCHING');
-  assert.equal(tracker.snapshot().failureReason, undefined);
-});
-
-test('flame service exposes the vertical lower-limit gate for continuous ACK retries', async () => {
-  const service = new FlameDetectorService({
-    mode: 'TCP',
-    ip: '127.0.0.1',
-    port: 31_001,
-    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
-  });
-  assert.equal(service.getReadyReport()?.verticalDownLimitGateEnabled, true);
-  assert.equal(service.getReadyReport()?.verticalDownLimitReached, false);
-  service.setVerticalDownLimit(true);
-  assert.equal(service.getReadyReport()?.verticalDownLimitReached, true);
-  await service.disconnect();
-});
-
-test('disabling the lower-limit gate allows immediate waveform mode initialization', async () => {
-  const service = new FlameDetectorService({
-    mode: 'TCP',
-    ip: '127.0.0.1',
-    port: 31_001,
-    waveformModeSwitchLowerLimitGateEnabled: false,
-    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
-  });
-  const report = service.getReadyReport();
-  assert.equal(report.verticalDownLimitGateEnabled, false);
-  assert.notEqual(report.units[0]?.startup.state, 'WAITING_FOR_VERTICAL_LOWER_LIMIT');
-  await service.disconnect();
-});
-
 test('preparing a new waveform batch drops stale parser bytes and last-push state', () => {
   const service = new FlameDetectorService({
     mode: 'TCP',
     ip: '127.0.0.1',
     port: 31_001,
-    waveformModeSwitchLowerLimitGateEnabled: false,
     units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_001 }],
   }, {
     deferWaveformUntilInspection: true,
@@ -134,20 +95,6 @@ test('preparing a new waveform batch drops stale parser bytes and last-push stat
   assert.equal(internal.pushBuffers.has(1), false);
   assert.equal(internal.modbusPushBuffers.has(1), false);
   assert.equal(internal.lastPushAt.has(1), false);
-});
-
-test('lower-limit gate setting survives flame configuration normalization', () => {
-  const current = {
-    mode: 'TCP' as const,
-    ip: '127.0.0.1',
-    port: 31_001,
-    waveformModeSwitchLowerLimitGateEnabled: true,
-    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP' as const, tcpHost: '127.0.0.1', tcpPort: 31_001 }],
-  };
-  assert.equal(
-    normalizeFlameConfig({ waveformModeSwitchLowerLimitGateEnabled: false }, current).waveformModeSwitchLowerLimitGateEnabled,
-    false,
-  );
 });
 
 function modeAck(): Buffer {
@@ -213,7 +160,7 @@ async function listenWaveformServer(requests: Buffer[] = []): Promise<{ server: 
   return { server, port: address.port };
 }
 
-test('waveform handshake uses the FF broadcast frame', async () => {
+test('waveform handshake starts without a PLC lower-limit condition', async () => {
   const receivedAt: number[] = [];
   const requests: Buffer[] = [];
   const listener = await listenModeServer(0, receivedAt, requests);
@@ -221,7 +168,6 @@ test('waveform handshake uses the FF broadcast frame', async () => {
     mode: 'TCP',
     ip: '127.0.0.1',
     port: listener.port,
-    waveformModeSwitchLowerLimitGateEnabled: false,
     units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: listener.port }],
   }, {
     deferWaveformUntilInspection: true,
@@ -246,7 +192,6 @@ test('FF broadcast handshake reaches the TCP waveform decoder', async () => {
     mode: 'TCP',
     ip: '127.0.0.1',
     port: listener.port,
-    waveformModeSwitchLowerLimitGateEnabled: false,
     units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: listener.port }],
   }, {
     deferWaveformUntilInspection: true,
@@ -275,7 +220,6 @@ test('six detector mode commands are issued concurrently instead of waiting for 
     mode: 'TCP',
     ip: '127.0.0.1',
     port: listeners[0]!.port,
-    waveformModeSwitchLowerLimitGateEnabled: false,
     units: listeners.map(({ port }, index) => ({
       index: index + 1,
       address: 1,
@@ -295,46 +239,6 @@ test('six detector mode commands are issued concurrently instead of waiting for 
     assert.equal(receivedAt.length, 6);
     const skewMs = Math.max(...receivedAt) - Math.min(...receivedAt);
     assert.ok(skewMs < 100, `six mode commands were serialized; observed skew=${skewMs}ms`);
-  } finally {
-    await service.disconnect();
-    await Promise.all(listeners.map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))));
-  }
-});
-
-test('enabled lower-limit gate blocks every mode command until the limit then releases all six concurrently', async () => {
-  const receivedAt: number[] = [];
-  const listeners = await Promise.all(Array.from({ length: 6 }, (_, index) => listenModeServer(index, receivedAt)));
-  const service = new FlameDetectorService({
-    mode: 'TCP',
-    ip: '127.0.0.1',
-    port: listeners[0]!.port,
-    waveformModeSwitchLowerLimitGateEnabled: true,
-    units: listeners.map(({ port }, index) => ({
-      index: index + 1,
-      address: 1,
-      enabled: true,
-      connMode: 'TCP' as const,
-      tcpHost: '127.0.0.1',
-      tcpPort: port,
-    })),
-  }, {
-    lockPath: join(tmpdir(), `flame-detector-limit-gate-${randomUUID()}.lock`),
-  });
-
-  try {
-    await service.connect();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(receivedAt.filter(Number.isFinite).length, 0);
-
-    service.setVerticalDownLimit(true);
-    const deadline = Date.now() + 1_000;
-    while (receivedAt.filter(Number.isFinite).length < 6 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.equal(receivedAt.filter(Number.isFinite).length, 6);
-    const skewMs = Math.max(...receivedAt) - Math.min(...receivedAt);
-    assert.ok(skewMs < 100, `lower-limit release serialized mode commands; observed skew=${skewMs}ms`);
-    await new Promise((resolve) => setTimeout(resolve, 160));
   } finally {
     await service.disconnect();
     await Promise.all(listeners.map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))));

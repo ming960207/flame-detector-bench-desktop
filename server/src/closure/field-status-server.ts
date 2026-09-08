@@ -91,7 +91,6 @@ export interface FlameDetectorStatusSource {
   isTransportConnected?(): boolean;
   isDataStreamConnected?(): boolean;
   clearWaveformHistory?(): void;
-  setVerticalDownLimit?(reached: boolean): void;
   prepareWaveformStartup?(batchId?: string): void;
   waitForReady?(options?: { requiredSlots?: number[]; timeoutMs?: number }): Promise<DetectorReadyReport>;
   getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
@@ -183,9 +182,6 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
     waveformSendMode: source.waveformSendMode === 'active' || source.waveformSendMode === 'filtered'
       ? source.waveformSendMode
       : (current.waveformSendMode ?? DEFAULT_WAVEFORM_SEND_MODE),
-    waveformModeSwitchLowerLimitGateEnabled: typeof source.waveformModeSwitchLowerLimitGateEnabled === 'boolean'
-      ? source.waveformModeSwitchLowerLimitGateEnabled
-      : (current.waveformModeSwitchLowerLimitGateEnabled ?? true),
     waveformDisplayMode: source.waveformDisplayMode === 'raw' || source.waveformDisplayMode === 'normalized'
       ? source.waveformDisplayMode
       : (current.waveformDisplayMode ?? 'normalized'),
@@ -323,10 +319,9 @@ export function createFieldStatusRuntime(
       if (generation !== detectorStartupWaitGeneration || detectorStartupBatchId !== startupBatchId || waveformAnalysisState.batchId !== startupBatchId) return;
       detectorStartupReport = report;
       const failed = report.units.find((unit) => !unit.ready);
-      const waitingForLimit = failed?.startup.state === 'WAITING_FOR_VERTICAL_LOWER_LIMIT';
       waveformAnalysis.setDetectorStartupBarrier(
         report.ready,
-        report.ready ? undefined : failed?.startup.failureReason || (waitingForLimit ? 'WAITING_FOR_VERTICAL_LOWER_LIMIT' : 'DETECTOR_STARTUP_TIMEOUT'),
+        report.ready ? undefined : failed?.startup.failureReason || 'DETECTOR_STARTUP_TIMEOUT',
       );
       recomputeVerdicts();
       broadcastSummary();
@@ -414,13 +409,7 @@ export function createFieldStatusRuntime(
     const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true && previousStatus?.io?.steps?.stepM10_4 === true;
     const flashStarted = status.io?.steps?.stepM11_0 === true && previousStatus?.io?.steps?.stepM11_0 !== true;
     const flashCompleted = status.io?.steps?.stepM11_0 !== true && previousStatus?.io?.steps?.stepM11_0 === true;
-    const verticalLowerLimitSignal = status.io?.inputs?.verticalDownFeedback;
-    const verticalLowerLimit = verticalLowerLimitSignal === true;
-    const verticalLowerLimitKnown = typeof verticalLowerLimitSignal === 'boolean';
-    const verticalLowerLimitStarted = verticalLowerLimitKnown && verticalLowerLimit && previousStatus?.io?.inputs?.verticalDownFeedback !== true;
-    const verticalLowerLimitGateEnabled = detectors.getConfig?.().waveformModeSwitchLowerLimitGateEnabled !== false;
     currentStatus = status;
-    if (verticalLowerLimitKnown) detectors.setVerticalDownLimit?.(verticalLowerLimit);
     const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
       && previousStage !== 'FLASH' && previousStage !== 'EMC';
     waveformAnalysis.observeProcess(status);
@@ -439,7 +428,6 @@ export function createFieldStatusRuntime(
         beginDetectorStartupBarrier();
       }
     }
-    if (verticalLowerLimitGateEnabled && verticalLowerLimitStarted && !batchStarted) beginDetectorStartupBarrier();
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
@@ -558,9 +546,6 @@ export function createFieldStatusRuntime(
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
   app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
     ready: false,
-    verticalDownLimitGateEnabled: true,
-    verticalDownLimitKnown: false,
-    verticalDownLimitReached: false,
     timeoutMs: 15_000,
     startedAt: null,
     completedAt: Date.now(),

@@ -83,7 +83,6 @@ export interface FlameDetectorConfig {
   pollIntervalMs?: number;
   protocol?: 'standard' | 'four-wavelength';
   waveformSendMode?: 'active' | 'filtered';
-  waveformModeSwitchLowerLimitGateEnabled?: boolean;
   waveformDisplayMode?: 'raw' | 'normalized';
   waveformMaxSamples?: number;
   waveformAnalysis?: Partial<FlameWaveformAnalysisConfig>;
