@@ -252,6 +252,12 @@ function numericFailures(unit: FieldDetectorResult, quality: DetectionQualityCon
   return failures;
 }
 
+function failureComparisonText(failure: NumericFailureDetail): string {
+  return failure.operator === '<='
+    ? `实测${valueText(failure.value)} > 上限${valueText(failure.limit)}`
+    : `实测${valueText(failure.value)} < 下限${valueText(failure.limit)}`;
+}
+
 export class FileFieldTestResultLogger implements FieldTestResultLogger {
   constructor(private readonly directory = process.env.TEST_RESULT_LOG_DIR || join(process.env.APP_DATA_DIR || process.cwd(), 'logs')) {}
 
@@ -316,7 +322,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       const metrics = unit.metrics;
       const failures = numericFailures(unit, quality);
       const detail = failures.length
-        ? failures.map((failure) => `${valueText(failure.value)} ${failure.operator === '<=' ? '≤' : '≥'} ${valueText(failure.limit)}`).join('；')
+        ? failures.map(failureComparisonText).join('；')
         : '';
       const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map((probe) => probe.replace('probe', 'P')).join('/')}` : '';
       const explanation = [reasonText(unit), noData, detail && `（${detail}）`].filter(Boolean).join('；');
@@ -361,19 +367,19 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       '',
       '设备结果明细',
       ...table(
-        ['设备', '地址', '结果', '噪声RMS', '噪声峰峰值', '绝对值', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
+        ['设备', '地址', '结果', '噪声RMS', '噪声半峰峰值', '绝对幅值(诊断)', '干扰比', '一致性', 'P2/P1(诊断)', 'P2/P3', 'P3/P1(诊断)', '灵敏度', '说明'],
         deviceRows,
       ),
       '',
       '工序检测明细',
       ...table(
-        ['工序', '设备', '采样数', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '结果', '说明'],
+        ['工序', '设备', '采样数', '干扰比', '一致性', 'P2/P1(诊断)', 'P2/P3', 'P3/P1(诊断)', '结果', '说明'],
         processRows,
       ),
       '',
       '检测位原始数值',
       ...table(
-        ['检测位', '设备', 'P1', 'P2', 'P3', 'P4', 'P2/P1', 'P2/P3', 'P3/P1', '状态说明'],
+        ['检测位', '设备', 'P1', 'P2', 'P3', 'P4', 'P2/P1(诊断)', 'P2/P3', 'P3/P1(诊断)', '状态说明'],
         positionRows,
       ),
       '',
