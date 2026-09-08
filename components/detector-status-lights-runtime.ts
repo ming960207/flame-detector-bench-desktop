@@ -1,3 +1,5 @@
+import './detector-status-lights.css';
+
 type StatusLightUnit = {
   index: number;
   online: boolean;
@@ -35,16 +37,26 @@ function detectorCard(index: number): HTMLElement | null {
   return document.querySelector<HTMLElement>(`.wutos-detector-card[aria-label="探测器${index}检测结果"]`);
 }
 
+function sanitizeLightElement(light: HTMLElement): void {
+  // No visible labels and no native hover tooltip. Accessibility/state text is
+  // carried only by aria-label so the production screen remains LED-only.
+  light.textContent = '';
+  light.removeAttribute('title');
+}
+
 function ensureLightGroup(index: number): HTMLElement | null {
   const card = detectorCard(index);
   if (!card) return null;
   let group = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__status-lights');
-  if (group) return group;
+  if (group) {
+    group.querySelectorAll<HTMLElement>('.wutos-detector-state-led').forEach(sanitizeLightElement);
+    return group;
+  }
 
   group = document.createElement('div');
   group.className = 'wutos-detector-card__status-lights';
   group.setAttribute('role', 'group');
-  group.setAttribute('aria-label', `探测器${index}火警、故障及继电器实时状态`);
+  group.setAttribute('aria-label', `探测器${index}四状态指示灯`);
 
   for (const definition of LIGHTS) {
     const light = document.createElement('span');
@@ -52,7 +64,7 @@ function ensureLightGroup(index: number): HTMLElement | null {
     light.dataset.kind = definition.kind;
     light.setAttribute('role', 'img');
     light.setAttribute('aria-label', `${definition.title}：未激活`);
-    light.title = `${definition.title}：未激活`;
+    sanitizeLightElement(light);
     group.appendChild(light);
   }
   card.appendChild(group);
@@ -62,11 +74,11 @@ function ensureLightGroup(index: number): HTMLElement | null {
 function setLight(group: HTMLElement, definition: typeof LIGHTS[number], active: boolean, known = true): void {
   const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
   if (!light) return;
+  sanitizeLightElement(light);
   light.classList.toggle('is-active', active);
   light.classList.toggle('is-unknown', !known);
   const text = `${definition.title}：${known ? active ? '亮' : '灭' : '未采集'}`;
   light.setAttribute('aria-label', text);
-  light.title = text;
 }
 
 function applyUnit(unit: StatusLightUnit): void {
@@ -90,8 +102,8 @@ function markStale(): void {
       light?.classList.remove('is-active');
       light?.classList.add('is-unknown');
       if (light) {
-        light.title = `${definition.title}：状态数据暂不可用`;
-        light.setAttribute('aria-label', light.title);
+        sanitizeLightElement(light);
+        light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
       }
     }
   }
