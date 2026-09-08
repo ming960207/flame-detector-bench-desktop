@@ -169,7 +169,7 @@ test('FAST_BATCH reports alarm contact failure without invalidating a passing fa
   assert.ok(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
 });
 
-test('DIO feedback read failures are reported as communication failures', async () => {
+test('DIO feedback read failures make the relay test invalid instead of product NG', async () => {
   let internal = { fire: false, fault: false };
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
@@ -191,10 +191,48 @@ test('DIO feedback read failures are reported as communication failures', async 
   }, config);
   const report = await coordinator.run('dio-fail');
 
-  assert.equal(report.verdict, 'FAIL');
-  assert.ok(report.units[0]?.alarm.reasons.includes('RELAY_FEEDBACK_READ_FAILED:DIO_CONNECTION_FAILED'));
+  assert.equal(report.verdict, 'TEST_INVALID');
+  assert.equal(report.units[0]?.verdict, 'TEST_INVALID');
+  assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:DIO_CONNECTION_FAILED')));
   assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'), false);
   assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('EMERGENCY_RESET_FEEDBACK_READ_FAILED:')));
+});
+
+test('simulation validation failure stops the slot and never becomes relay output NG', async () => {
+  let simulateCalls = 0;
+  let resetCalls = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate() {
+      simulateCalls += 1;
+      throw Object.assign(new Error('write ACK received but A/B state did not match'), { code: 'RELAY_SIMULATION_NOT_EFFECTIVE' });
+    },
+    async reset() { resetCalls += 1; },
+    async readLatched() { return { fire: false, fault: false }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mode: 'FAST_BATCH',
+    stableSamples: 1,
+    sampleIntervalMs: 50,
+    feedbackTimeoutMs: 100,
+    resetTimeoutMs: 100,
+    mappings: createMapping([1]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator(
+    detectors,
+    { readInputs: () => ({ X1: false, X2: false }) },
+    config,
+  );
+  const report = await coordinator.run('simulation-invalid');
+
+  assert.equal(report.verdict, 'TEST_INVALID');
+  assert.equal(report.units[0]?.verdict, 'TEST_INVALID');
+  assert.equal(simulateCalls, 1, 'fault simulation must be skipped after alarm simulation is invalid');
+  assert.ok(resetCalls >= 1, 'emergency cleanup must still run');
+  assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('ALARM_SIMULATION_INVALID:')));
+  assert.ok(report.units[0]?.fault.reasons.includes('FAULT_SKIPPED_AFTER_TEST_INVALID'));
+  assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'), false);
 });
 
 test('combined alarm+fault simulation is never used by FAST_BATCH production flow', async () => {
@@ -233,7 +271,7 @@ test('combined alarm+fault simulation is never used by FAST_BATCH production flo
   assert.equal(combinedCalls, 0);
 });
 
-test('emergency cleanup failure is explicit and forces the relay test to fail', async () => {
+test('emergency cleanup failure is explicit and makes the test invalid', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   let resetCalls = 0;
@@ -262,8 +300,9 @@ test('emergency cleanup failure is explicit and forces the relay test to fail', 
   const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
   const report = await coordinator.run('cleanup-fail');
 
-  assert.equal(report.verdict, 'FAIL');
-  assert.ok(resetCalls >= 3);
-  assert.ok(report.units[0]?.alarm.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
-  assert.ok(report.units[0]?.fault.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
+  assert.equal(report.verdict, 'TEST_INVALID');
+  assert.ok(resetCalls >= 2);
+  assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('ALARM_RESET_COMMAND_FAILED:')));
+  assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('EMERGENCY_RESET_COMMAND_FAILED:')));
+  assert.ok(report.units[0]?.fault.reasons.some((reason) => reason.startsWith('EMERGENCY_RESET_COMMAND_FAILED:')));
 });
