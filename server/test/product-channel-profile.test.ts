@@ -40,6 +40,7 @@ test('dual-wavelength production maps the two real optical channels to P2/P3', (
   assert.deepEqual(waveform.noiseProbes, ['probe2', 'probe3']);
   assert.deepEqual(waveform.consistencyProbes, ['probe2', 'probe3']);
   assert.deepEqual(waveform.interferenceRatio, { numerator: 'probe2', denominator: 'probe3' });
+  assert.equal(waveform.minNoiseRms, 0, 'quieter waveform must never fail a lower noise bound');
   assert.equal(waveform.maxNoiseAbsolute, 0, 'raw absolute amplitude must remain diagnostic-only by default');
   assert.equal(waveform.quality?.a.maxNoiseAbsolute, 0);
   assert.equal(waveform.quality?.b.maxNoiseAbsolute, 0);
@@ -48,10 +49,12 @@ test('dual-wavelength production maps the two real optical channels to P2/P3', (
 test('legacy count-only dual-wavelength path can no longer fall back to P1/P2', () => {
   assert.deepEqual(expectedProbeChannels(2), ['probe2', 'probe3']);
   const waveform = productAwareWaveformConfig({
+    minNoiseRms: 50,
     noiseProbes: ['probe1', 'probe2'],
     consistencyProbes: ['probe1', 'probe2'],
     interferenceRatio: { numerator: 'probe2', denominator: 'probe1' },
   }, 2)!;
+  assert.equal(waveform.minNoiseRms, 0);
   assert.deepEqual(waveform.noiseProbes, ['probe2', 'probe3']);
   assert.deepEqual(waveform.consistencyProbes, ['probe2', 'probe3']);
   assert.deepEqual(waveform.interferenceRatio, { numerator: 'probe2', denominator: 'probe3' });
