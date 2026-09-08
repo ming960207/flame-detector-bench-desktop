@@ -75,13 +75,16 @@ function ensureLightGroup(index: number): HTMLElement | null {
   return group;
 }
 
-function setLight(group: HTMLElement, definition: typeof LIGHTS[number], active: boolean, known = true): void {
+function setLight(group: HTMLElement, definition: typeof LIGHTS[number], active: boolean, known = true, latched = false): void {
   const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
   if (!light) return;
   sanitizeLightElement(light);
   light.classList.toggle('is-active', active);
-  light.classList.toggle('is-unknown', !known);
-  const text = `${definition.title}：${known ? active ? '亮' : '灭' : '未采集'}`;
+  light.classList.toggle('is-latched', latched);
+  light.classList.toggle('is-unknown', !known && !latched);
+  const text = !known
+    ? latched ? `${definition.title}：锁存亮（当前未采集）` : `${definition.title}：未采集`
+    : active ? latched ? `${definition.title}：锁存亮` : `${definition.title}：亮` : `${definition.title}：灭`;
   light.setAttribute('aria-label', text);
 }
 
@@ -92,7 +95,9 @@ function applyUnit(unit: StatusLightUnit): void {
   group.classList.remove('is-stale');
   for (const definition of LIGHTS) {
     const relayLight = definition.kind === 'alarm-relay' || definition.kind === 'fault-relay';
-    setLight(group, definition, Boolean(unit[definition.field]), relayLight ? unit.relayObserved : true);
+    const known = relayLight ? unit.relayObserved : true;
+    const latched = latchState(unit.index, definition.kind, Boolean(unit[definition.field]), known);
+    setLight(group, definition, latched, known, latched);
   }
 }
 
@@ -103,11 +108,10 @@ function markStale(): void {
     group.classList.add('is-stale');
     for (const definition of LIGHTS) {
       const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
-      light?.classList.remove('is-active');
-      light?.classList.add('is-unknown');
       if (light) {
-        sanitizeLightElement(light);
-        light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
+        const latched = isLatched(index, definition.kind);
+        setLight(group, definition, latched, false, latched);
+        if (!latched) light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
       }
     }
   }
@@ -115,6 +119,34 @@ function markStale(): void {
 
 let requestBusy = false;
 let lastSuccessAt = 0;
+let relaySessionActive = false;
+let relaySessionBatchId: string | null = null;
+const latchedLightKinds = new Map<number, Set<LightKind>>();
+
+function resetLatchedLights(): void {
+  latchedLightKinds.clear();
+}
+
+function updateRelaySession(active: boolean, batchId: string | null): void {
+  const startsNewSession = active && (!relaySessionActive || (batchId !== null && batchId !== relaySessionBatchId));
+  if (startsNewSession) resetLatchedLights();
+  if (active) relaySessionBatchId = batchId;
+  relaySessionActive = active;
+}
+
+function latchState(index: number, kind: LightKind, active: boolean, known: boolean): boolean {
+  let kinds = latchedLightKinds.get(index);
+  if (!kinds) {
+    kinds = new Set<LightKind>();
+    latchedLightKinds.set(index, kinds);
+  }
+  if (known && active) kinds.add(kind);
+  return kinds.has(kind);
+}
+
+function isLatched(index: number, kind: LightKind): boolean {
+  return latchedLightKinds.get(index)?.has(kind) ?? false;
+}
 
 async function refreshStatusLights(): Promise<void> {
   if (!document.querySelector('.wutos-detector-grid') || requestBusy) return;
@@ -123,6 +155,7 @@ async function refreshStatusLights(): Promise<void> {
     const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`STATUS_LIGHTS_HTTP_${response.status}`);
     const payload = await response.json() as StatusLightPayload;
+    updateRelaySession(Boolean(payload.active), payload.batchId ?? null);
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
     for (let index = 1; index <= 6; index += 1) {
       const unit = byIndex.get(index) ?? {

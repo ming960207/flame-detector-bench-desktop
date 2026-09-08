@@ -7,14 +7,19 @@
 .wutos-detector-card__status-lights {
   position: relative !important;
   z-index: 1 !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: clamp(5px, .42cqw, 8px) !important;
+  gap: clamp(3px, .32cqw, 5px) !important;
   align-self: center !important;
   min-width: 0 !important;
-  margin: 3% 0 1% !important;
-  padding: 2px 5px !important;
+  margin: 4% 0 1% !important;
+  padding: 1px 4px !important;
+  transform: none !important;
   border: 1px solid rgba(50, 126, 174, .28) !important;
   border-radius: 999px !important;
   background: rgba(2, 18, 34, .78) !important;
@@ -29,10 +34,10 @@
 .wutos-detector-state-led {
   position: relative !important;
   display: block !important;
-  width: clamp(17px, 1.35cqw, 22px) !important;
-  height: clamp(17px, 1.35cqw, 22px) !important;
-  min-width: clamp(17px, 1.35cqw, 22px) !important;
-  min-height: clamp(17px, 1.35cqw, 22px) !important;
+  width: clamp(10px, .82cqw, 14px) !important;
+  height: clamp(10px, .82cqw, 14px) !important;
+  min-width: clamp(10px, .82cqw, 14px) !important;
+  min-height: clamp(10px, .82cqw, 14px) !important;
   flex: 0 0 auto !important;
   overflow: hidden !important;
   border: 2px solid rgba(130, 177, 205, .58) !important;
@@ -98,16 +103,24 @@
   opacity: .38 !important;
 }
 
+.wutos-detector-state-led.is-latched {
+  filter: saturate(1.08);
+}
+
 .wutos-detector-card__status-lights.is-offline .wutos-detector-state-led:not(.is-active),
 .wutos-detector-card__status-lights.is-stale .wutos-detector-state-led {
   opacity: .28 !important;
 }
 
+.wutos-detector-card__status-lights.is-stale .wutos-detector-state-led.is-latched {
+  opacity: 1 !important;
+}
+
 @media (max-height: 760px) {
   .wutos-detector-state-led {
-    width: clamp(16px, 1.22cqw, 20px) !important;
-    height: clamp(16px, 1.22cqw, 20px) !important;
-    min-width: clamp(16px, 1.22cqw, 20px) !important;
-    min-height: clamp(16px, 1.22cqw, 20px) !important;
+    width: clamp(9px, .72cqw, 12px) !important;
+    height: clamp(9px, .72cqw, 12px) !important;
+    min-width: clamp(9px, .72cqw, 12px) !important;
+    min-height: clamp(9px, .72cqw, 12px) !important;
   }
 }
