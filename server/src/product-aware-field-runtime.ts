@@ -132,6 +132,31 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     res.json(productionConfigPayload());
   });
 
+  runtime.app.get('/api/detector-status-lights', (_req, res) => {
+    const flame = detectors.getCurrentState();
+    const byIndex = new Map(flame.units.map((unit) => [unit.index, unit]));
+    const units = Array.from({ length: 6 }, (_, offset) => {
+      const index = offset + 1;
+      const detector = byIndex.get(index);
+      return {
+        index,
+        online: Boolean(detector?.online),
+        fire: Boolean(detector?.fire),
+        fault: Boolean(detector?.fault),
+        // 当前分支未暴露独立的继电器实时反馈，避免把未知状态伪装为正常。
+        alarmRelay: false,
+        faultRelay: false,
+        relayObserved: false,
+      };
+    });
+    res.json({
+      active: false,
+      batchId: null,
+      updatedAt: flame.timestamp || Date.now(),
+      units,
+    });
+  });
+
   runtime.app.put('/api/production-config', requireDesktopMutation, async (req, res) => {
     if (runtime.snapshot().summary.productSelectionLocked) {
       return res.status(409).json({ code: 'PRODUCTION_CONFIG_LOCKED_DURING_PROCESS' });
