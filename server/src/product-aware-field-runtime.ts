@@ -19,6 +19,7 @@ import {
   relayDioConfigReady,
   relayFunctionalTestMissingMappings,
 } from './relay-functional-test.js';
+import { relayLiveStateSnapshot } from './relay-live-state.js';
 import { DioModbusTcpInputSource, RelayFeedbackDioError } from './relay-feedback-dio.js';
 import {
   DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
@@ -121,6 +122,41 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
 
   runtime.app.get('/api/production-config', (_req, res) => {
     res.json(productionConfigPayload());
+  });
+
+  // Lightweight 5 Hz UI source for the four prominent LEDs on every detector card.
+  // Internal fire/fault normally comes from the detector stream. During relay
+  // simulation, verified B000/B001 telemetry takes precedence. Physical relay LEDs
+  // are only asserted while the relay test is actively observing mapped DIO, so an
+  // old test result can never masquerade as a current relay output state.
+  runtime.app.get('/api/detector-status-lights', (_req, res) => {
+    const flame = detectors.getCurrentState();
+    const relay = relayLiveStateSnapshot();
+    const flameByIndex = new Map(flame.units.map((unit) => [unit.index, unit]));
+    const relayByIndex = new Map(relay.units.map((unit) => [unit.detectorIndex, unit]));
+    const units = Array.from({ length: 6 }, (_, offset) => {
+      const index = offset + 1;
+      const detector = flameByIndex.get(index);
+      const relayUnit = relayByIndex.get(index);
+      const preferRelayInternal = relay.active && relayUnit !== undefined;
+      return {
+        index,
+        online: Boolean(detector?.online),
+        fire: preferRelayInternal && typeof relayUnit?.fire === 'boolean' ? relayUnit.fire : Boolean(detector?.fire),
+        fault: preferRelayInternal && typeof relayUnit?.fault === 'boolean' ? relayUnit.fault : Boolean(detector?.fault),
+        alarmRelay: relay.active && relayUnit?.alarmRelay === true,
+        faultRelay: relay.active && relayUnit?.faultRelay === true,
+        relayObserved: relay.active
+          && typeof relayUnit?.alarmRelay === 'boolean'
+          && typeof relayUnit?.faultRelay === 'boolean',
+      };
+    });
+    res.json({
+      active: relay.active,
+      batchId: relay.batchId,
+      updatedAt: Math.max(flame.timestamp || 0, relay.updatedAt || 0),
+      units,
+    });
   });
 
   runtime.app.put('/api/production-config', requireDesktopMutation, async (req, res) => {
