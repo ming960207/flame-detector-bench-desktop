@@ -91,6 +91,10 @@ export function mergeFlameWaveformDelta(
 }
 
 export function waveformKeys(samples: FlameSample[], unit?: FlameDetectorUnitState): Array<keyof FlameSample> {
+  const reportedProbeCount = Number(unit?.probeCount);
+  if (Number.isInteger(reportedProbeCount) && reportedProbeCount >= 1 && reportedProbeCount <= CHANNEL_KEYS.length) {
+    return CHANNEL_KEYS.slice(0, reportedProbeCount);
+  }
   const hasFourthChannel = unit?.probe4 !== undefined
     || unit?.probeCount >= 4
     || unit?.protocol === 'four-wavelength'

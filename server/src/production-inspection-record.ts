@@ -37,7 +37,7 @@ export interface ProductionInspectionProductResult {
   faultAction: InspectionStatusValue;
   ledDisplay: InspectionStatusValue;
   amplitude: {
-    /** 按 P1..Pn 顺序记录本批噪声窗口真实绝对幅值。 */
+    /** 按 P2、P3 顺序记录本批噪声窗口的相对波动值。 */
     values: number[];
     status: InspectionItemStatus;
     source: 'AUTO';

@@ -3,7 +3,6 @@ import { dirname, join } from 'node:path';
 import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict.js';
 import type { FieldWaveformAnalysisSnapshot } from './closure/field-waveform-analysis.js';
 import {
-  expectedProbeChannels,
   selectedProductProfile,
   type ProductDetectionConfig,
   type ProductPrecheckReport,
@@ -40,21 +39,22 @@ function stageInterferencePassed(snapshot: FieldWaveformAnalysisSnapshot, index:
   return (['heat', 'flash', 'emc'] as const).every((stage) => unit.stages[stage]?.verdict === 'PASS');
 }
 
-function amplitudeValues(snapshot: FieldWaveformAnalysisSnapshot, index: number, probeCount: number): number[] {
+const REPORT_AMPLITUDE_CHANNELS = ['probe2', 'probe3'] as const;
+
+function amplitudeValues(snapshot: FieldWaveformAnalysisSnapshot, index: number): number[] {
   const unit = snapshot.units.find((item) => item.index === index);
   if (!unit) return [];
-  const channels = expectedProbeChannels(probeCount);
-  return channels
-    .map((channel) => unit.noiseTest?.metrics?.[channel]?.absolute)
+  return REPORT_AMPLITUDE_CHANNELS
+    .map((channel) => unit.noiseTest?.metrics?.[channel]?.fluctuation)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
 }
 
-function amplitudePassed(snapshot: FieldWaveformAnalysisSnapshot, index: number, probeCount: number): boolean {
+function amplitudePassed(snapshot: FieldWaveformAnalysisSnapshot, index: number): boolean {
   const unit = snapshot.units.find((item) => item.index === index);
   return Boolean(
     unit
     && unit.noiseTest?.verdict === 'PASS'
-    && amplitudeValues(snapshot, index, probeCount).length === probeCount,
+    && amplitudeValues(snapshot, index).length === REPORT_AMPLITUDE_CHANNELS.length,
   );
 }
 
@@ -88,8 +88,8 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
       ? autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
       : relayTestNotApplicable();
 
-    const amplitudes = amplitudeValues(input.waveformAnalysis, slot, profile.expectedProbeCount);
-    const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot, profile.expectedProbeCount);
+    const amplitudes = amplitudeValues(input.waveformAnalysis, slot);
+    const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot);
     const softwareOk = Boolean(
       precheck
       && precheck.actualSoftwareVersion

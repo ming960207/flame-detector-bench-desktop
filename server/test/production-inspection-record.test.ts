@@ -122,7 +122,7 @@ function precheck(relayEnabled = false) {
   } as any;
 }
 
-test('record keeps code status separate and marks bench-external items as not applicable', () => {
+test('record keeps code status separate and reports P2/P3 noise fluctuations as amplitude', () => {
   const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
   const record = buildProductionInspectionRecord({
     batchId: 'batch-1',
@@ -141,11 +141,11 @@ test('record keeps code status separate and marks bench-external items as not ap
   assert.equal(record.products[0]?.workCurrent.status, '不适用');
   assert.equal(record.products[0]?.fireAction.source, 'NOT_APPLICABLE');
   assert.equal(record.products[0]?.fireAction.status, '不适用');
-  assert.deepEqual(record.products[0]?.amplitude.values, [150, 180, 170]);
+  assert.deepEqual(record.products[0]?.amplitude.values, [110, 105]);
   assert.equal(record.conclusion, '合格');
   const html = productionInspectionRecordHtml(record);
   assert.match(html, /未生成/);
-  assert.match(html, /150，180，170/);
+  assert.match(html, /110，105/);
   assert.match(html, /不适用/);
 });
 

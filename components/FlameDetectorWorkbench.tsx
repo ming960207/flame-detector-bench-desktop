@@ -99,9 +99,11 @@ function cloneConfig(config: FlameDetectorConfig): FlameDetectorConfig {
 }
 
 function unitProbeKeys(unit: FlameDetectorUnitState | undefined): Array<keyof FlameSample> {
-  return unit && (unit.probe4 !== undefined || unit.probeCount >= 4 || unit.protocol === 'four-wavelength')
-    ? ['probe1', 'probe2', 'probe3', 'probe4']
-    : ['probe1', 'probe2', 'probe3'];
+  return waveformKeys([], unit);
+}
+
+function probeWavelengthLabel(probeCount: number): string {
+  return probeCount === 4 ? '四波长' : probeCount === 3 ? '三波长' : probeCount === 2 ? '双波长' : '单波长';
 }
 
 function formatProbe(value: number | undefined) {
@@ -231,7 +233,7 @@ const DetectorWaveformCard: FC<DetectorWaveformCardProps> = ({ index, unit, anal
     ...(probes.includes('probe4') ? [{ label: 'P4 / P3', value: unit?.features?.[0]?.snr43 }] : []),
   ];
   return <article className={`detector-card ${state}`}>
-    <header className="detector-card-header"><div><b>探测器 {index}</b><span>地址 {unit?.address ?? index} · {unit?.protocol === 'four-wavelength' ? '四波长' : '三波长'} · {probes.length} 路探头</span></div><div className="detector-card-status"><span className={`detector-card-live ${unit?.online ? 'is-live' : ''}`}>实时</span><strong>{analysis?.verdict === 'PASS' ? 'PASS' : analysis?.verdict === 'FAIL' ? 'FAIL' : startupLabel(unit)}</strong></div></header>
+    <header className="detector-card-header"><div><b>探测器 {index}</b><span>地址 {unit?.address ?? index} · {probeWavelengthLabel(probes.length)} · {probes.length} 路探头</span></div><div className="detector-card-status"><span className={`detector-card-live ${unit?.online ? 'is-live' : ''}`}>实时</span><strong>{analysis?.verdict === 'PASS' ? 'PASS' : analysis?.verdict === 'FAIL' ? 'FAIL' : startupLabel(unit)}</strong></div></header>
     <div className="detector-card-layout">
       <section className="detector-card-waveform"><div className="detector-card-section-heading"><b>实时波形预览</b><span>{selectedMode === 'raw' ? '原始值' : '归一化值'} · {(selectedMode === 'raw' ? rawSamples : samples).length} 点</span></div><WaveformChart samples={samples} raw={rawSamples} selectedMode={selectedMode} index={index} unit={unit} /></section>
       <div className="detector-card-data">
