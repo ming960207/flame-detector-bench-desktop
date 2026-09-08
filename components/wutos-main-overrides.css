@@ -96,6 +96,85 @@
 .wutos-detector-card__processes { padding-top: 2.5%; }
 .wutos-detector-card__failure { margin-top: 1.5%; }
 
+/*
+ * Four high-priority status LEDs are positioned inside the card header without
+ * participating in layout flow. Fixed order: fire, fault, alarm relay, fault relay.
+ * Relay LEDs use a double ring so the four states remain distinguishable without
+ * visible text; accessible names and native tooltips are still provided at runtime.
+ */
+.wutos-detector-card__status-lights {
+  position: absolute;
+  z-index: 6;
+  top: 3.2%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(3px, .28cqw, 5px);
+  min-width: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.wutos-detector-state-led {
+  position: relative;
+  display: block;
+  width: clamp(9px, .76cqw, 13px);
+  height: clamp(9px, .76cqw, 13px);
+  flex: 0 0 auto;
+  border: 1px solid rgba(130, 177, 205, .48);
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 32%, #355066 0 18%, #142d40 36%, #081725 76%);
+  box-shadow:
+    inset 0 0 4px rgba(0, 0, 0, .85),
+    0 0 0 1px rgba(55, 111, 145, .18);
+  opacity: .86;
+  pointer-events: auto;
+  transition: background .12s ease, box-shadow .12s ease, opacity .12s ease, transform .12s ease;
+}
+
+.wutos-detector-state-led.is-alarm-relay,
+.wutos-detector-state-led.is-fault-relay {
+  border-width: 2px;
+  box-shadow:
+    inset 0 0 3px rgba(0, 0, 0, .9),
+    0 0 0 1px rgba(85, 157, 193, .38),
+    0 0 0 2px rgba(5, 21, 34, .82);
+}
+
+.wutos-detector-state-led.is-fire.is-active,
+.wutos-detector-state-led.is-alarm-relay.is-active {
+  border-color: rgba(255, 154, 139, .98);
+  background: radial-gradient(circle at 34% 30%, #fff0e9 0 10%, #ff7766 25%, #ff3e38 58%, #a4161a 100%);
+  box-shadow:
+    0 0 7px rgba(255, 68, 58, .96),
+    0 0 13px rgba(255, 68, 58, .58),
+    inset 0 0 3px rgba(255, 236, 225, .72);
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+.wutos-detector-state-led.is-fault.is-active,
+.wutos-detector-state-led.is-fault-relay.is-active {
+  border-color: rgba(255, 224, 126, .98);
+  background: radial-gradient(circle at 34% 30%, #fff9dc 0 10%, #ffd65c 27%, #ffad24 60%, #a86500 100%);
+  box-shadow:
+    0 0 7px rgba(255, 186, 48, .96),
+    0 0 13px rgba(255, 177, 36, .55),
+    inset 0 0 3px rgba(255, 246, 205, .74);
+  opacity: 1;
+  transform: scale(1.08);
+}
+
+.wutos-detector-state-led.is-unknown {
+  opacity: .42;
+}
+
+.wutos-detector-card__status-lights.is-offline .wutos-detector-state-led:not(.is-active),
+.wutos-detector-card__status-lights.is-stale .wutos-detector-state-led {
+  opacity: .32;
+}
+
 .wutos-final-result-cards {
   bottom: 4.2%;
   height: clamp(20px, 12%, 46px);
@@ -164,6 +243,7 @@
 
 @media (max-height: 760px) {
   .wutos-result-model-control { font-size: clamp(5px, .56cqw, 9px); }
+  .wutos-detector-state-led { width: clamp(8px, .7cqw, 11px); height: clamp(8px, .7cqw, 11px); }
 }
 
 @media (max-width: 1100px) {
