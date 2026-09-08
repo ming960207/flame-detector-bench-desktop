@@ -5,12 +5,14 @@ import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
 
 export type WaveformAnalysisPhase = 'IDLE' | 'NOISE' | 'INTERFERENCE' | 'COMPLETE';
 export type WaveformAnalysisVerdict = 'PASS' | 'FAIL' | 'PENDING';
+export type WaveformAnalysisLogger = (message: string) => void;
 
 // M25.2 marks the PLC noise window, but the detector signal needs an additional
 // 10-second settling interval before the upper computer starts baseline sampling.
 // The PLC window remains unchanged; this intentionally reduces effective noise
 // sampling by 5 seconds to keep the signal stable before measurement.
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
+const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
 
 export interface DetectionSNRRange {
   min: number;
@@ -269,6 +271,15 @@ interface UnitAccumulator {
   latest: LatestUnitState;
   stageRatios: Record<InterferenceStage, { snr21: number | null; snr23: number | null; snr31: number | null }>;
   lastEventKey: string;
+  lastNoiseSamples: FlameSample[];
+  lastNoiseRawSamples: FlameSample[];
+  noiseAcceptedFrameCount: number;
+  noiseRejectedFrameCount: number;
+  noiseFirstFrameAt: number | null;
+  noiseLastFrameAt: number | null;
+  noiseMaxGapMs: number;
+  noiseTotalSampleCount: number;
+  noiseTotalRawSampleCount: number;
 }
 
 interface Statistics {
@@ -399,7 +410,47 @@ function newAccumulator(index: number, address = index): UnitAccumulator {
       emc: { snr21: null, snr23: null, snr31: null },
     },
     lastEventKey: '',
+    lastNoiseSamples: [],
+    lastNoiseRawSamples: [],
+    noiseAcceptedFrameCount: 0,
+    noiseRejectedFrameCount: 0,
+    noiseFirstFrameAt: null,
+    noiseLastFrameAt: null,
+    noiseMaxGapMs: 0,
+    noiseTotalSampleCount: 0,
+    noiseTotalRawSampleCount: 0,
   };
+}
+
+function compactTimestamp(timestamp: number | null): string {
+  if (timestamp === null || !Number.isFinite(timestamp)) return '-';
+  return `${timestamp}/${new Date(timestamp).toISOString()}`;
+}
+
+function compactNumber(value: number): string {
+  return Number.isFinite(value) ? String(Number(value.toFixed(3))) : '-';
+}
+
+function compactProbeSummary(samples: FlameSample[], includeFluctuation: boolean): string {
+  const usable = usableSamples(samples);
+  return CHANNEL_KEYS.map((key) => {
+    const values = channelValues(usable, key);
+    if (values.length === 0) return `${key.replace('probe', 'P')}{n=0}`;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const fluctuation = (max - min) / 2;
+    const absolute = Math.max(...values.map((value) => Math.abs(value)));
+    const fields = [
+      `n=${values.length}`,
+      `min=${compactNumber(min)}`,
+      `max=${compactNumber(max)}`,
+      `last=${compactNumber(values.at(-1)!)}`,
+    ];
+    if (includeFluctuation) {
+      fields.push(`fluct=${compactNumber(fluctuation)}`, `abs=${compactNumber(absolute)}`);
+    }
+    return `${key.replace('probe', 'P')}{${fields.join(',')}}`;
+  }).join(';');
 }
 
 function finiteRatio(value: unknown): number | null {
@@ -605,15 +656,65 @@ export class FieldWaveformAnalysis {
   private noiseEndedAt: number | null = null;
   private noiseWindowOpenedAt: number | null = null;
   private noiseCompleted = false;
+  private noiseNextTrendLogAt: number | null = null;
   private automaticRunActive = false;
   private detectorStartupReady = true;
   private detectorStartupFailureReason: string | undefined;
   private detectorStartupBarrierConfigured = false;
   private readonly startupCapturePrimed = new Set<number>();
 
-  constructor(config?: Partial<WaveformAnalysisConfig>) {
+  constructor(config?: Partial<WaveformAnalysisConfig>, logger?: WaveformAnalysisLogger) {
     this.config = normalizeConfig(config);
+    this.log = logger ?? (() => undefined);
     for (let index = 1; index <= 6; index += 1) this.units.set(index, newAccumulator(index));
+  }
+
+  private readonly log: WaveformAnalysisLogger;
+
+  private logNoiseWindowStart(timestamp: number): void {
+    this.log(
+      `[噪声窗口] 开始 batch=${this.batchId ?? '-'} plcOpenAt=${compactTimestamp(this.noiseWindowOpenedAt)} `
+      + `captureStartAt=${compactTimestamp(timestamp)} stabilizationWaitMs=${UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS}`,
+    );
+  }
+
+  private logPLCNoiseWindowBoundary(kind: '开启' | '关闭', timestamp: number, reason?: string): void {
+    this.log(
+      `[噪声窗口][PLC] ${kind} batch=${this.batchId ?? '-'} at=${compactTimestamp(timestamp)}`
+      + (reason ? ` reason=${reason}` : ''),
+    );
+  }
+
+  private logNoiseWindowTrend(timestamp: number): void {
+    const devices = Array.from(this.units.values())
+      .sort((a, b) => a.index - b.index)
+      .map((accumulator) => {
+        const ageMs = accumulator.noiseLastFrameAt === null ? '-' : Math.max(0, timestamp - accumulator.noiseLastFrameAt);
+        return `D${accumulator.index}{frames=${accumulator.noiseAcceptedFrameCount},reject=${accumulator.noiseRejectedFrameCount},`
+          + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},`
+          + `ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0},`
+          + `N[${compactProbeSummary(accumulator.lastNoiseSamples, false)}]}`;
+      })
+      .join(' ');
+    this.log(`[噪声窗口][每秒] at=${compactTimestamp(timestamp)} ${devices}`);
+  }
+
+  private logNoiseWindowEnd(timestamp: number, reason: string, plcOpenAt: number | null): void {
+    const durationMs = this.noiseStartedAt === null ? '-' : Math.max(0, timestamp - this.noiseStartedAt);
+    this.log(
+      `[噪声窗口] 结束 batch=${this.batchId ?? '-'} reason=${reason} plcOpenAt=${compactTimestamp(plcOpenAt)} `
+      + `captureStartAt=${compactTimestamp(this.noiseStartedAt)} captureEndAt=${compactTimestamp(timestamp)} durationMs=${durationMs}`,
+    );
+    for (const accumulator of Array.from(this.units.values()).sort((a, b) => a.index - b.index)) {
+      const ageMs = accumulator.noiseLastFrameAt === null ? '-' : Math.max(0, timestamp - accumulator.noiseLastFrameAt);
+      this.log(
+        `[噪声窗口][D${accumulator.index}] frames=${accumulator.noiseAcceptedFrameCount},reject=${accumulator.noiseRejectedFrameCount},`
+        + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.noiseRawSamples.length},`
+        + `firstFrameAt=${compactTimestamp(accumulator.noiseFirstFrameAt)},lastFrameAt=${compactTimestamp(accumulator.noiseLastFrameAt)},`
+        + `ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0} `
+        + `N[${compactProbeSummary(accumulator.noiseSamples, true)}] R[${compactProbeSummary(accumulator.noiseRawSamples, true)}]`,
+      );
+    }
   }
 
   updateConfig(config?: Partial<WaveformAnalysisConfig>): void {
@@ -644,6 +745,8 @@ export class FieldWaveformAnalysis {
         ? 'flash' : status.io?.steps?.stepM11_2 === true ? 'emc' : null;
     const previousCaptureStage = this.captureStage;
     const previousNoiseCaptureActive = this.noiseCaptureActive;
+    const previousNoiseWindowOpenedAt = this.noiseWindowOpenedAt;
+    const noiseWindowJustOpened = explicitNoiseCapture && this.noiseWindowOpenedAt === null;
     const noiseWindowOpenedAt = explicitNoiseCapture
       ? this.noiseWindowOpenedAt ?? status.timestamp
       : null;
@@ -660,12 +763,24 @@ export class FieldWaveformAnalysis {
             ? 'SIGNAL_STABILIZATION'
             : status.heatSubstage ?? 'IDLE';
     const processComplete = isPLCProcessComplete(status);
+    const noiseCaptureEnded = previousNoiseCaptureActive && !noiseCaptureActive;
+    const plcWindowClosedWithoutCapture = !explicitNoiseCapture
+      && previousNoiseWindowOpenedAt !== null
+      && !previousNoiseCaptureActive;
+    const noiseEndReason = processComplete
+      ? 'PROCESS_COMPLETE'
+      : activeInterferenceStage
+        ? 'INTERFERENCE_STAGE_STARTED'
+        : explicitNoiseCapture
+          ? 'CAPTURE_GATE_CLOSED'
+          : 'PLC_WINDOW_CLOSED';
     const automaticRunActive = status.autoRunning || status.io?.internal?.autoRunning === true;
     const automaticRunStarted = automaticRunActive && !this.automaticRunActive;
     this.automaticRunActive = automaticRunActive;
     const canStartBatch = stage !== 'RETURN_HOME' && stage !== 'COMPLETE' && status.stage !== 'FAULT';
     if (canStartBatch && (automaticRunStarted || (!this.batchId && explicitNoiseCapture))) this.startBatch(status.timestamp);
     this.noiseWindowOpenedAt = noiseWindowOpenedAt;
+    if (noiseWindowJustOpened) this.logPLCNoiseWindowBoundary('开启', status.timestamp);
 
     this.processStage = stage;
     this.updatedAt = status.timestamp;
@@ -680,10 +795,17 @@ export class FieldWaveformAnalysis {
     this.updateHeatStageTimings(currentHeatSubstage, status.timestamp);
     if (noiseCaptureActive && !previousNoiseCaptureActive && this.noiseStartedAt === null) {
       this.noiseStartedAt = status.timestamp;
+      this.noiseNextTrendLogAt = status.timestamp + NOISE_TREND_LOG_INTERVAL_MS;
+      this.logNoiseWindowStart(status.timestamp);
     }
-    if (previousNoiseCaptureActive && !noiseCaptureActive) this.noiseCompleted = true;
-    if (previousNoiseCaptureActive && !noiseCaptureActive && this.noiseEndedAt === null) {
-      this.noiseEndedAt = status.timestamp;
+    if (noiseCaptureEnded) {
+      this.noiseCompleted = true;
+      if (this.noiseEndedAt === null) this.noiseEndedAt = status.timestamp;
+      this.noiseNextTrendLogAt = null;
+      this.logNoiseWindowEnd(status.timestamp, noiseEndReason, previousNoiseWindowOpenedAt);
+    }
+    if (plcWindowClosedWithoutCapture) {
+      this.logPLCNoiseWindowBoundary('关闭', status.timestamp, 'CAPTURE_NOT_STARTED');
     }
     if (previousCaptureStage && previousCaptureStage !== activeInterferenceStage) this.completedStages.add(previousCaptureStage);
     if (processComplete) {
@@ -710,6 +832,7 @@ export class FieldWaveformAnalysis {
       accumulator.address = unit.address;
       accumulator.latest = latestFromUnit(unit);
       this.units.set(unit.index, accumulator);
+      const capturingNoise = this.batchId !== null && this.capturePhase === 'NOISE';
       if (
         !this.batchId
         || !this.capturePhase
@@ -717,7 +840,10 @@ export class FieldWaveformAnalysis {
         || !unit.sourceReady
         || !unit.syncOk
         || !this.detectorStartupReady
-      ) continue;
+      ) {
+        if (capturingNoise) accumulator.noiseRejectedFrameCount += 1;
+        continue;
+      }
 
       // The service's normalized samples remove the detector carrier/baseline
       // (for example the signed 0x8001 marker). Raw samples remain a fallback
@@ -731,11 +857,23 @@ export class FieldWaveformAnalysis {
       accumulator.lastEventKey = eventKey;
       if (this.detectorStartupBarrierConfigured && !this.startupCapturePrimed.has(unit.index)) {
         this.startupCapturePrimed.add(unit.index);
+        if (capturingNoise) accumulator.noiseRejectedFrameCount += 1;
         continue;
       }
       if (this.capturePhase === 'NOISE') {
         accumulator.noiseSamples.push(...samples);
         accumulator.noiseRawSamples.push(...capturedRawSamples);
+        accumulator.noiseTotalSampleCount += samples.length;
+        accumulator.noiseTotalRawSampleCount += capturedRawSamples.length;
+        const frameAt = Number.isFinite(unit.lastUpdate) && unit.lastUpdate > 0 ? unit.lastUpdate : state.timestamp;
+        if (accumulator.noiseLastFrameAt !== null) {
+          accumulator.noiseMaxGapMs = Math.max(accumulator.noiseMaxGapMs, Math.max(0, frameAt - accumulator.noiseLastFrameAt));
+        }
+        accumulator.noiseFirstFrameAt ??= frameAt;
+        accumulator.noiseLastFrameAt = frameAt;
+        accumulator.lastNoiseSamples = samples;
+        accumulator.lastNoiseRawSamples = capturedRawSamples;
+        accumulator.noiseAcceptedFrameCount += 1;
       }
       if (this.capturePhase === 'INTERFERENCE' && this.captureStage) {
         accumulator.interferenceSamples[this.captureStage].push(...samples);
@@ -751,6 +889,12 @@ export class FieldWaveformAnalysis {
       for (const stage of ['heat', 'flash', 'emc'] as InterferenceStage[]) {
         accumulator.interferenceSamples[stage] = accumulator.interferenceSamples[stage].slice(-2_000);
       }
+    }
+    if (this.capturePhase === 'NOISE' && this.noiseNextTrendLogAt !== null && state.timestamp >= this.noiseNextTrendLogAt) {
+      this.logNoiseWindowTrend(state.timestamp);
+      do {
+        this.noiseNextTrendLogAt += NOISE_TREND_LOG_INTERVAL_MS;
+      } while (this.noiseNextTrendLogAt <= state.timestamp);
     }
   }
 
@@ -800,6 +944,7 @@ export class FieldWaveformAnalysis {
     this.noiseEndedAt = null;
     this.noiseWindowOpenedAt = null;
     this.noiseCompleted = false;
+    this.noiseNextTrendLogAt = null;
     this.detectorStartupReady = true;
     this.detectorStartupFailureReason = undefined;
     this.startupCapturePrimed.clear();

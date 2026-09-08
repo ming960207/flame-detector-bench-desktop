@@ -253,7 +253,10 @@ export function createFieldStatusRuntime(
   let currentStatus = source.getCurrent();
   let productConfig = normalizeProductDetectionConfig(initialProductConfig);
   const initialProfile = selectedProductProfile(productConfig);
-  const waveformAnalysis = new FieldWaveformAnalysis(productAwareWaveformConfig(config.flame.waveformAnalysis, initialProfile.expectedProbeCount));
+  const waveformAnalysis = new FieldWaveformAnalysis(
+    productAwareWaveformConfig(config.flame.waveformAnalysis, initialProfile.expectedProbeCount),
+    (message) => console.log(message),
+  );
   if (currentStatus) waveformAnalysis.observeProcess(currentStatus);
   let waveformAnalysisState = waveformAnalysis.snapshot();
   let productPrecheck: ProductPrecheckReport | null = null;
