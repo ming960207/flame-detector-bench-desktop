@@ -28,10 +28,10 @@ function product(slot: number, code: string | null, verdict: '合格' | '不合�
   };
 }
 
-function record(products: ProductionInspectionProductResult[]): ProductionInspectionRecord {
+function record(products: ProductionInspectionProductResult[], batchId = 'batch-label-1'): ProductionInspectionRecord {
   return {
     schemaVersion: 1,
-    batchId: 'batch-label-1',
+    batchId,
     productModel: 'GHT-1050-02',
     productionDate: new Date(2026, 8, 1, 13, 0, 0).getTime(),
     inspector: '测试员',
@@ -100,6 +100,20 @@ test('missing product code becomes BLOCKED without consuming the printable queue
   await store.markPrinted(first!.id, 'worker-a');
   const secondPrintable = await store.claimNext('worker-a');
   assert.equal(secondPrintable?.slot, 3, '编号缺失 D2 必须被跳过且不能阻塞后续槽位');
+});
+
+test('automatic claim can start from the time auto print was enabled', async () => {
+  const { store } = await fixture();
+  const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, `OLD-${offset + 1}`, '合格'));
+  await store.enqueueProductionRecord(record(products), detectorVerdict());
+
+  const enabledAt = Date.now() + 1;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const nextProducts = Array.from({ length: 6 }, (_, offset) => product(offset + 1, `NEW-${offset + 1}`, '合格'));
+  await store.enqueueProductionRecord(record(nextProducts, 'batch-label-2'), detectorVerdict());
+
+  const claimed = await store.claimNext('worker-a', undefined, enabledAt);
+  assert.equal(claimed?.productCode, 'NEW-1', '开启自动打印前生成的标签不得被自动打印');
 });
 
 test('physical print failure pauses queue until explicit retry and printed label can be reprinted', async () => {

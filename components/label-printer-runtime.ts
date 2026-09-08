@@ -40,6 +40,7 @@ export interface LabelPrinterDevice {
 
 export interface LocalLabelPrinterConfig {
   autoPrint: boolean;
+  autoPrintSince: number | null;
   connectionType: PrinterConnectionType;
   printerName: string;
   printerPort: number;
@@ -85,7 +86,8 @@ interface PendingRequest {
 
 const STORAGE_KEY = 'flame-detector-label-printer-config-v1';
 const DEFAULT_CONFIG: LocalLabelPrinterConfig = {
-  autoPrint: true,
+  autoPrint: false,
+  autoPrintSince: null,
   connectionType: 'usb',
   printerName: '',
   printerPort: 0,
@@ -104,8 +106,11 @@ function normalizeConnectionType(value: unknown): PrinterConnectionType {
 function loadConfig(): LocalLabelPrinterConfig {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<LocalLabelPrinterConfig>;
+    const storedAutoPrintSince = Number(parsed.autoPrintSince);
+    const autoPrint = parsed.autoPrint === true && Number.isFinite(storedAutoPrintSince) && storedAutoPrintSince > 0;
     return {
-      autoPrint: parsed.autoPrint !== false,
+      autoPrint,
+      autoPrintSince: autoPrint ? storedAutoPrintSince : null,
       connectionType: normalizeConnectionType(parsed.connectionType),
       printerName: typeof parsed.printerName === 'string' ? parsed.printerName : '',
       printerPort: Number.isFinite(Number(parsed.printerPort)) ? Number(parsed.printerPort) : 0,
@@ -642,6 +647,9 @@ class LabelPrinterRuntime {
 
   updateConfig(patch: Partial<LocalLabelPrinterConfig>): void {
     const config: LocalLabelPrinterConfig = { ...this.state.config, ...patch };
+    if (patch.autoPrint === true && !this.state.config.autoPrint) config.autoPrintSince = Date.now();
+    if (patch.autoPrint === false) config.autoPrintSince = null;
+    if (config.autoPrint && (!Number.isFinite(config.autoPrintSince) || (config.autoPrintSince ?? 0) <= 0)) config.autoPrintSince = Date.now();
     config.connectionType = normalizeConnectionType(config.connectionType);
     config.density = Math.max(1, Math.min(15, Number(config.density) || 3));
     config.labelType = [1, 2, 3, 4, 5, 6, 10].includes(Number(config.labelType)) ? Number(config.labelType) : 1;
@@ -726,7 +734,10 @@ class LabelPrinterRuntime {
     this.busy = true;
     let claimed: ProductLabelPrintJob | null = null;
     try {
-      const payload = await this.post('/api/label-print/claim', { workerId: this.workerId }) as { job: ProductLabelPrintJob | null };
+      const payload = await this.post('/api/label-print/claim', {
+        workerId: this.workerId,
+        createdAfter: this.state.config.autoPrintSince ?? Date.now(),
+      }) as { job: ProductLabelPrintJob | null };
       claimed = payload.job;
       if (!claimed) return;
       this.emit({ health: 'printing', detail: `正在打印 D${claimed.slot} · ${claimed.verdict}`, currentJobId: claimed.id });

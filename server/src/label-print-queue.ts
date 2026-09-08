@@ -205,22 +205,23 @@ export class LabelPrintQueueStore {
     return changed;
   }
 
-  async claimNext(workerId: string, leaseMs = DEFAULT_LEASE_MS): Promise<ProductLabelPrintJob | null> {
+  async claimNext(workerId: string, leaseMs = DEFAULT_LEASE_MS, createdAfter = 0): Promise<ProductLabelPrintJob | null> {
     return this.mutate(async () => {
       const now = Date.now();
       const recovered = this.recoverExpiredLeases(now);
+      const eligible = (item: ProductLabelPrintJob) => item.createdAt >= Math.max(0, Number(createdAfter) || 0);
 
       // A failed physical-print attempt is ambiguous: the paper may have come out
       // even if the ACK was lost. Stop automatic progression here so D2 cannot be
       // printed after an unresolved D1 failure and the operator cannot mis-stick
       // the shifted paper sequence. Explicit retry/reprint clears the barrier.
-      if (this.state.jobs.some((item) => item.status === 'FAILED')) {
+      if (this.state.jobs.some((item) => item.status === 'FAILED' && eligible(item))) {
         if (recovered) await this.save();
         return null;
       }
 
       const job = this.state.jobs
-        .filter((item) => item.status === 'WAITING')
+        .filter((item) => item.status === 'WAITING' && eligible(item))
         .sort((a, b) => a.createdAt - b.createdAt || a.slot - b.slot)[0];
       if (!job) {
         if (recovered) await this.save();
