@@ -22,7 +22,7 @@ import type { FlameUnitConfig } from '../config.js';
  * transport implementation do not need to be forked.
  */
 
-type InternalService = FlameDetectorService & Record<string, any>;
+type InternalService = Record<string, any>;
 
 type RxStats = {
   bytes: number;
