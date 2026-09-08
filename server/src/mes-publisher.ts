@@ -1,5 +1,6 @@
 import { existsSync, promises as fs, readFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ProductionInspectionProductResult } from './production-inspection-record.js';
 import type { ProductionInspectionRecordStore } from './production-inspection-record-store.js';
 import type { ProductionRunArchive } from './production-run-coordinator.js';
@@ -60,12 +61,13 @@ export interface MESPublicStatus {
 
 const DEFAULT_MES_BASE_URL = 'http://10.11.2.144:5051';
 const DEFAULT_OUTBOX_FILE = join(process.env.APP_DATA_DIR || process.cwd(), 'mes-upload-outbox.json');
-const REFERENCE_MES_CONFIG_FILE = 'D:\\code\\小工具\\MES对接\\relay-client\\mes_config.json';
+const MES_CONFIG_FILE = process.env.MES_CONFIG_FILE
+  || join(dirname(fileURLToPath(import.meta.url)), '..', 'mes_config.json');
 const MES_RETRY_INTERVAL_MS = 30_000;
 
-function referenceMESConfig(): { baseUrl?: string; apiKey?: string } {
+function localMESConfig(): { baseUrl?: string; apiKey?: string } {
   try {
-    const source = JSON.parse(readFileSync(REFERENCE_MES_CONFIG_FILE, 'utf8')) as Record<string, unknown>;
+    const source = JSON.parse(readFileSync(MES_CONFIG_FILE, 'utf8')) as Record<string, unknown>;
     return {
       baseUrl: typeof source.mes_gateway === 'string' ? source.mes_gateway.trim() : undefined,
       apiKey: typeof source.mes_api_key === 'string' ? source.mes_api_key.trim() : undefined,
@@ -76,11 +78,11 @@ function referenceMESConfig(): { baseUrl?: string; apiKey?: string } {
 }
 
 export function defaultMESConfig(): MESConfig {
-  const reference = referenceMESConfig();
+  const local = localMESConfig();
   return {
     enabled: process.env.MES_ENABLED === 'true',
-    baseUrl: process.env.MES_BASE_URL || reference.baseUrl || DEFAULT_MES_BASE_URL,
-    apiKey: process.env.MES_API_KEY || reference.apiKey || '',
+    baseUrl: process.env.MES_BASE_URL || local.baseUrl || DEFAULT_MES_BASE_URL,
+    apiKey: process.env.MES_API_KEY || local.apiKey || '',
     operatorName: process.env.MES_OPERATOR_NAME || '',
     requestTimeoutMs: 15_000,
   };
