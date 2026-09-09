@@ -5,6 +5,25 @@ function Fail([string]$Message) {
     exit 1
 }
 
+function Read-TokenSecurely {
+    Write-Host ''
+    Write-Host 'First-time upload setup'
+    Write-Host 'No GitHub upload token is configured on this Windows account.'
+    Write-Host 'Paste the fine-grained GitHub token for this repository and press Enter.'
+    Write-Host 'The token will be saved as the current Windows user environment variable:'
+    Write-Host 'FLAME_BENCH_GITHUB_TOKEN'
+    Write-Host 'The token will not be written into this repository.'
+    Write-Host ''
+
+    $secure = Read-Host 'GitHub token' -AsSecureString
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 
@@ -34,14 +53,33 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'Machine')
+$tokenSource = 'machine environment'
 if (-not $token) {
     $token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'User')
+    $tokenSource = 'user environment'
 }
 if (-not $token) {
     $token = $env:FLAME_BENCH_GITHUB_TOKEN
+    $tokenSource = 'current process environment'
 }
+
 if (-not $token) {
-    Fail 'FLAME_BENCH_GITHUB_TOKEN is not configured. Upload requires a repository write token, but no Git login is required.'
+    $token = Read-TokenSecurely
+    if (-not $token -or [string]::IsNullOrWhiteSpace($token)) {
+        Fail 'No GitHub token was entered.'
+    }
+
+    $token = $token.Trim()
+    try {
+        [Environment]::SetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', $token, 'User')
+        $env:FLAME_BENCH_GITHUB_TOKEN = $token
+        $tokenSource = 'new user environment deployment'
+        Write-Host ''
+        Write-Host 'SUCCESS: GitHub token was saved for the current Windows user.'
+        Write-Host 'Future log uploads will use it automatically.'
+    } catch {
+        Fail "Unable to save FLAME_BENCH_GITHUB_TOKEN for the current Windows user: $($_.Exception.Message)"
+    }
 }
 
 $deviceGitName = 'Flame Detector Bench'
@@ -59,7 +97,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Git identity: $deviceGitName <$deviceGitEmail>"
 Write-Host 'Git identity scope: repository only'
-Write-Host 'Authentication: dedicated environment token, no local Git login'
+Write-Host "Authentication: $tokenSource, no local Git login"
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $archiveRelative = "diagnostic-logs/$stamp"
@@ -171,7 +209,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
         Write-Host 'The local log commit was created, but authenticated push failed.'
-        Write-Host 'Verify FLAME_BENCH_GITHUB_TOKEN has write access to this repository.'
+        Write-Host 'Verify the configured GitHub token has Contents: Read and write permission for this repository.'
         exit 1
     }
 } finally {
