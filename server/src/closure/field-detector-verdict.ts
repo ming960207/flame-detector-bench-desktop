@@ -20,6 +20,7 @@ import type {
 
 export type FieldDetectorVerdict = 'PASS' | 'FAIL' | 'PENDING';
 export type FieldQualityGrade = 'A_PASS' | 'B_PASS' | 'FAIL' | 'PENDING';
+export type FieldResultClassification = 'PRODUCT_RESULT' | 'TEST_INVALID';
 
 export interface FieldDetectorMetrics {
   noiseRms: number | null;
@@ -39,6 +40,7 @@ export interface FieldDetectorResult {
   verdict: FieldDetectorVerdict;
   grade: FieldQualityGrade;
   reason?: string;
+  classification?: FieldResultClassification;
   sampledAt: number;
   metrics: FieldDetectorMetrics;
   precheck?: ProductPrecheckUnitResult;
@@ -54,6 +56,8 @@ export interface FieldDetectorBatchVerdict {
   expectedSoftwareVersion?: string;
   expectedProbeCount?: number;
   productPrecheckVerdict?: ProductPrecheckReport['verdict'] | null;
+  testInvalidCount?: number;
+  productFailCount?: number;
 }
 
 const REQUIRED_PRODUCTION_SLOTS = [1, 2, 3, 4, 5, 6] as const;
@@ -193,6 +197,23 @@ function noiseThresholdFailure(
   return undefined;
 }
 
+function precheckHasProductFailure(precheck: ProductPrecheckUnitResult): boolean {
+  return precheck.reasons.some((reason) => reason === 'SOFTWARE_VERSION_MISMATCH'
+    || reason === 'PROBE_COUNT_MISMATCH'
+    || reason === 'DETECTOR_FAULT_AT_PRECHECK'
+    || reason === 'RELAY_FUNCTIONAL_TEST_FAILED');
+}
+
+function precheckIsTestInvalid(precheck: ProductPrecheckUnitResult | undefined): boolean {
+  if (!precheck || precheck.verdict !== 'FAIL') return false;
+  if (precheckHasProductFailure(precheck)) return false;
+  return precheck.reasons.includes('TEST_INFRASTRUCTURE_INVALID')
+    || precheck.reasons.includes('SOFTWARE_VERSION_NOT_CONFIGURED')
+    || precheck.reasons.includes('SOFTWARE_VERSION_READ_FAILED')
+    || precheck.reasons.includes('PROBE_COUNT_READ_FAILED')
+    || precheck.reasons.includes('SENSITIVITY_READ_FAILED');
+}
+
 function result(
   base: Pick<FieldDetectorResult, 'index' | 'address' | 'sampledAt'>,
   metrics: FieldDetectorMetrics,
@@ -201,12 +222,14 @@ function result(
   reason?: string,
   precheck?: ProductPrecheckUnitResult,
   missingProbes: ChannelKey[] = [],
+  classification: FieldResultClassification = 'PRODUCT_RESULT',
 ): FieldDetectorResult {
   return {
     ...base,
     metrics,
     verdict,
     grade,
+    classification,
     ...(reason ? { reason } : {}),
     ...(precheck ? { precheck } : {}),
     ...(missingProbes.length > 0 ? { noDataProbes: missingProbes } : {}),
@@ -243,20 +266,24 @@ function evaluateUnit(
     return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
   }
   // Product precheck is evidence collected during the signal-stabilization wait.
-  // Keep its detailed reasons attached to the unit, but do not expose an operator
-  // NG result while the mechanical/waveform inspection is still running. The same
-  // recorded failure becomes authoritative once the quantitative process completes.
+  // Transport/configuration failures remain blocking, but are explicitly classified
+  // as TEST_INVALID so production reporting can ask for a retest instead of counting
+  // them as a product-quality NG. Genuine mismatch/fault/relay-function evidence is
+  // still classified as PRODUCT_RESULT and remains an authoritative product failure.
   if (precheck?.verdict === 'FAIL') {
     if (!complete) {
       return result(base, metrics, 'PENDING', 'PENDING', 'PRODUCT_PRECHECK_RECORDED', precheck, missingProbes);
     }
+    if (precheckIsTestInvalid(precheck)) {
+      return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
+    }
     return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
   }
   if (productConfig && complete && precheck?.verdict === 'PENDING') {
-    return result(base, metrics, 'FAIL', 'FAIL', 'PRODUCT_PRECHECK_NOT_COMPLETED', precheck, missingProbes);
+    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
   }
   if (productConfig && complete && !precheck) {
-    return result(base, metrics, 'FAIL', 'FAIL', 'PRODUCT_PRECHECK_NOT_COMPLETED', undefined, missingProbes);
+    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', undefined, missingProbes, 'TEST_INVALID');
   }
   if (missingProbes.length > 0) {
     return result(base, metrics, 'FAIL', 'FAIL', `${missingProbes[0].toUpperCase()}_SIGNAL_NO_DATA`, precheck, missingProbes);
@@ -358,6 +385,8 @@ export function evaluateFieldDetectorBatch(
         : analysisSnapshot
           ? 'A_PASS'
           : 'PENDING';
+  const testInvalidCount = units.filter((unit) => unit.classification === 'TEST_INVALID').length;
+  const productFailCount = units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length;
   return {
     verdict: grade === 'FAIL'
       ? 'FAIL'
@@ -367,6 +396,8 @@ export function evaluateFieldDetectorBatch(
     grade,
     units,
     timestamp: state.timestamp,
+    testInvalidCount,
+    productFailCount,
     ...(productConfig && productProfile ? {
       productType: productConfig.selectedType,
       expectedSoftwareVersion: productProfile.expectedSoftwareVersion,
