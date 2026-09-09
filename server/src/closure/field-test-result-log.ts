@@ -9,6 +9,7 @@ import {
   selectedProductProfile,
   type ProductDetectionConfig,
   type ProductPrecheckReport,
+  type ProductPrecheckUnitResult,
 } from '../product-profile.js';
 import {
   DEFAULT_DETECTION_QUALITY_CONFIG,
@@ -93,10 +94,15 @@ export interface FieldTestResultLogger {
   record(test: CompletedFieldTest): string | void;
 }
 
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const SHANGHAI_TIMEZONE_LABEL = 'Asia/Shanghai (UTC+8)';
+
+function shanghaiDate(timestamp: number): Date {
+  return new Date(timestamp + SHANGHAI_OFFSET_MS);
+}
+
 function datePart(timestamp: number): string {
-  const date = new Date(timestamp);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
+  return shanghaiDate(timestamp).toISOString().slice(0, 10);
 }
 
 function rotateCorruptLog(file: string): void {
@@ -126,11 +132,16 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_SOURCE_NOT_READY: '光源未就绪',
   DETECTOR_SYNC_NOT_OK: '同步异常',
   SOFTWARE_VERSION_NOT_CONFIGURED: '未配置软件版本基准',
+  SOFTWARE_VERSION_READ_FAILED: '软件版本读取失败',
   SOFTWARE_VERSION_MISMATCH: '软件版本不一致',
+  PROBE_COUNT_READ_FAILED: '探头数量读取失败',
   PROBE_COUNT_MISMATCH: '探头数量不一致',
+  SENSITIVITY_READ_FAILED: '灵敏度读取失败',
   DETECTOR_FAULT_AT_PRECHECK: '产品预检时探测器故障',
   PRECHECK_READ_FAILED: '产品预检读取失败',
   PRODUCT_PRECHECK_NOT_COMPLETED: '产品预检未完成',
+  TEST_INFRASTRUCTURE_INVALID: '测试链路异常，需复测',
+  TEST_INVALID_RETEST_REQUIRED: '测试无效，需复测',
   DETECTOR_STARTUP_FAILED: '探测器启动失败',
   DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
   DETECTOR_STARTUP_DISCONNECTED: '探测器启动时未连接',
@@ -188,6 +199,23 @@ function precheckReasonText(reason: string): string {
   return REASON_TEXT[reason] ?? reason;
 }
 
+function precheckHasProductFailure(unit: ProductPrecheckUnitResult): boolean {
+  return unit.reasons.some((reason) => reason === 'SOFTWARE_VERSION_MISMATCH'
+    || reason === 'PROBE_COUNT_MISMATCH'
+    || reason === 'DETECTOR_FAULT_AT_PRECHECK'
+    || reason === 'RELAY_FUNCTIONAL_TEST_FAILED');
+}
+
+function precheckNeedsRetest(unit: ProductPrecheckUnitResult): boolean {
+  return unit.verdict === 'FAIL'
+    && !precheckHasProductFailure(unit)
+    && (unit.reasons.includes('TEST_INFRASTRUCTURE_INVALID')
+      || unit.reasons.includes('SOFTWARE_VERSION_NOT_CONFIGURED')
+      || unit.reasons.includes('SOFTWARE_VERSION_READ_FAILED')
+      || unit.reasons.includes('PROBE_COUNT_READ_FAILED')
+      || unit.reasons.includes('SENSITIVITY_READ_FAILED'));
+}
+
 function valueText(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : '-';
 }
@@ -198,10 +226,10 @@ function roundedValueText(value: unknown): string {
 
 function localDateTime(timestamp: number | null): string {
   if (timestamp === null) return '-';
-  const date = new Date(timestamp);
+  const date = shanghaiDate(timestamp);
   if (!Number.isFinite(date.getTime())) return '-';
   const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
 }
 
 function startupStateText(state: string | undefined): string {
@@ -287,7 +315,7 @@ function formalNoiseFailureDetails(
   maxFluctuation: number,
   maxAbsolute: number | undefined,
 ): string[] {
-  if (unit.grade !== 'FAIL' || !analysis?.noiseTest) return [];
+  if (unit.classification === 'TEST_INVALID' || unit.grade !== 'FAIL' || !analysis?.noiseTest) return [];
   const details: string[] = [];
   for (const key of channels) {
     const fluctuation = noiseMetric(analysis, key, 'fluctuation');
@@ -322,8 +350,9 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const firstPrecheck = precheckUnits[0];
     const analysisByIndex = new Map((test.waveformAnalysis?.units ?? []).map((unit) => [unit.index, unit]));
     const durationMs = test.startedAt === null ? null : Math.max(0, test.completedAt - test.startedAt);
-    const finalResult = resultText(test.finalVerdict.verdict);
-    const finalGrade = gradeText(test.finalVerdict.grade);
+    const retestRequired = test.finalVerdict.reason === 'TEST_INVALID_RETEST_REQUIRED';
+    const finalResult = retestRequired ? '需复测' : resultText(test.finalVerdict.verdict);
+    const finalGrade = retestRequired ? '需复测' : gradeText(test.finalVerdict.grade);
     const profile = test.productConfig ? selectedProductProfile(test.productConfig) : null;
     const productType = test.productConfig?.selectedType
       ?? test.detectorVerdict.productType
@@ -346,6 +375,11 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const noiseWindowDurationMs = noiseWindowStart !== null && noiseWindowEnd !== null
       ? Math.max(0, noiseWindowEnd - noiseWindowStart)
       : null;
+    const aCount = units.filter((unit) => unit.grade === 'A_PASS').length;
+    const bCount = units.filter((unit) => unit.grade === 'B_PASS').length;
+    const retestCount = units.filter((unit) => unit.classification === 'TEST_INVALID').length;
+    const ngCount = units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length;
+    const pendingCount = units.filter((unit) => unit.grade === 'PENDING').length;
     const summary = [
       `批次：${test.batchId}`,
       ...(productLabel ? [`产品：${productLabel}`] : []),
@@ -355,7 +389,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       `结果：${finalResult}`,
       `等级：${finalGrade}`,
       `耗时：${durationMs === null ? '未知' : `${(durationMs / 1000).toFixed(1)}秒`}`,
-      `设备：${units.length}（A ${units.filter((unit) => unit.grade === 'A_PASS').length} / B ${units.filter((unit) => unit.grade === 'B_PASS').length} / NG ${units.filter((unit) => unit.grade === 'FAIL').length} / 待检 ${units.filter((unit) => unit.grade === 'PENDING').length}）`,
+      `设备：${units.length}（A ${aCount} / B ${bCount} / NG ${ngCount} / 复测 ${retestCount} / 待检 ${pendingCount}）`,
     ].join(' | ');
 
     const precheckRows = precheckUnits.map((unit) => [
@@ -367,7 +401,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       String(unit.expectedProbeCount),
       unit.fireAlarm === null ? '-' : unit.fireAlarm ? '有火警' : '无火警',
       unit.fault === null ? '-' : unit.fault ? '故障' : '无故障',
-      unit.verdict === 'PASS' ? '通过' : unit.verdict === 'FAIL' ? '异常' : '待检',
+      unit.verdict === 'PASS' ? '通过' : precheckNeedsRetest(unit) ? '需复测' : unit.verdict === 'FAIL' ? '异常' : '待检',
       unit.reasons.length ? unit.reasons.map(precheckReasonText).join('；') : '-',
     ]);
 
@@ -385,7 +419,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map(channelLabel).join('/')}` : '';
       const explanation = [reasonText(unit), noData, ...formalNoiseDetails].filter(Boolean).join('；');
       return [
-        String(unit.index), String(unit.address), gradeText(unit.grade),
+        String(unit.index), String(unit.address), unit.classification === 'TEST_INVALID' ? '需复测' : gradeText(unit.grade),
         noiseMetricSummary(analysis, expectedChannels, 'fluctuation'),
         noiseMetricSummary(analysis, expectedChannels, 'absolute'),
         valueText(metrics.noiseRms), valueText(metrics.noisePeakToPeak), valueText(metrics.noiseAbsolute),
@@ -456,7 +490,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
     const lines = [
       '='.repeat(96),
-      `完成时间：${localDateTime(test.completedAt)}`,
+      `完成时间：${localDateTime(test.completedAt)}（${SHANGHAI_TIMEZONE_LABEL}）`,
       summary,
       '',
       '产品预检',
@@ -466,6 +500,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       '',
       '设备结果明细',
       '说明：正式噪声判定使用有效探头 RAW 波动值=(max-min)/2 与 RAW 绝对值；真实 RMS 仅作为分析辅助参数，不参与合格判定。',
+      '说明：测试链路/读取/命令类持续异常标记为“需复测”，不计入产品 NG；仍阻止本轮放行。',
       '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为噪声波动值下限/上限；本版本不调整采集窗口、判定阈值或计算方法。',
       ...table(
         ['设备', '地址', '结果', '噪声波动值(RAW)', '噪声绝对值(RAW)', 'RMS(辅助)', '归一化波动(辅助)', '归一化绝对值(辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
