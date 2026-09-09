@@ -143,6 +143,7 @@ function detectorStartupLabel(unit: FlameDetectorUnitState | undefined): string 
 }
 
 function verdictLabel(verdict: FieldFinalVerdict | null): string {
+  if (verdict?.reason === 'TEST_INVALID_RETEST_REQUIRED') return '需复测';
   if (verdict?.grade === 'A_PASS') return 'A类合格';
   if (verdict?.grade === 'B_PASS') return 'B类合格';
   if (verdict?.grade === 'FAIL' || verdict?.verdict === 'FAIL') return '不合格';
@@ -150,9 +151,9 @@ function verdictLabel(verdict: FieldFinalVerdict | null): string {
   return '等待工序完成';
 }
 
-function finalResultSummary(verdict: FieldFinalVerdict | null, aPassCount: number, bPassCount: number, failCount: number): string {
+function finalResultSummary(verdict: FieldFinalVerdict | null, aPassCount: number, bPassCount: number, failCount: number, retestCount: number): string {
   if (!verdict || verdict.verdict === 'PENDING') return verdictLabel(verdict);
-  return `${aPassCount}A类合格/${bPassCount}B类合格/${failCount}NG`;
+  return `${aPassCount}A类合格/${bPassCount}B类合格/${failCount}NG/${retestCount}需复测`;
 }
 
 function pad(value: number): string {
@@ -202,13 +203,19 @@ function alarmRows(
   const safetyAlarm = status?.io && (!inputs?.safetyInput || !internal?.safetyOk);
   const stopAlarm = !isPLCProcessComplete(status) && Boolean(internal?.stopLatch || internal?.stopRequest);
   const limitAlarm = Boolean(internal?.safetyLimit);
-  const gradeDetail = detectorVerdict?.grade === 'A_PASS'
-    ? '全部 A类合格'
-    : detectorVerdict?.grade === 'B_PASS'
-      ? '含 B类合格，无不合格'
-      : detectorVerdict?.grade === 'FAIL'
-        ? `${detectorVerdict.units.filter((unit) => unit.grade === 'FAIL').length} 台不合格`
-        : '等待定量指标完成';
+  const invalidCount = detectorVerdict?.testInvalidCount ?? 0;
+  const productFailCount = detectorVerdict?.productFailCount
+    ?? detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length
+    ?? 0;
+  const gradeDetail = invalidCount > 0 && productFailCount === 0
+    ? `${invalidCount} 台测试链路异常，需复测`
+    : detectorVerdict?.grade === 'A_PASS'
+      ? '全部 A类合格'
+      : detectorVerdict?.grade === 'B_PASS'
+        ? '含 B类合格，无不合格'
+        : detectorVerdict?.grade === 'FAIL'
+          ? `${productFailCount} 台产品不合格${invalidCount ? ` / ${invalidCount} 台需复测` : ''}`
+          : '等待定量指标完成';
   return [
     {
       time: current,
@@ -275,19 +282,20 @@ const FinalResultCards: FC<{
   aPassCount: number;
   bPassCount: number;
   failCount: number;
-}> = ({ finalVerdict, aPassCount, bPassCount, failCount }) => {
+  retestCount: number;
+}> = ({ finalVerdict, aPassCount, bPassCount, failCount, retestCount }) => {
   const cards = [
-    { key: 'a-pass', label: 'A类合格', value: aPassCount },
-    { key: 'b-pass', label: 'B类合格', value: bPassCount },
-    { key: 'fail', label: '不合格', value: failCount },
+    { key: 'a-pass', label: 'A类合格', value: String(aPassCount) },
+    { key: 'b-pass', label: 'B类合格', value: String(bPassCount) },
+    { key: 'fail', label: 'NG / 复测', value: `${failCount} / ${retestCount}` },
   ];
   return (
     <div
       className="wutos-final-result-cards"
-      aria-label={`最终结果：${finalResultSummary(finalVerdict, aPassCount, bPassCount, failCount)}`}
+      aria-label={`最终结果：${finalResultSummary(finalVerdict, aPassCount, bPassCount, failCount, retestCount)}`}
     >
       {cards.map((card) => (
-        <div className={`wutos-final-result-card is-${card.key}`} key={card.key} title={`${card.label}：${card.value} 台`}>
+        <div className={`wutos-final-result-card is-${card.key}`} key={card.key} title={`${card.label}：${card.value}`}>
           <small>{card.label}</small>
           <b>{card.value}</b>
         </div>
@@ -373,6 +381,7 @@ function failureProcess(reason: string | undefined): ProcessLampKey | undefined 
 
 function failureReasonLabel(reason: string | undefined): string {
   if (!reason) return '检测指标未通过';
+  if (reason === 'TEST_INVALID_RETEST_REQUIRED') return '测试链路异常，本轮结果无效，需复测';
   const stage = reason.includes('NOISE_') ? ''
     : reason.startsWith('HEAT_') ? '移动热源干扰测试 '
       : reason.startsWith('FLASH_') ? '爆闪灯干扰测试 '
@@ -428,6 +437,7 @@ const DetectorCard: FC<{
 }> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits }) => {
   const [openLamp, setOpenLamp] = useState<ProcessLampKey | null>(null);
   const grade = detectorResult?.grade;
+  const testInvalid = detectorResult?.classification === 'TEST_INVALID';
   const tone = detectorTone(unit, grade);
   const fail = Boolean(unit?.fault || grade === 'FAIL');
   const noiseRatios = maximumConfiguredRatio(detectorResult?.metrics, configuredRatios);
@@ -446,7 +456,7 @@ const DetectorCard: FC<{
     <article className={'wutos-detector-card ' + tone + (isNoisePhase ? ' is-noise' : '')} aria-label={`探测器${index}检测结果`}>
       <header>
         <strong>探测器{index}</strong>
-        <span>{gradeLabel(grade)}</span>
+        <span>{testInvalid ? '需复测' : gradeLabel(grade)}</span>
       </header>
       <div className="wutos-detector-card__metrics">
         {([
@@ -489,7 +499,7 @@ const DetectorCard: FC<{
           </button>;
         })}
       </div>
-      {fail && <small className="wutos-detector-card__failure" title={failureReasonLabel(detectorResult?.reason)}>不合格原因：{failureReasonLabel(detectorResult?.reason)}</small>}
+      {fail && <small className="wutos-detector-card__failure" title={failureReasonLabel(detectorResult?.reason)}>{testInvalid ? '需复测原因' : '不合格原因'}：{failureReasonLabel(detectorResult?.reason)}</small>}
     </article>
   );
 };
@@ -609,7 +619,7 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
       {ratios.map(([label, value]) => <span key={label}>{label}<b>{Number.isFinite(value) ? value.toFixed(2) : '--'}</b><small>×</small></span>)}
     </div>
     <div className="wutos-sensor-quality">
-      <span>噪声 RMS<b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span>
+      <span>噪声 RMS(辅助)<b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span>
       <span>干扰比<b>{analysis?.interferenceRatio == null ? '--' : `${analysis.interferenceRatio.toFixed(2)}×`}</b></span>
       <span>样本<b>{analysis ? `${analysis.noiseSampleCount}/${analysis.interferenceSampleCount}` : '--'}</b></span>
     </div>
@@ -761,7 +771,8 @@ export function WutosDashboard({
   const fireCount = detectors?.fireCount ?? units.filter((unit) => unit?.fire).length;
   const aPassCount = detectorVerdict?.units.filter((unit) => unit.grade === 'A_PASS').length ?? 0;
   const bPassCount = detectorVerdict?.units.filter((unit) => unit.grade === 'B_PASS').length ?? 0;
-  const failCount = detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL').length ?? faultCount;
+  const retestCount = detectorVerdict?.units.filter((unit) => unit.classification === 'TEST_INVALID').length ?? 0;
+  const failCount = detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length ?? faultCount;
   const configuredRatios = configuredRatioMetrics(waveformAnalysis);
   const noiseLimits = configuredNoiseLimits(waveformAnalysis);
   const stageText = processLabel(status);
@@ -848,7 +859,7 @@ export function WutosDashboard({
               />
             ))}
           </div>
-          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} />
+          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} />
         </Panel>
 
         <Panel title="工序流程" className="wutos-panel--flow">
