@@ -27,18 +27,23 @@ if (-not $branch -or $branch -eq 'HEAD') {
     Fail 'Detached HEAD is not supported. Check out a branch first.'
 }
 
-try {
-    $origin = (& git remote get-url origin).Trim()
-} catch {
-    Fail 'Git remote origin is not configured.'
+$publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
+& git remote set-url origin $publicRemote
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Unable to configure the GitHub remote.'
 }
 
-if (-not $origin) {
-    Fail 'Git remote origin is not configured.'
+$token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'Machine')
+if (-not $token) {
+    $token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'User')
+}
+if (-not $token) {
+    $token = $env:FLAME_BENCH_GITHUB_TOKEN
+}
+if (-not $token) {
+    Fail 'FLAME_BENCH_GITHUB_TOKEN is not configured. Upload requires a repository write token, but no Git login is required.'
 }
 
-# Configure a fixed repository-local identity for automated bench log commits.
-# This writes only to this repository's .git/config and never changes global Git settings.
 $deviceGitName = 'Flame Detector Bench'
 $deviceGitEmail = 'flame-detector-bench@local.invalid'
 
@@ -54,6 +59,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Git identity: $deviceGitName <$deviceGitEmail>"
 Write-Host 'Git identity scope: repository only'
+Write-Host 'Authentication: dedicated environment token, no local Git login'
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $archiveRelative = "diagnostic-logs/$stamp"
@@ -131,7 +137,7 @@ Write-Host ''
 Write-Host "Archive: $archiveRelative"
 Write-Host "Files: $copied"
 Write-Host "Branch: $branch"
-Write-Host "Remote: $origin"
+Write-Host "Remote: $publicRemote"
 Write-Host ''
 
 & git add -f -- $archiveRelative
@@ -145,13 +151,34 @@ if ($LASTEXITCODE -ne 0) {
     Fail 'git commit failed.'
 }
 
-& git push origin $branch
-if ($LASTEXITCODE -ne 0) {
-    Write-Host ''
-    Write-Host 'The local log commit was created, but git push failed.'
-    Write-Host 'Resolve the remote branch state and run: git push origin ' -NoNewline
-    Write-Host $branch
-    exit 1
+$askPass = Join-Path $env:TEMP "flame-bench-git-askpass-$PID.cmd"
+$askPassContent = @(
+    '@echo off',
+    'echo %FLAME_BENCH_GITHUB_ASKPASS_VALUE%'
+)
+Set-Content -LiteralPath $askPass -Value $askPassContent -Encoding ASCII
+
+$oldAskPass = $env:GIT_ASKPASS
+$oldPrompt = $env:GIT_TERMINAL_PROMPT
+$oldAskPassValue = $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE
+
+try {
+    $env:GIT_ASKPASS = $askPass
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $token
+
+    & git -c credential.helper= -c credential.username=x-access-token push origin $branch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host 'The local log commit was created, but authenticated push failed.'
+        Write-Host 'Verify FLAME_BENCH_GITHUB_TOKEN has write access to this repository.'
+        exit 1
+    }
+} finally {
+    $env:GIT_ASKPASS = $oldAskPass
+    $env:GIT_TERMINAL_PROMPT = $oldPrompt
+    $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $oldAskPassValue
+    Remove-Item -LiteralPath $askPass -Force -ErrorAction SilentlyContinue
 }
 
 $newHead = (& git rev-parse --short HEAD).Trim()
