@@ -1,9 +1,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FieldDetectorBatchVerdict, FieldDetectorMetrics, FieldDetectorResult } from './field-detector-verdict.js';
+import type { FieldDetectorBatchVerdict, FieldDetectorResult } from './field-detector-verdict.js';
 import type { FieldFinalVerdict } from './field-final-verdict.js';
 import type { FlameDetectorState } from '../types.js';
 import {
+  expectedProbeChannels,
   formatSoftwareVersion,
   selectedProductProfile,
   type ProductDetectionConfig,
@@ -12,9 +13,10 @@ import {
 import {
   DEFAULT_DETECTION_QUALITY_CONFIG,
   normalizeDetectionQualityConfig,
-  type DetectionQualityConfig,
+  type ChannelKey,
   type FieldWaveformAnalysisSnapshot,
   type WaveformAnalysisConfig,
+  type WaveformAnalysisUnitResult,
 } from './field-waveform-analysis.js';
 
 export interface CompletedFieldTest {
@@ -91,15 +93,6 @@ export interface FieldTestResultLogger {
   record(test: CompletedFieldTest): string | void;
 }
 
-interface NumericFailureDetail {
-  code: string;
-  metric: keyof FieldDetectorMetrics;
-  value: number;
-  operator: '<=' | '>=';
-  limit: number;
-  thresholdGrade: 'A' | 'B';
-}
-
 function datePart(timestamp: number): string {
   const date = new Date(timestamp);
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -148,7 +141,7 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '首帧已收到，等待通道同步',
   MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
-  NOISE_RMS_EXCEEDS_LIMIT: '噪声 RMS 超过上限',
+  NOISE_RMS_EXCEEDS_LIMIT: '噪声波动值超过上限',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
   INTERFERENCE_RATIO_EXCEEDS_LIMIT: '干扰比超过上限',
   CONSISTENCY_TREND_BELOW_LIMIT: '一致性低于下限',
@@ -168,9 +161,19 @@ const PRODUCT_TYPE_LABELS: Record<string, string> = {
   IMAGE_DETECTOR: '图探型',
 };
 
+function channelLabel(key: ChannelKey): string {
+  return key.replace('probe', 'P');
+}
+
 function reasonText(unit: FieldDetectorResult): string {
   const reason = unit.reason ?? '';
   if (reason.endsWith('_SIGNAL_NO_DATA')) return '探头疑似无有效数据（高绝对值/低波动）';
+  const fluctuationMatch = reason.match(/PROBE(\d+)_NOISE_RMS_(BELOW|EXCEEDS)_LIMIT$/);
+  if (fluctuationMatch) {
+    return `P${fluctuationMatch[1]} 噪声波动值${fluctuationMatch[2] === 'BELOW' ? '低于下限' : '超过上限'}`;
+  }
+  const absoluteMatch = reason.match(/PROBE(\d+)_NOISE_ABSOLUTE_EXCEEDS_LIMIT$/);
+  if (absoluteMatch) return `P${absoluteMatch[1]} 噪声绝对值超过上限`;
   const direct = REASON_TEXT[reason];
   if (direct) return direct;
   const suffix = Object.keys(REASON_TEXT).find((code) => reason.endsWith(code));
@@ -187,6 +190,10 @@ function precheckReasonText(reason: string): string {
 
 function valueText(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : '-';
+}
+
+function roundedValueText(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(Number(value.toFixed(3))) : '-';
 }
 
 function localDateTime(timestamp: number | null): string {
@@ -235,6 +242,15 @@ function stageReason(reason: string | undefined): string {
   return reason;
 }
 
+function noiseReason(reason: string | undefined): string {
+  if (!reason) return '未采集';
+  if (reason === 'NOISE_WITHIN_LIMIT') return '噪声波动值/绝对值在限值内';
+  if (reason === 'NOISE_SAMPLES_MISSING') return '噪声采样不足';
+  if (reason === 'WAITING_FOR_NOISE_SAMPLES') return '等待噪声采样';
+  if (reason === 'WAITING_FOR_NOISE_WINDOW_COMPLETE') return '等待噪声采集窗口结束';
+  return REASON_TEXT[reason] ?? reason;
+}
+
 function positionState(device: InspectionPositionResult['devices'][number]): string {
   return [
     device.online ? '在线' : '离线',
@@ -246,35 +262,47 @@ function positionState(device: InspectionPositionResult['devices'][number]): str
   ].join('、');
 }
 
-function numericFailures(unit: FieldDetectorResult, quality: DetectionQualityConfig): NumericFailureDetail[] {
-  if (unit.grade !== 'FAIL') return [];
-  const thresholdGrade = 'B' as const;
-  const limits = quality.b;
-  const ratios = quality.ratios.b;
-  const failures: NumericFailureDetail[] = [];
-  const upper = (metric: keyof FieldDetectorMetrics, limit: number | undefined, code: string) => {
-    const value = unit.metrics[metric];
-    if (value !== null && limit != null && limit > 0 && value > limit) {
-      failures.push({ code, metric, value, operator: '<=', limit, thresholdGrade });
+function noiseMetric(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  key: ChannelKey,
+  metric: 'fluctuation' | 'absolute',
+): number | null {
+  const value = analysis?.noiseTest?.metrics?.[key]?.[metric];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function noiseMetricSummary(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  channels: ChannelKey[],
+  metric: 'fluctuation' | 'absolute',
+): string {
+  return channels.map((key) => `${channelLabel(key)}:${roundedValueText(noiseMetric(analysis, key, metric))}`).join(' / ');
+}
+
+function formalNoiseFailureDetails(
+  unit: FieldDetectorResult,
+  analysis: WaveformAnalysisUnitResult | undefined,
+  channels: ChannelKey[],
+  minFluctuation: number,
+  maxFluctuation: number,
+  maxAbsolute: number | undefined,
+): string[] {
+  if (unit.grade !== 'FAIL' || !analysis?.noiseTest) return [];
+  const details: string[] = [];
+  for (const key of channels) {
+    const fluctuation = noiseMetric(analysis, key, 'fluctuation');
+    const absolute = noiseMetric(analysis, key, 'absolute');
+    if (fluctuation !== null && minFluctuation > 0 && fluctuation < minFluctuation) {
+      details.push(`${channelLabel(key)}波动 ${roundedValueText(fluctuation)} < 下限 ${roundedValueText(minFluctuation)}`);
     }
-  };
-  const lower = (metric: keyof FieldDetectorMetrics, limit: number | undefined, code: string) => {
-    const value = unit.metrics[metric];
-    if (value !== null && limit != null && limit > 0 && value < limit) {
-      failures.push({ code, metric, value, operator: '>=', limit, thresholdGrade });
+    if (fluctuation !== null && maxFluctuation > 0 && fluctuation > maxFluctuation) {
+      details.push(`${channelLabel(key)}波动 ${roundedValueText(fluctuation)} > B上限 ${roundedValueText(maxFluctuation)}`);
     }
-  };
-  upper('noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT');
-  upper('noiseAbsolute', limits.maxNoiseAbsolute, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT');
-  upper('interferenceRatio', limits.maxInterferenceRatio, 'INTERFERENCE_RATIO_EXCEEDS_LIMIT');
-  lower('consistencyTrend', limits.minConsistencyTrend, 'CONSISTENCY_TREND_BELOW_LIMIT');
-  if (ratios) {
-    lower('snr21', ratios.snr21.min, 'SNR21_BELOW_LIMIT'); upper('snr21', ratios.snr21.max, 'SNR21_ABOVE_LIMIT');
-    lower('snr23', ratios.snr23.min, 'SNR23_BELOW_LIMIT'); upper('snr23', ratios.snr23.max, 'SNR23_ABOVE_LIMIT');
-    lower('snr31', ratios.snr31.min, 'SNR31_BELOW_LIMIT'); upper('snr31', ratios.snr31.max, 'SNR31_ABOVE_LIMIT');
+    if (absolute !== null && maxAbsolute != null && maxAbsolute > 0 && absolute > maxAbsolute) {
+      details.push(`${channelLabel(key)}绝对值 ${roundedValueText(absolute)} > B上限 ${roundedValueText(maxAbsolute)}`);
+    }
   }
-  lower('sensitivity', limits.minSensitivity, 'SENSITIVITY_BELOW_LIMIT');
-  return failures;
+  return details;
 }
 
 export class FileFieldTestResultLogger implements FieldTestResultLogger {
@@ -312,6 +340,12 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       ?? test.productPrecheck?.expectedProbeCount
       ?? firstPrecheck?.expectedProbeCount
       ?? null;
+    const expectedChannels = expectedProbeChannels(expectedProbeCount ?? 3);
+    const noiseWindowStart = test.waveformAnalysis?.noiseStartedAt ?? null;
+    const noiseWindowEnd = test.waveformAnalysis?.noiseEndedAt ?? null;
+    const noiseWindowDurationMs = noiseWindowStart !== null && noiseWindowEnd !== null
+      ? Math.max(0, noiseWindowEnd - noiseWindowStart)
+      : null;
     const summary = [
       `批次：${test.batchId}`,
       ...(productLabel ? [`产品：${productLabel}`] : []),
@@ -339,18 +373,44 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
     const deviceRows = units.map((unit) => {
       const metrics = unit.metrics;
-      const failures = numericFailures(unit, quality);
-      const detail = failures.length
-        ? failures.map((failure) => `${valueText(failure.value)} ${failure.operator === '<=' ? '≤' : '≥'} ${valueText(failure.limit)}`).join('；')
-        : '';
-      const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map((probe) => probe.replace('probe', 'P')).join('/')}` : '';
-      const explanation = [reasonText(unit), noData, detail && `（${detail}）`].filter(Boolean).join('；');
+      const analysis = analysisByIndex.get(unit.index);
+      const formalNoiseDetails = formalNoiseFailureDetails(
+        unit,
+        analysis,
+        expectedChannels,
+        test.thresholds.minNoiseRms,
+        quality.b.maxNoiseRms,
+        quality.b.maxNoiseAbsolute,
+      );
+      const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map(channelLabel).join('/')}` : '';
+      const explanation = [reasonText(unit), noData, ...formalNoiseDetails].filter(Boolean).join('；');
       return [
         String(unit.index), String(unit.address), gradeText(unit.grade),
+        noiseMetricSummary(analysis, expectedChannels, 'fluctuation'),
+        noiseMetricSummary(analysis, expectedChannels, 'absolute'),
         valueText(metrics.noiseRms), valueText(metrics.noisePeakToPeak), valueText(metrics.noiseAbsolute),
         valueText(metrics.interferenceRatio), valueText(metrics.consistencyTrend),
         valueText(metrics.snr21), valueText(metrics.snr23), valueText(metrics.snr31), valueText(metrics.sensitivity),
         explanation || '-',
+      ];
+    });
+
+    const noiseHeaders = [
+      '设备', '采样数',
+      ...expectedChannels.flatMap((key) => [`${channelLabel(key)} RAW波动`, `${channelLabel(key)} RAW绝对值`]),
+      '结果', '说明',
+    ];
+    const noiseRows = units.map((unit) => {
+      const analysis = analysisByIndex.get(unit.index);
+      return [
+        String(unit.index),
+        valueText(analysis?.noiseTest?.sampleCount),
+        ...expectedChannels.flatMap((key) => [
+          roundedValueText(noiseMetric(analysis, key, 'fluctuation')),
+          roundedValueText(noiseMetric(analysis, key, 'absolute')),
+        ]),
+        analysis?.noiseTest ? resultText(analysis.noiseTest.verdict) : '未采集',
+        noiseReason(analysis?.noiseTest?.reason),
       ];
     });
 
@@ -405,10 +465,17 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
         : ['未记录产品预检结果']),
       '',
       '设备结果明细',
+      '说明：正式噪声判定使用有效探头 RAW 波动值=(max-min)/2 与 RAW 绝对值；真实 RMS 仅作为分析辅助参数，不参与合格判定。',
+      '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为噪声波动值下限/上限；本版本不调整采集窗口、判定阈值或计算方法。',
       ...table(
-        ['设备', '地址', '结果', '噪声RMS', '噪声峰峰值', '绝对值', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
+        ['设备', '地址', '结果', '噪声波动值(RAW)', '噪声绝对值(RAW)', 'RMS(辅助)', '归一化波动(辅助)', '归一化绝对值(辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
         deviceRows,
       ),
+      '',
+      '噪声采集诊断',
+      `窗口开始：${localDateTime(noiseWindowStart)} | 窗口结束：${localDateTime(noiseWindowEnd)} | 有效采集时长：${noiseWindowDurationMs === null ? '-' : `${(noiseWindowDurationMs / 1000).toFixed(1)}秒`} | 最低采样数：${test.thresholds.minNoiseSamples}`,
+      `判定通道：${expectedChannels.map(channelLabel).join('/')} | 波动下限：${valueText(test.thresholds.minNoiseRms)} | A类波动上限：${valueText(quality.a.maxNoiseRms)} | B类波动上限：${valueText(quality.b.maxNoiseRms)} | 绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
+      ...table(noiseHeaders, noiseRows),
       '',
       '探测器启动诊断',
       ...table(
