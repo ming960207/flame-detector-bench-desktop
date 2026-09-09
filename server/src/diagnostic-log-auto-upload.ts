@@ -162,7 +162,7 @@ export function startDiagnosticLogAutoUpload(options: DiagnosticLogAutoUploadOpt
         const stat = statSync(file);
         const previousSize = knownSizes.get(file);
         knownSizes.set(file, stat.size);
-        if (previousSize === undefined || stat.size <= 0 || stat.size === previousSize) continue;
+        if (stat.size <= 0 || stat.size === previousSize) continue;
         const batchId = extractLatestCompletedBatchId(readTail(file));
         const key = `${file}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
         enqueue(key, batchId);
