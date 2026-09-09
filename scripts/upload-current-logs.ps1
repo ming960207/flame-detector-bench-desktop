@@ -66,12 +66,10 @@ $files = Get-ChildItem -Path $repoRoot -Recurse -File -Filter '*.log' -ErrorActi
         return $false
     }
 
-    $canonical = $_.Name -eq 'latest.log' -or
-                 $_.Name -eq 'detector-lifecycle.log' -or
-                 $_.Name -like 'test-results-*.log' -or
-                 $_.Name -like 'flame-detector-*.log'
+    $alwaysInclude = $_.Name -eq 'latest.log' -or $_.Name -eq 'detector-lifecycle.log'
+    $recentDiagnostic = $_.LastWriteTime -ge $cutoff
 
-    return $canonical -or $_.LastWriteTime -ge $cutoff
+    return $alwaysInclude -or $recentDiagnostic
 } | Sort-Object FullName -Unique
 
 if (-not $files -or $files.Count -eq 0) {
@@ -81,7 +79,7 @@ if (-not $files -or $files.Count -eq 0) {
 
 $copied = 0
 foreach ($file in $files) {
-    $relative = $file.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
+    $relative = $file.FullName.Substring($repoRoot.Length).TrimStart([char[]]@('\', '/'))
     $target = Join-Path $archivePath $relative
     $targetDir = Split-Path -Parent $target
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
