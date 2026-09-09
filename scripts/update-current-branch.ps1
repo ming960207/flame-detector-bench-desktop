@@ -64,26 +64,26 @@ try {
     $remoteCommit = (& git rev-parse --short $remoteRef).Trim()
     Write-Host "Remote commit: $remoteCommit"
 
-    Write-Host 'Discarding local tracked changes...'
-    & git reset --hard
-    if ($LASTEXITCODE -ne 0) { Fail 'git reset --hard failed.' }
+    Write-Host "Force switching working tree to $targetBranch..."
+    & git checkout -f -B $targetBranch $remoteRef
+    if ($LASTEXITCODE -ne 0) { Fail "Unable to force switch to $targetBranch." }
+
     Write-Host 'Removing non-ignored untracked files and directories...'
     & git clean -fd
     if ($LASTEXITCODE -ne 0) { Fail 'git clean -fd failed.' }
 
-    Write-Host "Switching to $targetBranch..."
-    & git checkout -B $targetBranch $remoteRef
-    if ($LASTEXITCODE -ne 0) { Fail "Unable to switch to $targetBranch." }
-    & git reset --hard $remoteRef
-    if ($LASTEXITCODE -ne 0) { Fail 'Final git reset --hard failed.' }
-    & git clean -fd
-    if ($LASTEXITCODE -ne 0) { Fail 'Final git clean -fd failed.' }
-
     $after = (& git rev-parse --short HEAD).Trim()
     $currentBranch = (& git rev-parse --abbrev-ref HEAD).Trim()
+    $upstream = (& git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null).Trim()
+
+    if ($after -ne $remoteCommit) {
+        Fail "Verification failed: local commit $after does not match remote commit $remoteCommit."
+    }
+
     Write-Host ''
     Write-Host 'SUCCESS: Software update completed.'
     Write-Host "Branch: $currentBranch"
+    Write-Host "Upstream: $upstream"
     Write-Host "Previous commit: $before"
     Write-Host "Current commit: $after"
     Write-Host "Remote commit: $remoteCommit"
