@@ -333,7 +333,7 @@ test('MQTT inspection payload keeps product identity and per-detector precheck e
   assert.deepEqual(message.payload.detector_results[0]?.no_data_probes, ['probe2']);
 });
 
-test('missing precheck is NG but batch product identity still survives into MQTT', () => {
+test('missing precheck requires retest but batch product identity still survives into MQTT', () => {
   const stateUnit = unit();
   const state: FlameDetectorState = {
     units: [stateUnit],
@@ -345,7 +345,8 @@ test('missing precheck is NG but batch product identity still survives into MQTT
   const result = analysisUnit();
   const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), null, dualProduct());
   assert.equal(detectorVerdict.verdict, 'FAIL');
-  assert.equal(detectorVerdict.units[0]?.reason, 'PRODUCT_PRECHECK_NOT_COMPLETED');
+  assert.equal(detectorVerdict.units[0]?.reason, 'TEST_INVALID_RETEST_REQUIRED');
+  assert.equal(detectorVerdict.units[0]?.classification, 'TEST_INVALID');
   assert.equal(detectorVerdict.productType, 'DUAL_WAVELENGTH');
   assert.equal(detectorVerdict.expectedSoftwareVersion, '01.02.03.04');
   assert.equal(detectorVerdict.expectedProbeCount, 2);
@@ -374,7 +375,7 @@ test('missing precheck is NG but batch product identity still survives into MQTT
   assert.equal(message.payload.detector_results[0]?.expected_probe_count, 2);
 });
 
-test('slots absent from completed precheck remain explicit and fail formal verdict', () => {
+test('slots absent from completed precheck remain explicit and require retest', () => {
   const active = unit(1);
   const disabledSlot = unit(2);
   disabledSlot.online = false;
@@ -391,7 +392,8 @@ test('slots absent from completed precheck remain explicit and fail formal verdi
   const verdict = evaluateFieldDetectorBatch(state, snapshot(), report, dualProduct());
   assert.equal(verdict.units.length, 6);
   assert.deepEqual(verdict.units.map((item) => item.index), [1, 2, 3, 4, 5, 6]);
-  assert.equal(verdict.units[1]?.reason, 'PRODUCT_PRECHECK_NOT_COMPLETED');
+  assert.equal(verdict.units[1]?.reason, 'TEST_INVALID_RETEST_REQUIRED');
+  assert.equal(verdict.units[1]?.classification, 'TEST_INVALID');
   assert.equal(verdict.units[1]?.verdict, 'FAIL');
   assert.equal(verdict.units[2]?.reason, 'DETECTOR_SLOT_MISSING');
   assert.equal(verdict.verdict, 'FAIL');
