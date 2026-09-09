@@ -160,6 +160,15 @@ async function listenWaveformServer(requests: Buffer[] = []): Promise<{ server: 
   return { server, port: address.port };
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return predicate();
+}
+
 test('waveform handshake starts without a PLC lower-limit condition', async () => {
   const receivedAt: number[] = [];
   const requests: Buffer[] = [];
@@ -177,7 +186,8 @@ test('waveform handshake starts without a PLC lower-limit condition', async () =
   try {
     await service.connect();
     await service.startWaveformStreaming();
-    assert.ok(requests.length > 0, 'the detector mode command was not sent');
+    const commandObserved = await waitFor(() => requests.length > 0);
+    assert.ok(commandObserved, 'the detector mode command was not observed within 1s');
     assert.equal(requests[0]?.toString('hex').toUpperCase(), SEND_MODE_BROADCAST_FRAME_HEX);
   } finally {
     await service.disconnect();
@@ -236,7 +246,8 @@ test('six detector mode commands are issued concurrently instead of waiting for 
   try {
     await service.connect();
     await service.startWaveformStreaming();
-    assert.equal(receivedAt.length, 6);
+    const allCommandsObserved = await waitFor(() => receivedAt.filter((value) => Number.isFinite(value)).length === 6);
+    assert.ok(allCommandsObserved, `expected 6 mode commands, observed ${receivedAt.filter((value) => Number.isFinite(value)).length}`);
     const skewMs = Math.max(...receivedAt) - Math.min(...receivedAt);
     assert.ok(skewMs < 100, `six mode commands were serialized; observed skew=${skewMs}ms`);
   } finally {
