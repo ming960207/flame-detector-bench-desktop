@@ -203,6 +203,18 @@ function precheckReport(): ProductPrecheckReport {
   };
 }
 
+function passingPrecheckReport(): ProductPrecheckReport {
+  const report = precheckReport();
+  report.verdict = 'PASS';
+  report.units = report.units.map((unit) => ({
+    ...unit,
+    actualSoftwareVersion: '90.22.09.15',
+    verdict: 'PASS' as const,
+    reasons: [],
+  }));
+  return report;
+}
+
 test('transient relay simulate/reset transport failures recover within bounded retries', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
@@ -268,6 +280,19 @@ test('infrastructure-only completed precheck failure is blocking but classified 
   const final = evaluateFieldFinalVerdict({ stage: 'COMPLETE', processStage: 'COMPLETE', complete: true, valid: true }, verdict, waveform);
   assert.equal(final.verdict, 'FAIL');
   assert.equal(final.reason, 'TEST_INVALID_RETEST_REQUIRED');
+});
+
+test('RAW fluctuation above A limit but within B limit is graded B instead of A', () => {
+  const waveform = analysisSnapshot();
+  const d4 = waveform.units[3]!;
+  d4.noiseTest.metrics.probe2 = { fluctuation: 224, absolute: 271 };
+  d4.noiseTest.metrics.probe3 = { fluctuation: 200, absolute: 241 };
+
+  const verdict = evaluateFieldDetectorBatch(detectorState(), waveform, passingPrecheckReport(), productConfig());
+  assert.equal(verdict.units[3]?.verdict, 'PASS');
+  assert.equal(verdict.units[3]?.grade, 'B_PASS');
+  assert.match(verdict.units[3]?.reason ?? '', /^A_GRADE_/);
+  assert.equal(verdict.units.filter((unit) => unit.grade === 'FAIL').length, 0);
 });
 
 test('field result logs use Asia/Shanghai date and label regardless host timezone', () => {
