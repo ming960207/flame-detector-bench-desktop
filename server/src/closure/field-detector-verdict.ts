@@ -228,13 +228,16 @@ function evaluateUnit(
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
-  // Startup diagnostics are deliberately evaluated before waveform metrics so a
-  // mode-switch or channel-sync failure cannot be misreported as a slow sampler
-  // or a threshold failure.
+  // Startup failures remain authoritative. However, after a quantitative batch is
+  // COMPLETE, stopWaveformStreaming() intentionally resets startup to DISCONNECTED
+  // and broadcasts one last transport state. A completed waveform PASS is evidence
+  // gathered while the unit was online/source-ready/synchronized, so that terminal
+  // cleanup state must not rewrite the finished inspection to NG.
   if (unit.startup?.state === 'FAILED') {
     return result(base, metrics, 'FAIL', 'FAIL', unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED', precheck, missingProbes);
   }
-  if (unit.startup && unit.startup.state !== 'TEST_READY') {
+  const completedWaveformPass = complete && analysis?.verdict === 'PASS';
+  if (unit.startup && unit.startup.state !== 'TEST_READY' && !completedWaveformPass) {
     const reason = `DETECTOR_STARTUP_${unit.startup.state}`;
     if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
     return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
