@@ -29,6 +29,8 @@ import {
 
 const POSITION_ONE_CONTACT_SETTLE_MS = 800;
 const POST_PRECHECK_WAVEFORM_RECOVERY_MS = 500;
+const PRECHECK_READ_MAX_ATTEMPTS = 3;
+const PRECHECK_READ_RETRY_DELAY_MS = 80;
 
 export interface ProductAwareBatchContext {
   batchId: string;
@@ -112,6 +114,39 @@ function allocationError(
 
 function uniquePush(target: string[], value: string): void {
   if (!target.includes(value)) target.push(value);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readWithRetry<T>(operation: () => Promise<T>): Promise<T | null> {
+  for (let attempt = 1; attempt <= PRECHECK_READ_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch {
+      if (attempt >= PRECHECK_READ_MAX_ATTEMPTS) return null;
+      await sleep(PRECHECK_READ_RETRY_DELAY_MS);
+    }
+  }
+  return null;
+}
+
+function relayFailureIsInfrastructure(reason: string): boolean {
+  const normalized = reason.replace(/^(ALARM|FAULT):/, '');
+  const code = normalized.split(':')[0] ?? normalized;
+  return code === 'ALARM_COMMAND_FAILED'
+    || code === 'FAULT_COMMAND_FAILED'
+    || code === 'ALARM_RESET_COMMAND_FAILED'
+    || code === 'FAULT_RESET_COMMAND_FAILED'
+    || code === 'EMERGENCY_RESET_COMMAND_FAILED'
+    || code === 'RELAY_BASELINE_READ_FAILED'
+    || code === 'RELAY_FEEDBACK_READ_FAILED'
+    || code === 'EMERGENCY_RESET_FEEDBACK_READ_FAILED'
+    || code === 'RELAY_TEST_ABORTED'
+    || code === 'RELAY_TEST_GLOBAL_DISABLED'
+    || code === 'DIO_NOT_CONFIGURED'
+    || code === 'RELAY_FEEDBACK_MAPPING_MISSING';
 }
 
 export class ProductAwareFlameDetectorService extends FlameDetectorService implements RelayDetectorPort {
@@ -244,6 +279,12 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
    * six units run in parallel; each individual detector still performs its Modbus
    * requests sequentially through RawTcpModbusClient's request queue.
    *
+   * Same-batch repeated testing on 2026-09-09 showed isolated one-run identity read
+   * failures while the same detector passed immediately before and after. Identity
+   * reads therefore allow three short attempts. A persistent read failure is still
+   * preserved as explicit evidence and is classified downstream as a test-invalid
+   * condition rather than silently converted into a product pass.
+   *
    * Software-version read is intentionally first. Field testing confirmed that the
    * complete version command works while continuous waveform push is enabled, but
    * the visible waveform can pause for about three seconds. Doing it first leaves
@@ -262,14 +303,14 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       };
       try {
         const device = this.detectorDevice(index);
-        try { result.softwareVersion = await device.readSoftwareVersion(); } catch { /* explicit reason below when enabled */ }
-        try { result.probeCount = await device.readProbeCount(); } catch { /* explicit reason below */ }
-        try { result.sensitivity = await device.readSensitivity(); } catch { /* explicit reason below */ }
-        try {
-          const alarm = await device.readAlarmStatus();
+        result.softwareVersion = await readWithRetry(() => device.readSoftwareVersion());
+        result.probeCount = await readWithRetry(() => device.readProbeCount());
+        result.sensitivity = await readWithRetry(() => device.readSensitivity());
+        const alarm = await readWithRetry(() => device.readAlarmStatus());
+        if (alarm) {
           result.fireAlarm = alarm.fireAlarm;
           result.fault = alarm.fault;
-        } catch { /* relay functional test still provides independent evidence */ }
+        }
       } catch {
         // Device was not ready; individual null fields become explicit precheck reasons.
       }
@@ -363,6 +404,10 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         sensitivityByDetector[index] = identity.sensitivity;
         const live = currentByIndex.get(index);
         const reasons: string[] = [];
+        const identityReadFailed = (!profile.skipSoftwareVersionCheck && identity.softwareVersion === null)
+          || identity.probeCount === null
+          || identity.sensitivity === null;
+        if (identityReadFailed) uniquePush(reasons, 'TEST_INFRASTRUCTURE_INVALID');
 
         if (!profile.skipSoftwareVersionCheck) {
           if (identity.softwareVersion === null) {
@@ -381,10 +426,13 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
 
         const relayUnit = relayFunctionalTest?.units.find((item) => item.detectorIndex === index);
         if (relayUnit && relayUnit.verdict !== 'PASS') {
-          uniquePush(reasons, 'RELAY_FUNCTIONAL_TEST_FAILED');
-          for (const reason of [...relayUnit.alarm.reasons, ...relayUnit.fault.reasons]) {
-            uniquePush(reasons, `RELAY:${reason}`);
+          const relayReasons = [...new Set([...relayUnit.alarm.reasons, ...relayUnit.fault.reasons])];
+          if (relayReasons.length > 0 && relayReasons.every(relayFailureIsInfrastructure)) {
+            uniquePush(reasons, 'TEST_INFRASTRUCTURE_INVALID');
+          } else {
+            uniquePush(reasons, 'RELAY_FUNCTIONAL_TEST_FAILED');
           }
+          for (const reason of relayReasons) uniquePush(reasons, `RELAY:${reason}`);
         }
 
         return {
