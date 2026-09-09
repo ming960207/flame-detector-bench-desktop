@@ -17,9 +17,10 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
   assertSupportedRuntimeMode(config.closureMode);
 
   if (config.closureMode === 'field') {
-    const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }] = await Promise.all([
+    const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }, { startDiagnosticLogAutoUpload }] = await Promise.all([
       import('./product-aware-field-runtime.js'),
       import('./unified-services.js'),
+      import('./diagnostic-log-auto-upload.js'),
     ]);
 
     const fieldRuntime = await startProductAwareFieldStatusServer();
@@ -35,12 +36,18 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
       throw error;
     }
 
+    // A completed field test is persisted by FileFieldTestResultLogger as one
+    // append to test-results-*.log. Watching that durable completion artifact
+    // keeps automatic GitHub upload inside the unified backend process and avoids
+    // coupling upload/network failures back into the inspection verdict path.
+    const diagnosticUploadRuntime = startDiagnosticLogAutoUpload();
+
     let closed = false;
     return {
       async close(): Promise<void> {
         if (closed) return;
         closed = true;
-        await closeAll([auxiliaryRuntime, fieldRuntime]);
+        await closeAll([diagnosticUploadRuntime, auxiliaryRuntime, fieldRuntime]);
       },
     };
   }
