@@ -683,11 +683,16 @@ export class FieldWaveformAnalysis {
       .map((accumulator) => {
         const ageMs = accumulator.noiseLastFrameAt === null ? '-' : Math.max(0, timestamp - accumulator.noiseLastFrameAt);
         return `D${accumulator.index}{frames=${accumulator.noiseAcceptedFrameCount},reject=${accumulator.noiseRejectedFrameCount},`
-          + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},`
+          + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.noiseRawSamples.length},`
+          + `ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},`
           + `ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0},`
-          + `N[${compactProbeSummary(accumulator.lastNoiseSamples, false)}]}`;
+          + `Nlast[${compactProbeSummary(accumulator.lastNoiseSamples, false)}],`
+          + `Rlast[${compactProbeSummary(accumulator.lastNoiseRawSamples, true)}],`
+          + `Rcum[${compactProbeSummary(accumulator.noiseRawSamples, true)}]}`;
       })
       .join(' ');
+    // Rlast/Rcum are diagnostics only. Formal judgement still uses the unchanged
+    // complete-window RAW fluctuation=(max-min)/2 and absolute-value limits.
     this.log(`[噪声窗口][每秒] at=${compactTimestamp(timestamp)} ${devices}`);
   }
 
