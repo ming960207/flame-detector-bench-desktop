@@ -37,25 +37,15 @@ if (-not $origin) {
     Fail 'Git remote origin is not configured.'
 }
 
-$status = & git status --porcelain --untracked-files=all
-if ($LASTEXITCODE -ne 0) {
-    Fail 'Unable to inspect the working tree.'
-}
-
-if ($status) {
-    Write-Host 'ERROR: The working tree is not clean.'
-    Write-Host 'Commit, upload, move, or discard local changes before updating.'
-    Write-Host ''
-    & git status --short
-    exit 1
-}
-
 $before = (& git rev-parse --short HEAD).Trim()
 
 Write-Host "Repository: $repoRoot"
 Write-Host "Branch: $branch"
 Write-Host "Remote: $origin"
 Write-Host "Current commit: $before"
+Write-Host ''
+Write-Host 'WARNING: This update mode discards all local repository changes.'
+Write-Host 'Tracked changes, staged changes, local commits, and untracked files will be removed.'
 Write-Host ''
 Write-Host 'Fetching remote updates...'
 
@@ -70,47 +60,36 @@ if ($LASTEXITCODE -ne 0) {
     Fail "Remote branch $remoteRef does not exist."
 }
 
-$aheadBehind = (& git rev-list --left-right --count "$branch...$remoteRef").Trim()
-if (-not $aheadBehind) {
-    Fail 'Unable to compare local and remote branches.'
-}
-
-$parts = $aheadBehind -split '\s+'
-if ($parts.Count -lt 2) {
-    Fail 'Unexpected branch comparison result.'
-}
-
-$localAhead = [int]$parts[0]
-$remoteAhead = [int]$parts[1]
-
-Write-Host "Local-only commits: $localAhead"
-Write-Host "Remote-only commits: $remoteAhead"
+$remoteCommit = (& git rev-parse --short $remoteRef).Trim()
+Write-Host "Remote commit: $remoteCommit"
 Write-Host ''
+Write-Host 'Resetting current branch to the remote branch...'
 
-if ($localAhead -gt 0 -and $remoteAhead -gt 0) {
-    Fail 'Local and remote branches have diverged. Manual reconciliation is required.'
-}
-
-if ($localAhead -gt 0 -and $remoteAhead -eq 0) {
-    Write-Host 'No remote update is required. The local branch contains commits not yet on origin.'
-    Write-Host 'Run the log upload script or push your commits if needed.'
-    exit 0
-}
-
-if ($remoteAhead -eq 0) {
-    Write-Host 'SUCCESS: The current branch is already up to date.'
-    exit 0
-}
-
-Write-Host 'Applying remote updates with fast-forward only...'
-& git pull --ff-only origin $branch
+& git reset --hard $remoteRef
 if ($LASTEXITCODE -ne 0) {
-    Fail 'git pull --ff-only failed.'
+    Fail 'git reset --hard failed.'
+}
+
+Write-Host 'Removing untracked files and directories...'
+& git clean -fd
+if ($LASTEXITCODE -ne 0) {
+    Fail 'git clean -fd failed.'
 }
 
 $after = (& git rev-parse --short HEAD).Trim()
+$remaining = & git status --porcelain --untracked-files=all
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Unable to verify the working tree after update.'
+}
+
+if ($remaining) {
+    Write-Host 'WARNING: The repository still contains ignored or external runtime files.'
+    Write-Host 'Tracked and untracked repository content was synchronized successfully.'
+}
+
 Write-Host ''
-Write-Host 'SUCCESS: The current branch was updated from GitHub.'
+Write-Host 'SUCCESS: The current branch now exactly matches GitHub tracked content.'
 Write-Host "Previous commit: $before"
 Write-Host "Current commit: $after"
+Write-Host "Remote commit: $remoteCommit"
 exit 0
