@@ -156,18 +156,23 @@ export function selectedProductProfile(config: ProductDetectionConfig): ProductP
   return config.profiles[config.selectedType];
 }
 
+/**
+ * The installed two-probe product still uses the standard three-channel physical
+ * waveform frame. P1 is a protocol/placeholder channel; the two real optical probes
+ * are P2 and P3. Therefore a two-probe product must never treat P1 as an expected
+ * detection channel. Three/four-probe products retain the natural P1..Pn mapping.
+ */
 export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] {
   const count = Math.max(1, Math.min(4, Math.floor(Number(expectedProbeCount) || 3)));
+  if (count === 2) return ['probe2', 'probe3'];
   return (['probe1', 'probe2', 'probe3', 'probe4'] as ChannelKey[]).slice(0, count);
 }
 
 /**
- * A dual-wavelength product must be analyzed as a real two-channel system,
- * rather than by removing P3 from a three-channel operator selection. If the
- * old selection was P2/P3, simple filtering would leave only P2 and make trend
- * agreement impossible. Explicitly use P1+P2 for noise/trend and P2/P1 for the
- * interference ratio. Three/four-probe products keep their configured rules;
- * the detector verdict separately checks every expected probe for no-data.
+ * A dual-wavelength product is physically transported in a three-channel frame,
+ * but its real sensing channels are P2 and P3. P1 remains available in raw telemetry
+ * for protocol diagnostics only and must not participate in production noise/trend,
+ * no-data or interference acceptance decisions.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
@@ -176,8 +181,8 @@ export function productAwareWaveformConfig(
   if (!source || expectedProbeCount !== 2) return source;
   return {
     ...source,
-    noiseProbes: ['probe1', 'probe2'],
-    consistencyProbes: ['probe1', 'probe2'],
-    interferenceRatio: { numerator: 'probe2', denominator: 'probe1' },
+    noiseProbes: ['probe2', 'probe3'],
+    consistencyProbes: ['probe2', 'probe3'],
+    interferenceRatio: { numerator: 'probe3', denominator: 'probe2' },
   };
 }
