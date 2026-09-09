@@ -126,9 +126,9 @@ function snapshot(result = analysisUnit()): FieldWaveformAnalysisSnapshot {
     updatedAt: 1_000,
     thresholds: {
       ...DEFAULT_WAVEFORM_ANALYSIS_CONFIG,
-      noiseProbes: ['probe1', 'probe2'],
-      consistencyProbes: ['probe1', 'probe2'],
-      interferenceRatio: { numerator: 'probe2', denominator: 'probe1' },
+      noiseProbes: ['probe2', 'probe3'],
+      consistencyProbes: ['probe2', 'probe3'],
+      interferenceRatio: { numerator: 'probe3', denominator: 'probe2' },
     },
     units: [result],
   };
@@ -258,14 +258,14 @@ test('configured probe counts are honored for every product type', () => {
   assert.equal(config.profiles.IMAGE_DETECTOR.expectedProbeCount, 1);
 });
 
-test('dual wavelength uses P1/P2 for noise, trend and ratio', () => {
+test('dual wavelength uses P2/P3 for noise, trend and ratio', () => {
   const result = productAwareWaveformConfig(DEFAULT_WAVEFORM_ANALYSIS_CONFIG, 2)!;
-  assert.deepEqual(result.noiseProbes, ['probe1', 'probe2']);
-  assert.deepEqual(result.consistencyProbes, ['probe1', 'probe2']);
-  assert.deepEqual(result.interferenceRatio, { numerator: 'probe2', denominator: 'probe1' });
+  assert.deepEqual(result.noiseProbes, ['probe2', 'probe3']);
+  assert.deepEqual(result.consistencyProbes, ['probe2', 'probe3']);
+  assert.deepEqual(result.interferenceRatio, { numerator: 'probe3', denominator: 'probe2' });
 });
 
-test('expected probe stuck near absolute limit with low fluctuation is a no-data NG', () => {
+test('expected P2 probe stuck near absolute limit with low fluctuation is a no-data NG', () => {
   const stateUnit = unit();
   const state: FlameDetectorState = {
     units: [stateUnit],
@@ -275,14 +275,14 @@ test('expected probe stuck near absolute limit with low fluctuation is a no-data
     timestamp: 1_000,
   };
   const result = analysisUnit();
-  result.noiseTest.metrics.probe1 = { absolute: 995, fluctuation: 5 };
+  result.noiseTest.metrics.probe2 = { absolute: 995, fluctuation: 5 };
   const verdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
   assert.equal(verdict.verdict, 'FAIL');
-  assert.equal(verdict.units[0]?.reason, 'PROBE1_SIGNAL_NO_DATA');
-  assert.deepEqual(verdict.units[0]?.noDataProbes, ['probe1']);
+  assert.equal(verdict.units[0]?.reason, 'PROBE2_SIGNAL_NO_DATA');
+  assert.deepEqual(verdict.units[0]?.noDataProbes, ['probe2']);
 });
 
-test('unused P3 on a dual-wavelength product does not create a no-data NG', () => {
+test('unused P1 on a dual-wavelength product does not create a no-data NG', () => {
   const stateUnit = unit();
   const state: FlameDetectorState = {
     units: [stateUnit],
@@ -292,9 +292,9 @@ test('unused P3 on a dual-wavelength product does not create a no-data NG', () =
     timestamp: 1_000,
   };
   const result = analysisUnit();
-  result.noiseTest.metrics.probe3 = { absolute: 999, fluctuation: 1 };
+  result.noiseTest.metrics.probe1 = { absolute: 999, fluctuation: 1 };
   const verdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
-  assert.notEqual(verdict.units[0]?.reason, 'PROBE3_SIGNAL_NO_DATA');
+  assert.notEqual(verdict.units[0]?.reason, 'PROBE1_SIGNAL_NO_DATA');
   assert.deepEqual(verdict.units[0]?.noDataProbes ?? [], []);
 });
 
@@ -308,7 +308,7 @@ test('MQTT inspection payload keeps product identity and per-detector precheck e
     timestamp: 1_000,
   };
   const result = analysisUnit();
-  result.noiseTest.metrics.probe1 = { absolute: 995, fluctuation: 5 };
+  result.noiseTest.metrics.probe2 = { absolute: 995, fluctuation: 5 };
   const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), precheck(), dualProduct());
   const message = buildInspectionResultPayload(archiveWithVerdict(detectorVerdict, state, result), 'bench-1', 300) as {
     payload: {
@@ -330,7 +330,7 @@ test('MQTT inspection payload keeps product identity and per-detector precheck e
   assert.equal(message.payload.product_precheck_verdict, 'PASS');
   assert.equal(message.payload.detector_results[0]?.actual_software_version, '01.02.03.04');
   assert.equal(message.payload.detector_results[0]?.actual_probe_count, 2);
-  assert.deepEqual(message.payload.detector_results[0]?.no_data_probes, ['probe1']);
+  assert.deepEqual(message.payload.detector_results[0]?.no_data_probes, ['probe2']);
 });
 
 test('missing precheck is NG but batch product identity still survives into MQTT', () => {
