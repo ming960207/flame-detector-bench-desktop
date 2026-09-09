@@ -1,4 +1,8 @@
-import type { ChannelKey, WaveformAnalysisConfig } from './closure/field-waveform-analysis.js';
+import {
+  normalizeDetectionQualityConfig,
+  type ChannelKey,
+  type WaveformAnalysisConfig,
+} from './closure/field-waveform-analysis.js';
 import {
   normalizeProductCodeRule,
   type ProductCodeRule,
@@ -173,16 +177,33 @@ export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] 
  * but its real sensing channels are P2 and P3. P1 remains available in raw telemetry
  * for protocol diagnostics only and must not participate in production noise/trend,
  * no-data or interference acceptance decisions.
+ *
+ * The per-stage waveform peak-to-peak amplitude ratio is retained as diagnostic
+ * evidence, but it is not a production acceptance gate for this product. Field logs
+ * showed that a single stage transient can push the amplitude ratio above 1.5 while
+ * the detector-provided P2/P3 (SNR23) stays inside the configured 0.5..1.5 range.
+ * Production acceptance therefore uses SNR23 plus trend/noise limits for the real
+ * P2/P3 channels and keeps the amplitude ratio visible for troubleshooting only.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
   expectedProbeCount: number,
 ): Partial<WaveformAnalysisConfig> | undefined {
-  if (!source || expectedProbeCount !== 2) return source;
+  if (expectedProbeCount !== 2) return source;
+  const base = source ?? {};
+  const quality = normalizeDetectionQualityConfig(base.quality);
   return {
-    ...source,
+    ...base,
     noiseProbes: ['probe2', 'probe3'],
     consistencyProbes: ['probe2', 'probe3'],
     interferenceRatio: { numerator: 'probe3', denominator: 'probe2' },
+    // Disable only the amplitude-ratio gate. The ratio is still calculated and
+    // archived; SNR23 remains the authoritative P2/P3 acceptance ratio below.
+    maxInterferenceRatio: 0,
+    quality: {
+      ...quality,
+      a: { ...quality.a, maxInterferenceRatio: 0 },
+      b: { ...quality.b, maxInterferenceRatio: 0 },
+    },
   };
 }
