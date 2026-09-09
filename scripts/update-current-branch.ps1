@@ -27,31 +27,29 @@ if (-not $branch -or $branch -eq 'HEAD') {
     Fail 'Detached HEAD is not supported. Check out a branch first.'
 }
 
-try {
-    $origin = (& git remote get-url origin).Trim()
-} catch {
-    Fail 'Git remote origin is not configured.'
+$publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
+& git remote set-url origin $publicRemote
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Unable to configure the public GitHub remote.'
 }
 
-if (-not $origin) {
-    Fail 'Git remote origin is not configured.'
-}
-
+$env:GIT_TERMINAL_PROMPT = '0'
 $before = (& git rev-parse --short HEAD).Trim()
 
 Write-Host "Repository: $repoRoot"
 Write-Host "Branch: $branch"
-Write-Host "Remote: $origin"
+Write-Host "Remote: $publicRemote"
+Write-Host 'Authentication: anonymous read-only HTTPS'
 Write-Host "Current commit: $before"
 Write-Host ''
 Write-Host 'WARNING: This update mode discards all local repository changes.'
 Write-Host 'Tracked changes, staged changes, local commits, and untracked files will be removed.'
 Write-Host ''
-Write-Host 'Fetching remote updates...'
+Write-Host 'Fetching remote updates anonymously...'
 
-& git fetch --prune origin
+& git -c credential.helper= fetch --prune origin
 if ($LASTEXITCODE -ne 0) {
-    Fail 'git fetch failed.'
+    Fail 'git fetch failed. Verify network access to GitHub.'
 }
 
 $remoteRef = "origin/$branch"
@@ -88,7 +86,7 @@ if ($remaining) {
 }
 
 Write-Host ''
-Write-Host 'SUCCESS: The current branch now exactly matches GitHub tracked content.'
+Write-Host 'SUCCESS: The current branch now matches GitHub tracked content.'
 Write-Host "Previous commit: $before"
 Write-Host "Current commit: $after"
 Write-Host "Remote commit: $remoteCommit"
