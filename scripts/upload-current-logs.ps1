@@ -37,6 +37,24 @@ if (-not $origin) {
     Fail 'Git remote origin is not configured.'
 }
 
+# Configure a fixed repository-local identity for automated bench log commits.
+# This writes only to this repository's .git/config and never changes global Git settings.
+$deviceGitName = 'Flame Detector Bench'
+$deviceGitEmail = 'flame-detector-bench@local.invalid'
+
+& git config --local user.name $deviceGitName
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Failed to configure repository-local Git user.name.'
+}
+
+& git config --local user.email $deviceGitEmail
+if ($LASTEXITCODE -ne 0) {
+    Fail 'Failed to configure repository-local Git user.email.'
+}
+
+Write-Host "Git identity: $deviceGitName <$deviceGitEmail>"
+Write-Host 'Git identity scope: repository only'
+
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $archiveRelative = "diagnostic-logs/$stamp"
 $archivePath = Join-Path $repoRoot $archiveRelative
@@ -104,6 +122,7 @@ $manifest = @(
     "Captured: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     "Branch: $branch",
     "Source commit: $head",
+    "Git author: $deviceGitName <$deviceGitEmail>",
     "File count: $copied"
 )
 Set-Content -LiteralPath (Join-Path $archivePath 'manifest.txt') -Value $manifest -Encoding ASCII
