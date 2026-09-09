@@ -5,6 +5,12 @@ import type { ProductionInspectionRecord } from './production-inspection-record.
 
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
 export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格';
+export type LabelNoiseChannel = 'P1' | 'P2' | 'P3' | 'P4';
+
+export interface LabelNoiseMetric {
+  channel: LabelNoiseChannel;
+  fluctuation: number;
+}
 
 export interface ProductLabelPrintJob {
   id: string;
@@ -17,7 +23,10 @@ export interface ProductLabelPrintJob {
   verdict: LabelVerdict;
   isolation: boolean;
   productionDate: number;
+  /** Legacy numeric array retained for persisted queue/API compatibility. */
   noiseValues: number[];
+  /** Explicit probe-to-RAW-fluctuation mapping used by label rendering. */
+  noiseMetrics?: LabelNoiseMetric[];
   status: LabelPrintJobStatus;
   attempts: number;
   reprintCount: number;
@@ -53,6 +62,23 @@ function safeClone<T>(value: T): T {
 
 function jobId(batchId: string, slot: number): string {
   return `${batchId}:D${slot}`;
+}
+
+/**
+ * Production inspection amplitude.values follows the expected sensing-channel order.
+ * The installed two-probe detector is the special protocol case P2/P3 (P1 is a
+ * placeholder); three/four-probe products use the natural P1..Pn order.
+ */
+export function labelNoiseMetricsFromValues(values: number[]): LabelNoiseMetric[] {
+  const normalized = (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .slice(0, 4);
+  const firstProbe = normalized.length === 2 ? 2 : 1;
+  return normalized.map((fluctuation, index) => ({
+    channel: `P${firstProbe + index}` as LabelNoiseChannel,
+    fluctuation,
+  }));
 }
 
 function labelVerdict(record: ProductionInspectionRecord, slot: number, detectorVerdict: FieldDetectorBatchVerdict): LabelVerdict {
@@ -154,6 +180,7 @@ export class LabelPrintQueueStore {
         if (this.state.jobs.some((job) => job.id === id)) continue;
         const verdict = labelVerdict(record, product.slot, detectorVerdict);
         const hasCode = Boolean(product.productCode);
+        const noiseValues = [...product.amplitude.values];
         const job: ProductLabelPrintJob = {
           id,
           batchId: record.batchId,
@@ -165,7 +192,8 @@ export class LabelPrintQueueStore {
           verdict,
           isolation: verdict === '不合格',
           productionDate: record.productionDate,
-          noiseValues: [...product.amplitude.values],
+          noiseValues,
+          noiseMetrics: labelNoiseMetricsFromValues(noiseValues),
           status: hasCode ? 'WAITING' : 'BLOCKED',
           attempts: 0,
           reprintCount: 0,
