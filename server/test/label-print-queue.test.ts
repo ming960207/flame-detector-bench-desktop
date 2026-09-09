@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { LabelPrintQueueStore } from '../src/label-print-queue.js';
+import { LabelPrintQueueStore, labelNoiseMetricsFromValues } from '../src/label-print-queue.js';
 import type { ProductionInspectionRecord, ProductionInspectionProductResult } from '../src/production-inspection-record.js';
 
 function product(slot: number, code: string | null, verdict: '合格' | '不合格', noiseValues = [150, 180]): ProductionInspectionProductResult {
@@ -67,6 +67,24 @@ async function fixture() {
   return { file, store: new LabelPrintQueueStore(file) };
 }
 
+test('label noise mapping follows real optical probe channels', () => {
+  assert.deepEqual(labelNoiseMetricsFromValues([151, 181]), [
+    { channel: 'P2', fluctuation: 151 },
+    { channel: 'P3', fluctuation: 181 },
+  ]);
+  assert.deepEqual(labelNoiseMetricsFromValues([101, 102, 103]), [
+    { channel: 'P1', fluctuation: 101 },
+    { channel: 'P2', fluctuation: 102 },
+    { channel: 'P3', fluctuation: 103 },
+  ]);
+  assert.deepEqual(labelNoiseMetricsFromValues([101, 102, 103, 104]), [
+    { channel: 'P1', fluctuation: 101 },
+    { channel: 'P2', fluctuation: 102 },
+    { channel: 'P3', fluctuation: 103 },
+    { channel: 'P4', fluctuation: 104 },
+  ]);
+});
+
 test('completed batch creates D1-D6 jobs in slot order with A/B/NG and keeps NG product identity', async () => {
   const { store } = await fixture();
   const products = Array.from({ length: 6 }, (_, offset) => {
@@ -83,6 +101,10 @@ test('completed batch creates D1-D6 jobs in slot order with A/B/NG and keeps NG 
   assert.equal(created[3]?.productCode, products[3]?.productCode);
   assert.equal(created[3]?.qrContent, products[3]?.productCode);
   assert.deepEqual(created[0]?.noiseValues, [151, 181]);
+  assert.deepEqual(created[0]?.noiseMetrics, [
+    { channel: 'P2', fluctuation: 151 },
+    { channel: 'P3', fluctuation: 181 },
+  ]);
 
   const duplicate = await store.enqueueProductionRecord(record(products), detectorVerdict());
   assert.equal(duplicate.length, 0, '同一批次归档不得重复生成标签任务');
