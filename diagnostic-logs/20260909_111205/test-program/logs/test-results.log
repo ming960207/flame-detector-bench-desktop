@@ -1,0 +1,4 @@
+2026-09-09 09:22:12 | run=test-20260909012158702-ed418b | status=ABORTED | result=PENDING | grade=PENDING | duration=13.71 s | stages=0/2 | relays=15 | detectors=324 | waveforms=0
+2026-09-09 09:24:45 | run=test-20260909012214837-c6efb6 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.46 s | stages=10/10 | relays=61 | detectors=3264 | waveforms=29212
+2026-09-09 11:08:36 | run=test-20260909030824879-8c4422 | status=ABORTED | result=PENDING | grade=PENDING | duration=11.23 s | stages=0/2 | relays=15 | detectors=270 | waveforms=0
+2026-09-09 11:11:09 | run=test-20260909030838563-72e908 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.71 s | stages=10/10 | relays=61 | detectors=3366 | waveforms=27788
