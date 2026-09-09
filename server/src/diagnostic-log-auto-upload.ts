@@ -273,6 +273,10 @@ class GitHubDiagnosticUploader {
     return `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}${path}`;
   }
 
+  private branchPath(): string {
+    return this.branch.split('/').map((part) => encodeURIComponent(part)).join('/');
+  }
+
   private async createBlobs(files: Array<{ path: string; content: Buffer }>): Promise<Array<{ path: string; sha: string }>> {
     const created: Array<{ path: string; sha: string }> = [];
     for (const file of files) {
@@ -290,11 +294,11 @@ class GitHubDiagnosticUploader {
     blobs: Array<{ path: string; sha: string }>,
     message: string,
   ): Promise<string> {
-    const encodedBranch = encodeURIComponent(this.branch);
+    const branchPath = this.branchPath();
     let lastError: unknown;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        const ref = await this.api<GitHubRefResponse>('GET', this.repoPath(`/git/ref/heads/${encodedBranch}`));
+        const ref = await this.api<GitHubRefResponse>('GET', this.repoPath(`/git/ref/heads/${branchPath}`));
         const parentSha = ref.object?.sha;
         if (!parentSha) throw new Error('GITHUB_BRANCH_HEAD_MISSING');
         const parent = await this.api<GitHubCommitResponse>('GET', this.repoPath(`/git/commits/${parentSha}`));
@@ -316,7 +320,7 @@ class GitHubDiagnosticUploader {
           },
         });
         if (!commit.sha) throw new Error('GITHUB_COMMIT_SHA_MISSING');
-        await this.api('PATCH', this.repoPath(`/git/refs/heads/${encodedBranch}`), {
+        await this.api('PATCH', this.repoPath(`/git/refs/heads/${branchPath}`), {
           sha: commit.sha,
           force: false,
         });
