@@ -96,7 +96,7 @@ function thresholdMatches(
   metrics: FieldDetectorMetrics,
   limits: DetectionQualityThresholds,
   ratios: DetectionRatioThresholds,
-  expectedProbeCount: number,
+  expectedChannels: ChannelKey[],
 ): string | undefined {
   const upperBounds: Array<[keyof Pick<FieldDetectorMetrics, 'noiseRms' | 'noiseAbsolute' | 'interferenceRatio'>, number | undefined, string]> = [
     ['noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT'],
@@ -115,18 +115,23 @@ function thresholdMatches(
     if (metrics.consistencyTrend < limits.minConsistencyTrend!) return 'CONSISTENCY_TREND_BELOW_LIMIT';
   }
 
+  // Ratio applicability follows the actual optical channel pair, not the numeric
+  // probe count. The installed dual-wavelength product has two real channels P2/P3
+  // in a three-channel protocol frame, so SNR23 must be checked while P1-based
+  // SNR21/SNR31 must be ignored for that product.
   const snrRanges: Array<[
     keyof Pick<FieldDetectorMetrics, 'snr21' | 'snr23' | 'snr31'>,
     DetectionRatioThresholds[keyof DetectionRatioThresholds],
     string,
-    number,
+    readonly ChannelKey[],
   ]> = [
-    ['snr21', ratios.snr21, 'SNR21', 2],
-    ['snr23', ratios.snr23, 'SNR23', 3],
-    ['snr31', ratios.snr31, 'SNR31', 3],
+    ['snr21', ratios.snr21, 'SNR21', ['probe2', 'probe1']],
+    ['snr23', ratios.snr23, 'SNR23', ['probe2', 'probe3']],
+    ['snr31', ratios.snr31, 'SNR31', ['probe3', 'probe1']],
   ];
-  for (const [key, range, label, requiredProbeCount] of snrRanges) {
-    if (expectedProbeCount < requiredProbeCount) continue;
+  const expectedChannelSet = new Set(expectedChannels);
+  for (const [key, range, label, requiredChannels] of snrRanges) {
+    if (!requiredChannels.every((channel) => expectedChannelSet.has(channel))) continue;
     const value = metrics[key];
     if (range.min > 0 || range.max > 0) {
       if (value === null) return `${key.toUpperCase()}_MISSING`;
@@ -290,7 +295,7 @@ function evaluateUnit(
     for (const stage of stages) {
       const stageResult = analysis.stages?.[stage];
       if (stageResult?.verdict === 'FAIL') return `${stage.toUpperCase()}_${stageResult.reason || 'STAGE_FAIL'}`;
-      const reason = thresholdMatches(stageMetrics(stage), limits, ratios, expectedProbeCount);
+      const reason = thresholdMatches(stageMetrics(stage), limits, ratios, expectedChannels);
       if (reason) return `${stage.toUpperCase()}_${reason}`;
     }
     return undefined;
