@@ -1,5 +1,11 @@
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
 export type PrinterConnectionType = 'usb' | 'wifi';
+export type LabelNoiseChannel = 'P1' | 'P2' | 'P3' | 'P4';
+
+export interface LabelNoiseMetric {
+  channel: LabelNoiseChannel;
+  fluctuation: number;
+}
 
 export interface ProductLabelPrintJob {
   id: string;
@@ -13,6 +19,7 @@ export interface ProductLabelPrintJob {
   isolation: boolean;
   productionDate: number;
   noiseValues: number[];
+  noiseMetrics?: LabelNoiseMetric[];
   status: LabelPrintJobStatus;
   attempts: number;
   reprintCount: number;
@@ -134,6 +141,28 @@ function localDate(timestamp: number): string {
   const date = new Date(timestamp);
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function legacyNoiseMetrics(values: number[]): LabelNoiseMetric[] {
+  const normalized = (Array.isArray(values) ? values : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .slice(0, 4);
+  const firstProbe = normalized.length === 2 ? 2 : 1;
+  return normalized.map((fluctuation, index) => ({
+    channel: `P${firstProbe + index}` as LabelNoiseChannel,
+    fluctuation,
+  }));
+}
+
+export function labelNoiseText(job: Pick<ProductLabelPrintJob, 'noiseMetrics' | 'noiseValues'>): string {
+  const explicit = Array.isArray(job.noiseMetrics)
+    ? job.noiseMetrics.filter((metric) => metric
+      && ['P1', 'P2', 'P3', 'P4'].includes(metric.channel)
+      && Number.isFinite(Number(metric.fluctuation)))
+    : [];
+  const metrics = explicit.length > 0 ? explicit : legacyNoiseMetrics(job.noiseValues);
+  return metrics.map((metric) => `${metric.channel} ${Number(metric.fluctuation)}`).join('  ');
 }
 
 function unpackAckPayload(response: JcAck): unknown {
@@ -705,7 +734,7 @@ class LabelPrinterRuntime {
               await this.transport.text(job.productCode!, { x: 24.5, y: 13.1, width: 33, height: 3.8, fontSize: 2.05 }, { bold: true });
               await this.transport.text(`结果：${job.verdict}`, { x: 24.5, y: 17.5, width: 33, height: 4.5, fontSize: 2.75 }, { bold: true });
               await this.transport.text(`日期：${localDate(job.productionDate)}`, { x: 24.5, y: 22.3, width: 33, height: 3.4, fontSize: 1.85 });
-              await this.transport.text(`噪声：${job.noiseValues.map((value, index) => `P${index + 1} ${value}`).join('  ')}`,
+              await this.transport.text(`噪声波动：${labelNoiseText(job)}`,
                 { x: 24.5, y: 26.1, width: 33, height: 3.3, fontSize: 1.65 }, { bold: true });
               await this.transport.line(2, 32, 56);
               await this.transport.text(job.isolation ? 'NG · 请隔离处理' : '二维码内容：产品编号',
