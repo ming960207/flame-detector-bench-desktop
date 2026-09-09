@@ -23,6 +23,9 @@ interface UnitWorkState {
   commandStartedAt: number | null;
 }
 
+const RELAY_COMMAND_MAX_ATTEMPTS = 3;
+const RELAY_COMMAND_RETRY_DELAY_MS = 80;
+
 function emptyAction(): RelayActionResult {
   return {
     commandAccepted: false,
@@ -72,6 +75,10 @@ function sleep(ms: number): Promise<void> {
  * DIAGNOSTIC 则必须真正逐槽位完成一整套火警/故障循环后再进入下一槽位，
  * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
  *
+ * 2026-09-09 同批重复实测发现模拟/复位命令存在偶发单次传输失败。模拟和复位命令
+ * 均为幂等操作，因此在不改变实体继电器判据的前提下，发送层允许有限重试；只有连续
+ * 3 次均失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位恢复判据保持原样。
+ *
  * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
  * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
  */
@@ -81,6 +88,19 @@ export class RelayFunctionalTestCoordinator {
     private readonly feedback: RelayFeedbackSource,
     private readonly config: RelayFunctionalTestConfig,
   ) {}
+
+  private async detectorCommandWithRetry(operation: () => Promise<void>): Promise<boolean> {
+    for (let attempt = 1; attempt <= RELAY_COMMAND_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await operation();
+        return true;
+      } catch {
+        if (attempt >= RELAY_COMMAND_MAX_ATTEMPTS) return false;
+        await sleep(RELAY_COMMAND_RETRY_DELAY_MS);
+      }
+    }
+    return false;
+  }
 
   private async physicalState(index: number): Promise<{ alarm: boolean | null; fault: boolean | null; error?: string }> {
     const mapping = relayFeedbackMappingFor(this.config, index);
@@ -133,14 +153,11 @@ export class RelayFunctionalTestCoordinator {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
       state.commandStartedAt = Date.now();
-      try {
-        await this.detectors.simulate(index, kind === 'alarm'
-          ? { fire: true, fault: false }
-          : { fire: false, fault: true });
-        action.commandAccepted = true;
-      } catch {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
-      }
+      const accepted = await this.detectorCommandWithRetry(() => this.detectors.simulate(index, kind === 'alarm'
+        ? { fire: true, fault: false }
+        : { fire: false, fault: true }));
+      if (accepted) action.commandAccepted = true;
+      else uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
     }));
   }
 
@@ -230,12 +247,9 @@ export class RelayFunctionalTestCoordinator {
   private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
-      try {
-        await this.detectors.reset(index);
-        action.resetAccepted = true;
-      } catch {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
-      }
+      const accepted = await this.detectorCommandWithRetry(() => this.detectors.reset(index));
+      if (accepted) action.resetAccepted = true;
+      else uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_COMMAND_FAILED' : 'FAULT_RESET_COMMAND_FAILED');
     }));
   }
 
@@ -324,12 +338,9 @@ export class RelayFunctionalTestCoordinator {
   private async emergencyCleanup(work: Map<number, UnitWorkState>): Promise<void> {
     const resetAccepted = new Set<number>();
     await Promise.all([...work.entries()].map(async ([index, state]) => {
-      try {
-        await this.detectors.reset(index);
-        resetAccepted.add(index);
-      } catch {
-        this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
-      }
+      const accepted = await this.detectorCommandWithRetry(() => this.detectors.reset(index));
+      if (accepted) resetAccepted.add(index);
+      else this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
     }));
 
     const stable = new Map<number, number>();
