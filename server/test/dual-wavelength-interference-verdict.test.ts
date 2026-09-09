@@ -179,6 +179,27 @@ function state(): FlameDetectorState {
   };
 }
 
+function terminalStartup(state: 'DISCONNECTED' | 'FAILED') {
+  return {
+    state,
+    index: 1,
+    address: 1,
+    powerOnAt: null,
+    communicationReadyAt: null,
+    modeSwitchStartedAt: null,
+    modeSwitchOkAt: null,
+    firstFrameAt: null,
+    firstValidSampleAt: null,
+    channelFirstValidAt: {},
+    channelSyncAt: null,
+    testReadyAt: null,
+    modeSwitchAttempts: 0,
+    channelValidStreak: 0,
+    requiredChannelCount: 3,
+    ...(state === 'FAILED' ? { failureReason: 'MODE_SWITCH_FAILED' } : {}),
+  } as NonNullable<FlameDetectorUnitState['startup']>;
+}
+
 test('dual-wavelength keeps amplitude ratio as diagnostics but disables it as an acceptance gate', () => {
   const config = productAwareWaveformConfig(DEFAULT_WAVEFORM_ANALYSIS_CONFIG, 2)!;
   assert.equal(config.maxInterferenceRatio, 0);
@@ -218,4 +239,27 @@ test('dual-wavelength ignores P1-based ratios even if a saved config enables the
   const verdict = evaluateFieldDetectorBatch(state(), current, precheck(), dualProduct());
   assert.equal(verdict.units[0]?.verdict, 'PASS');
   assert.equal(verdict.units[0]?.grade, 'A_PASS');
+});
+
+test('completed waveform PASS survives intentional stop-stream transport reset', () => {
+  const stopped = state();
+  const unit = stopped.units[0]!;
+  unit.online = false;
+  unit.sourceReady = false;
+  unit.syncOk = false;
+  unit.sendMode = 0;
+  unit.startup = terminalStartup('DISCONNECTED');
+
+  const verdict = evaluateFieldDetectorBatch(stopped, snapshot(1.2, 1.0), precheck(), dualProduct());
+  assert.equal(verdict.units[0]?.verdict, 'PASS');
+  assert.equal(verdict.units[0]?.grade, 'A_PASS');
+});
+
+test('explicit startup failure remains authoritative after completion', () => {
+  const failed = state();
+  failed.units[0]!.startup = terminalStartup('FAILED');
+
+  const verdict = evaluateFieldDetectorBatch(failed, snapshot(1.2, 1.0), precheck(), dualProduct());
+  assert.equal(verdict.units[0]?.verdict, 'FAIL');
+  assert.equal(verdict.units[0]?.reason, 'MODE_SWITCH_FAILED');
 });
