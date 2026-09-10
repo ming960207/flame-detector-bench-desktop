@@ -267,3 +267,85 @@ test('emergency cleanup failure is explicit and forces the relay test to fail', 
   assert.ok(report.units[0]?.alarm.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
   assert.ok(report.units[0]?.fault.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
 });
+
+test('transient relay baseline read failures are retried instead of forcing a retest', async () => {
+  let internal = { fire: false, fault: false };
+  const inputs: Record<string, boolean> = { X1: false, X2: false };
+  let readLatchedCalls = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      internal = { ...state };
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
+    },
+    async reset() {
+      internal = { fire: false, fault: false };
+      inputs.X1 = false;
+      inputs.X2 = false;
+    },
+    async readLatched() {
+      readLatchedCalls += 1;
+      if (readLatchedCalls <= 2) throw new Error('temporary detector read timeout');
+      return { ...internal };
+    },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mode: 'FAST_BATCH',
+    stableSamples: 1,
+    sampleIntervalMs: 20,
+    feedbackTimeoutMs: 300,
+    resetTimeoutMs: 300,
+    mappings: createMapping([1]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
+  const report = await coordinator.run('baseline-retry');
+
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(readLatchedCalls >= 3);
+  assert.equal(report.units[0]?.alarm.reasons.includes('RELAY_BASELINE_READ_FAILED'), false);
+  assert.equal(report.units[0]?.fault.reasons.includes('RELAY_BASELINE_READ_FAILED'), false);
+});
+
+test('transient relay DI baseline read failures are retried instead of forcing a retest', async () => {
+  let internal = { fire: false, fault: false };
+  const inputs: Record<string, boolean> = { X1: false, X2: false };
+  let readInputsCalls = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      internal = { ...state };
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
+    },
+    async reset() {
+      internal = { fire: false, fault: false };
+      inputs.X1 = false;
+      inputs.X2 = false;
+    },
+    async readLatched() { return { ...internal }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true,
+    mode: 'FAST_BATCH',
+    stableSamples: 1,
+    sampleIntervalMs: 20,
+    feedbackTimeoutMs: 300,
+    resetTimeoutMs: 300,
+    mappings: createMapping([1]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, {
+    async readInputs() {
+      readInputsCalls += 1;
+      if (readInputsCalls <= 2) throw Object.assign(new Error('temporary DIO timeout'), { code: 'DIO_CONNECTION_FAILED' });
+      return { ...inputs };
+    },
+  }, config);
+  const report = await coordinator.run('baseline-dio-retry');
+
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(readInputsCalls >= 3);
+  assert.equal(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:')), false);
+  assert.equal(report.units[0]?.fault.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:')), false);
+});
