@@ -8,174 +8,68 @@
   <link rel="icon" type="image/png" href="./favicon.png" />
   <!-- Tailwind CSS 通过 PostCSS 处理，不再使用 CDN -->
   <style>
-    /* 使用系统字体回退，确保离线可用 */
     body {
       font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background-color: #f8fafc;
       color: #334155;
       overflow: hidden;
     }
+    .dark body { background-color: #020617; color: #e2e8f0; }
+    .font-tech { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; letter-spacing: 0.05em; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .neon-border { box-shadow: 0 0 5px rgba(6, 182, 212, 0.5), inset 0 0 5px rgba(6, 182, 212, 0.2); }
+    .neon-text { text-shadow: 0 0 5px rgba(6, 182, 212, 0.8); }
+    .active-step-glow { box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); border-color: #22c55e; }
 
-    .dark body {
-      background-color: #020617;
-      color: #e2e8f0;
-    }
-
-    .font-tech {
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      letter-spacing: 0.05em;
-    }
-
-    /* Custom Scrollbar for the dark theme */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: #0f172a;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #334155;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #475569;
-    }
-
-    .neon-border {
-      box-shadow: 0 0 5px rgba(6, 182, 212, 0.5), inset 0 0 5px rgba(6, 182, 212, 0.2);
-    }
-
-    .neon-text {
-      text-shadow: 0 0 5px rgba(6, 182, 212, 0.8);
-    }
-
-    .active-step-glow {
-      box-shadow: 0 0 15px rgba(34, 197, 94, 0.6);
-      border-color: #22c55e;
-    }
-
-    /*
-     * D1-D6 实时波形卡片状态灯。
-     * 不建立额外 WebSocket/HTTP 轮询，直接跟随现有 React 卡片实时状态类更新，
-     * 避免为了状态灯增加现场数据链路负载。
-     */
-    .wutos-sensor-caption {
-      justify-content: flex-start !important;
-    }
-
+    .wutos-sensor-caption { justify-content: flex-start !important; }
     .wutos-device-state-lamps {
-      display: inline-flex;
-      flex: 0 1 auto;
-      min-width: 0;
-      align-items: center;
-      justify-content: center;
-      gap: clamp(1px, .11cqw, 2px);
-      margin-left: auto;
-      margin-right: clamp(2px, .2cqw, 4px);
-      white-space: nowrap;
+      display: inline-flex; flex: 0 1 auto; min-width: 0; align-items: center; justify-content: center;
+      gap: clamp(1px, .11cqw, 2px); margin-left: auto; margin-right: clamp(2px, .2cqw, 4px); white-space: nowrap;
     }
-
     .wutos-device-state-lamp {
-      display: inline-flex;
-      min-width: 0;
-      align-items: center;
-      gap: 1px;
-      color: #718997;
-      font-size: clamp(2.6px, .25cqw, 4.4px);
-      font-weight: 700;
-      line-height: 1;
-      white-space: nowrap;
+      display: inline-flex; min-width: 0; align-items: center; gap: 1px; color: #718997;
+      font-size: clamp(2.6px, .25cqw, 4.4px); font-weight: 700; line-height: 1; white-space: nowrap;
       transition: color .12s ease, text-shadow .12s ease;
     }
-
     .wutos-device-state-lamp > i {
-      display: inline-block;
-      width: clamp(3px, .28cqw, 5px);
-      height: clamp(3px, .28cqw, 5px);
-      flex: 0 0 auto;
-      border: 1px solid rgba(74, 101, 116, .72);
-      border-radius: 50%;
-      background: #9aa9b0;
-      box-shadow: inset 0 0 2px rgba(0, 0, 0, .32);
-      transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
+      display: inline-block; width: clamp(3px, .28cqw, 5px); height: clamp(3px, .28cqw, 5px); flex: 0 0 auto;
+      border: 1px solid rgba(74, 101, 116, .72); border-radius: 50%; background: #9aa9b0;
+      box-shadow: inset 0 0 2px rgba(0, 0, 0, .32); transition: background .12s ease, border-color .12s ease, box-shadow .12s ease;
     }
-
     .wutos-device-state-lamp.is-active[data-state-kind="fire"],
-    .wutos-device-state-lamp.is-active[data-state-kind="fire-relay"] {
-      color: #c62828;
-      text-shadow: 0 0 3px rgba(239, 68, 68, .42);
-    }
-
+    .wutos-device-state-lamp.is-active[data-state-kind="fire-relay"] { color: #c62828; text-shadow: 0 0 3px rgba(239, 68, 68, .42); }
     .wutos-device-state-lamp.is-active[data-state-kind="fire"] > i,
     .wutos-device-state-lamp.is-active[data-state-kind="fire-relay"] > i {
-      border-color: #ff3b30;
-      background: #ff3b30;
-      box-shadow: 0 0 4px rgba(255, 59, 48, .9), inset 0 0 2px rgba(255, 255, 255, .65);
+      border-color: #ff3b30; background: #ff3b30; box-shadow: 0 0 4px rgba(255, 59, 48, .9), inset 0 0 2px rgba(255, 255, 255, .65);
     }
-
     .wutos-device-state-lamp.is-active[data-state-kind="fault"],
-    .wutos-device-state-lamp.is-active[data-state-kind="fault-relay"] {
-      color: #b36a00;
-      text-shadow: 0 0 3px rgba(245, 158, 11, .38);
-    }
-
+    .wutos-device-state-lamp.is-active[data-state-kind="fault-relay"] { color: #b36a00; text-shadow: 0 0 3px rgba(245, 158, 11, .38); }
     .wutos-device-state-lamp.is-active[data-state-kind="fault"] > i,
     .wutos-device-state-lamp.is-active[data-state-kind="fault-relay"] > i {
-      border-color: #f59e0b;
-      background: #f59e0b;
-      box-shadow: 0 0 4px rgba(245, 158, 11, .9), inset 0 0 2px rgba(255, 255, 255, .62);
+      border-color: #f59e0b; background: #f59e0b; box-shadow: 0 0 4px rgba(245, 158, 11, .9), inset 0 0 2px rgba(255, 255, 255, .62);
     }
+    .wutos-device-state-lamp.is-offline { color: #9aa9b0; opacity: .62; }
+    .wutos-device-state-lamp.is-offline > i { border-color: #9aa9b0; background: #c7d0d5; box-shadow: none; }
 
-    .wutos-device-state-lamp.is-offline {
-      color: #9aa9b0;
-      opacity: .62;
-    }
-
-    .wutos-device-state-lamp.is-offline > i {
-      border-color: #9aa9b0;
-      background: #c7d0d5;
-      box-shadow: none;
-    }
-
-    /* A类继续使用现有绿色 pass 外框；B类使用独立黄色外框和轻微发光，便于现场快速区分。 */
+    /* A类绿色；B类黄色，现场快速区分。 */
     .wutos-detector-card.pass.is-b-grade {
       border-color: #facc15 !important;
       box-shadow: 0 0 13px rgba(250, 204, 21, .68), inset 0 0 13px rgba(250, 204, 21, .13) !important;
     }
+    .wutos-detector-card.pass.is-b-grade > header span { color: #ffe36a !important; text-shadow: 0 0 6px rgba(250, 204, 21, .62); }
 
-    .wutos-detector-card.pass.is-b-grade > header span {
-      color: #ffe36a !important;
-      text-shadow: 0 0 6px rgba(250, 204, 21, .62);
-    }
-
-    /* B类阈值不再允许独立配置：仅保留A类输入，B由后端按A固定放宽10%。 */
+    /* B类阈值不再独立配置：仅保留A类输入，B由后端固定按A放宽10%。 */
     .quality-threshold-groups > .quality-threshold-group:nth-child(2),
-    .quality-detector-grades > .quality-snr-grade:nth-child(2) {
-      display: none !important;
-    }
-
-    .quality-threshold-groups,
-    .quality-detector-grades {
-      grid-template-columns: minmax(0, 1fr) !important;
-    }
-
+    .quality-detector-grades > .quality-snr-grade:nth-child(2) { display: none !important; }
+    .quality-threshold-groups, .quality-detector-grades { grid-template-columns: minmax(0, 1fr) !important; }
     .quality-threshold-groups::after {
       content: "B类无需单独设置：系统固定按A类数值规则放宽10%（上限×1.10，下限×0.90；区间向两侧扩展10%）。";
-      display: flex;
-      align-items: center;
-      min-height: 38px;
-      padding: 8px 10px;
-      border: 1px solid rgba(250, 204, 21, .46);
-      border-radius: 5px;
-      background: rgba(250, 204, 21, .08);
-      color: #ffe36a;
-      font-size: 11px;
-      font-weight: 700;
-      line-height: 1.45;
+      display: flex; align-items: center; min-height: 38px; padding: 8px 10px;
+      border: 1px solid rgba(250, 204, 21, .46); border-radius: 5px; background: rgba(250, 204, 21, .08);
+      color: #ffe36a; font-size: 11px; font-weight: 700; line-height: 1.45;
     }
   </style>
   <link rel="stylesheet" href="./index.css">
@@ -199,48 +93,30 @@
         if (!caption) return null;
         let group = caption.querySelector('.wutos-device-state-lamps');
         if (group) return group;
-
         group = document.createElement('div');
         group.className = 'wutos-device-state-lamps';
         group.setAttribute('role', 'status');
         group.setAttribute('aria-label', '探测器实时状态指示');
-
         for (const item of LAMPS) {
           const lamp = document.createElement('span');
           lamp.className = 'wutos-device-state-lamp';
           lamp.dataset.stateKind = item.kind;
           lamp.dataset.stateTitle = item.title;
-          const dot = document.createElement('i');
-          dot.setAttribute('aria-hidden', 'true');
-          const text = document.createElement('span');
-          text.textContent = item.label;
-          lamp.append(dot, text);
-          group.appendChild(lamp);
+          const dot = document.createElement('i'); dot.setAttribute('aria-hidden', 'true');
+          const text = document.createElement('span'); text.textContent = item.label;
+          lamp.append(dot, text); group.appendChild(lamp);
         }
-
         const waveformMeta = Array.from(caption.children).find((child) => child.tagName === 'SPAN');
-        if (waveformMeta) caption.insertBefore(group, waveformMeta);
-        else caption.appendChild(group);
+        if (waveformMeta) caption.insertBefore(group, waveformMeta); else caption.appendChild(group);
         return group;
       }
 
       function updateCard(card) {
-        const group = ensureLampGroup(card);
-        if (!group) return;
-
+        const group = ensureLampGroup(card); if (!group) return;
         const offline = card.classList.contains('is-offline');
         const fire = card.classList.contains('is-fire');
         const fault = card.classList.contains('is-fault');
-        // 当前探测器协议实时帧提供火警/故障输出状态，没有独立的物理触点位。
-        // 因此继电器灯表示对应继电器“输出动作状态”；外部 DIO 物理反馈仍由
-        // 继电器功能检测用于最终 PASS/FAIL 判定，不在这里伪装为触点反馈。
-        const states = {
-          fire,
-          fault,
-          'fire-relay': fire,
-          'fault-relay': fault,
-        };
-
+        const states = { fire, fault, 'fire-relay': fire, 'fault-relay': fault };
         group.querySelectorAll('.wutos-device-state-lamp').forEach((lamp) => {
           const kind = lamp.dataset.stateKind;
           const active = Boolean(states[kind]);
@@ -257,14 +133,12 @@
       }
 
       function updateQualityPolicyText() {
+        const qualityText = 'A类使用当前设置；B类无需单独设置，系统固定按A类规则自动放宽10%；超过B类容差才判不合格。';
+        const snrText = '仅设置A类范围；B类范围由系统自动扩展10%（下限×0.90，上限×1.10）。';
         const qualityHeading = document.querySelector('.quality-config-heading span');
-        if (qualityHeading) {
-          qualityHeading.textContent = 'A类使用当前设置；B类无需单独设置，系统固定按A类规则自动放宽10%；超过B类容差才判不合格。';
-        }
+        if (qualityHeading && qualityHeading.textContent !== qualityText) qualityHeading.textContent = qualityText;
         const snrHeading = document.querySelector('.quality-snr-heading span');
-        if (snrHeading) {
-          snrHeading.textContent = '仅设置A类范围；B类范围由系统自动扩展10%（下限×0.90，上限×1.10）。';
-        }
+        if (snrHeading && snrHeading.textContent !== snrText) snrHeading.textContent = snrText;
       }
 
       let scheduled = false;
@@ -281,18 +155,10 @@
 
       const observer = new MutationObserver(refreshAll);
       const start = () => {
-        observer.observe(document.documentElement, {
-          subtree: true,
-          childList: true,
-          characterData: true,
-          attributes: true,
-          attributeFilter: ['class'],
-        });
+        observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
         refreshAll();
       };
-
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
-      else start();
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
     })();
   </script>
   <script type="module" src="./index.tsx"></script>
