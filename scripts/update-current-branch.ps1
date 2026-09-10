@@ -18,6 +18,18 @@ function Invoke-Checked([string]$Label, [string]$Command, [string[]]$Arguments) 
     }
 }
 
+function Test-CommandShim([string]$PathValue) {
+    if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) { return $false }
+    $file = Get-Item -LiteralPath $PathValue
+    if ($file.Length -le 0 -or $file.Length -ge 64KB) { return $false }
+    try {
+        $text = [System.IO.File]::ReadAllText($PathValue)
+        return -not $text.Contains([char]0) -and $text -match 'node|npm'
+    } catch {
+        return $false
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 
@@ -53,30 +65,22 @@ function Fetch-TargetBranch {
 }
 
 function Restart-WithUpdatedUpdaterIfNeeded {
-    if ($env:FLAME_UPDATER_REEXEC -eq '1') {
-        return
-    }
+    if ($env:FLAME_UPDATER_REEXEC -eq '1') { return }
     $diskHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash
-    if ($diskHash -eq $initialUpdaterHash) {
-        return
-    }
+    if ($diskHash -eq $initialUpdaterHash) { return }
 
     Write-Host ''
-    Write-Host '[UPDATE] The updater itself changed during git synchronization.' -ForegroundColor Yellow
-    Write-Host '[UPDATE] Restarting with the newly downloaded updater before building runtime...' -ForegroundColor Yellow
-
+    Write-Host '[UPDATE] Updater changed during synchronization.' -ForegroundColor Yellow
+    Write-Host '[UPDATE] Restarting with the newly downloaded updater...' -ForegroundColor Yellow
     $env:FLAME_UPDATER_REEXEC = '1'
     $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
-    if ($StartAfterUpdate) {
-        $childArgs += '-StartAfterUpdate'
-    }
+    if ($StartAfterUpdate) { $childArgs += '-StartAfterUpdate' }
     & powershell.exe @childArgs
-    $childExitCode = $LASTEXITCODE
-    exit $childExitCode
+    exit $LASTEXITCODE
 }
 
 function Stop-ProjectRuntimeProcesses {
-    Write-Host '[CHECK] Stopping running project Electron/Node processes before replacing runtime files...' -ForegroundColor Cyan
+    Write-Host '[CHECK] Stopping running project Electron/Node processes before rebuilding...' -ForegroundColor Cyan
     try {
         $escapedRoot = [Regex]::Escape($repoRoot)
         $targets = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
@@ -89,13 +93,65 @@ function Stop-ProjectRuntimeProcesses {
             Write-Host "Stopping $($process.Name) PID=$($process.ProcessId)"
             Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
         }
-        if ($targets.Count -gt 0) {
-            Start-Sleep -Milliseconds 800
-        }
+        if ($targets.Count -gt 0) { Start-Sleep -Milliseconds 800 }
     } catch {
         Write-Host "WARN: Runtime process detection failed: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host 'The build will continue, but it will fail if old runtime files are locked.' -ForegroundColor Yellow
+        Write-Host 'Build will continue and will fail if runtime files are locked.' -ForegroundColor Yellow
     }
+}
+
+function Restore-DependencySet(
+    [string]$Label,
+    [string]$RequiredShim,
+    [string[]]$CiArguments,
+    [string[]]$InstallArguments,
+    [string]$LockPath
+) {
+    if (Test-CommandShim $RequiredShim) {
+        Write-Host "[OK] $Label toolchain already present; preserving the working field dependency set." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "[REPAIR] $Label toolchain missing. Trying npm ci with conservative arguments..." -ForegroundColor Yellow
+    & npm.cmd @CiArguments
+    if ($LASTEXITCODE -eq 0 -and (Test-CommandShim $RequiredShim)) {
+        Write-Host "[OK] $Label dependencies restored with npm ci." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "WARN: npm ci could not restore $Label dependencies on this field PC." -ForegroundColor Yellow
+    Write-Host 'Falling back to npm install. The tracked lock file will be restored afterwards.' -ForegroundColor Yellow
+    & npm.cmd @InstallArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label dependency repair failed with npm ci and npm install."
+    }
+    if (-not (Test-CommandShim $RequiredShim)) {
+        throw "$Label dependency repair completed but required build tool is still missing: $RequiredShim"
+    }
+    & git checkout -f -- $LockPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to restore tracked lock file after dependency repair: $LockPath"
+    }
+    Write-Host "[OK] $Label dependencies repaired with npm install fallback." -ForegroundColor Green
+}
+
+function Ensure-Dependencies {
+    Write-Host "Node: $(& node.exe --version)"
+    Write-Host "npm: $(& npm.cmd --version)"
+
+    Restore-DependencySet `
+        'Root/web' `
+        (Join-Path $repoRoot 'node_modules\.bin\vite.cmd') `
+        @('ci') `
+        @('install') `
+        'package-lock.json'
+
+    Restore-DependencySet `
+        'Server' `
+        (Join-Path $repoRoot 'server\node_modules\.bin\tsc.cmd') `
+        @('ci', '--prefix', 'server') `
+        @('install', '--prefix', 'server') `
+        'server/package-lock.json'
 }
 
 function Remove-RuntimeOutput([string]$RelativePath) {
@@ -112,9 +168,7 @@ function Assert-RuntimeArtifact([string]$RelativePath, [datetime]$BuildStartedAt
         throw "Required runtime artifact was not generated: $RelativePath"
     }
     $file = Get-Item -LiteralPath $path
-    if ($file.Length -le 0) {
-        throw "Generated runtime artifact is empty: $RelativePath"
-    }
+    if ($file.Length -le 0) { throw "Generated runtime artifact is empty: $RelativePath" }
     if ($file.LastWriteTimeUtc -lt $BuildStartedAt.ToUniversalTime().AddSeconds(-2)) {
         throw "Runtime artifact was not freshly rebuilt: $RelativePath"
     }
@@ -122,9 +176,7 @@ function Assert-RuntimeArtifact([string]$RelativePath, [datetime]$BuildStartedAt
 
 function Get-SoftwareChanges([string]$BaseCommit, [string]$HeadCommit) {
     $names = @(& git diff --name-only $BaseCommit $HeadCommit --)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to compare $BaseCommit with $HeadCommit."
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Unable to compare $BaseCommit with $HeadCommit." }
     return @($names | Where-Object {
         $name = ($_ -replace '\\', '/')
         $name -and
@@ -143,12 +195,13 @@ function Write-RuntimeBuildMarker([string]$SoftwareCommit, [string]$RepositoryCo
         repositoryCommit = $RepositoryCommit
         builtAtShanghai = $builtAtShanghai
         timezone = 'Asia/Shanghai (UTC+8)'
+        nodeVersion = (& node.exe --version)
+        npmVersion = (& npm.cmd --version)
         serverMainSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $serverMain).Hash
         webIndexSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $webIndex).Hash
     }
     $json = $marker | ConvertTo-Json -Depth 4
     $utf8 = New-Object System.Text.UTF8Encoding($false)
-
     $logsDir = Join-Path $repoRoot 'logs'
     New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
     [System.IO.File]::WriteAllText($runtimeMarker, $json, $utf8)
@@ -156,32 +209,20 @@ function Write-RuntimeBuildMarker([string]$SoftwareCommit, [string]$RepositoryCo
     [System.IO.File]::WriteAllText((Join-Path $repoRoot 'dist\runtime-build.json'), $json, $utf8)
 }
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Fail 'Git is not installed or is not available in PATH.'
-}
-if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
-    Fail 'Node.js is not installed or node.exe is not available in PATH.'
-}
-if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-    Fail 'npm is not installed or npm.cmd is not available in PATH.'
-}
-if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) {
-    Fail 'Windows PowerShell is not available in PATH.'
-}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail 'Git is not installed or is not available in PATH.' }
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { Fail 'Node.js is not installed or node.exe is not available in PATH.' }
+if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { Fail 'npm is not installed or npm.cmd is not available in PATH.' }
+if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) { Fail 'Windows PowerShell is not available in PATH.' }
 
 try {
     $insideRepo = (& git rev-parse --is-inside-work-tree 2>$null).Trim()
 } catch {
     Fail 'This script must be run from a Git working tree.'
 }
-if ($insideRepo -ne 'true') {
-    Fail 'This script must be run from a Git working tree.'
-}
+if ($insideRepo -ne 'true') { Fail 'This script must be run from a Git working tree.' }
 
 & git remote set-url origin $publicRemote
-if ($LASTEXITCODE -ne 0) {
-    Fail 'Unable to configure the public GitHub remote.'
-}
+if ($LASTEXITCODE -ne 0) { Fail 'Unable to configure the public GitHub remote.' }
 
 $oldPrompt = $env:GIT_TERMINAL_PROMPT
 $env:GIT_TERMINAL_PROMPT = '0'
@@ -200,9 +241,7 @@ try {
 
     Write-Host 'Checking GitHub repository access...'
     & git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Fail 'GitHub repository is not reachable or the target branch does not exist.'
-    }
+    if ($LASTEXITCODE -ne 0) { Fail 'GitHub repository is not reachable or the target branch does not exist.' }
     Write-Host 'GitHub access: OK' -ForegroundColor Green
 
     Stop-ProjectRuntimeProcesses
@@ -221,41 +260,26 @@ try {
 
         Write-Host "Force switching working tree to $targetBranch..."
         & git checkout -f -B $targetBranch $remoteRef
-        if ($LASTEXITCODE -ne 0) {
-            throw "Unable to force switch to $targetBranch."
-        }
+        if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to $targetBranch." }
         & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
 
-        # Future updater revisions are allowed to replace this file. If that happens,
-        # restart immediately so the rest of the update uses the new updater logic
-        # instead of continuing with the old script already loaded in memory.
         Restart-WithUpdatedUpdaterIfNeeded
 
         Write-Host 'Removing non-ignored untracked files and directories...'
         & git clean -fd
-        if ($LASTEXITCODE -ne 0) {
-            throw 'git clean -fd failed.'
-        }
+        if ($LASTEXITCODE -ne 0) { throw 'git clean -fd failed.' }
 
         $softwareCommit = (& git rev-parse HEAD).Trim()
         if ($softwareCommit -ne $remoteCommit) {
-            throw "Verification failed: local source commit does not match fetched remote commit."
+            throw 'Verification failed: local source commit does not match fetched remote commit.'
         }
-
         Write-Host "Source synchronized: $((& git rev-parse --short HEAD).Trim())" -ForegroundColor Green
 
         Invoke-Checked 'Validate Electron main process syntax' 'node.exe' @('--check', 'desktop\main.cjs')
+        Ensure-Dependencies
 
-        # npm ci is intentional here. The old updater only replaced Git-tracked source,
-        # so node_modules could also remain stale when package-lock.json changed.
-        # prefer-offline keeps field updates fast when the npm cache is already warm,
-        # while npm ci guarantees the installed dependency tree matches the lock files.
-        Invoke-Checked 'Restore exact root dependencies' 'npm.cmd' @('ci', '--prefer-offline', '--no-audit', '--no-fund')
-        Invoke-Checked 'Restore exact server dependencies' 'npm.cmd' @('ci', '--prefix', 'server', '--prefer-offline', '--no-audit', '--no-fund')
-
-        # dist and server/dist are Git-ignored. Explicitly delete them before building
-        # so a failed or partial build can never leave the previous executable runtime
-        # looking like a successful software update.
+        # dist and server/dist are Git-ignored. They must be deleted explicitly so an
+        # unsuccessful build can never leave an old runtime masquerading as updated.
         Remove-RuntimeOutput 'dist'
         Remove-RuntimeOutput 'server\dist'
 
@@ -268,12 +292,10 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'dist\assets') -PathType Container)) {
             throw 'Desktop frontend assets directory was not generated: dist\assets'
         }
-
         Write-Host '[OK] Runtime artifacts were freshly rebuilt.' -ForegroundColor Green
 
-        # A field test can auto-upload logs to this same branch. Re-fetch after the
-        # build and only rebuild again when real software files changed. Log-only
-        # commits do not invalidate the runtime we just compiled.
+        # Field logging may advance the same branch. Only real software changes require
+        # another compile; diagnostic/log-only commits do not invalidate this runtime.
         Fetch-TargetBranch
         $latestRemoteCommit = (& git rev-parse $remoteRef).Trim()
         if ($latestRemoteCommit -ne $softwareCommit) {
@@ -290,9 +312,7 @@ try {
 
             Write-Host 'Remote advanced only by diagnostic/log commits; runtime rebuild remains valid.'
             & git checkout -f -B $targetBranch $remoteRef
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Unable to fast-forward local branch to the latest log-only remote commit.'
-            }
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to fast-forward local branch to the latest log-only remote commit.' }
             & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
         }
 
@@ -302,9 +322,7 @@ try {
         break
     }
 
-    if (-not $buildSucceeded) {
-        throw 'Runtime build did not complete.'
-    }
+    if (-not $buildSucceeded) { throw 'Runtime build did not complete.' }
 
     $serverArtifact = Get-Item -LiteralPath (Join-Path $repoRoot 'server\dist\main.js')
     $webArtifact = Get-Item -LiteralPath (Join-Path $repoRoot 'dist\index.html')
@@ -322,13 +340,12 @@ try {
     Write-Host "Web runtime: $($webArtifact.FullName)"
     Write-Host "Build marker: $runtimeMarker"
     Write-Host ''
-    Write-Host 'The next launch will use the freshly rebuilt runtime. Do not use an already-running old process.' -ForegroundColor Green
+    Write-Host 'The next launch will use the freshly rebuilt runtime.' -ForegroundColor Green
 
     if ($StartAfterUpdate) {
         Write-Host 'Starting desktop application...' -ForegroundColor Cyan
         Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'desktop') -WorkingDirectory $repoRoot
     }
-
     exit 0
 } catch {
     Write-Host ''
