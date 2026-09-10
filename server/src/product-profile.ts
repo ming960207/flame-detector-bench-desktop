@@ -3,6 +3,7 @@ import {
   type ChannelKey,
   type WaveformAnalysisConfig,
 } from './closure/field-waveform-analysis.js';
+import { applyAutomaticBGradePolicy } from './closure/quality-grade-policy.js';
 import {
   normalizeProductCodeRule,
   type ProductCodeRule,
@@ -173,37 +174,47 @@ export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] 
 }
 
 /**
+ * Apply the production grade policy before waveform analysis starts. Historical B
+ * thresholds are deliberately ignored here: A keeps the operator's current values,
+ * while B is regenerated from A with the fixed 10% tolerance on every config load.
+ * This is important because waveform analysis owns the early acceptance gate; if it
+ * saw a stale B value, a valid B product could be rejected before final grading.
+ *
  * A dual-wavelength product is physically transported in a three-channel frame,
  * but its real sensing channels are P2 and P3. P1 remains available in raw telemetry
  * for protocol diagnostics only and must not participate in production noise/trend,
  * no-data or interference acceptance decisions.
  *
  * The per-stage waveform peak-to-peak amplitude ratio is retained as diagnostic
- * evidence, but it is not a production acceptance gate for this product. Field logs
- * showed that a single stage transient can push the amplitude ratio above 1.5 while
- * the detector-provided P2/P3 (SNR23) stays inside the configured 0.5..1.5 range.
- * Production acceptance therefore uses SNR23 plus trend/noise limits for the real
- * P2/P3 channels and keeps the amplitude ratio visible for troubleshooting only.
+ * evidence, but it is not a production acceptance gate for this product. Production
+ * acceptance therefore uses SNR23 plus trend/noise limits for the real P2/P3 channels.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
   expectedProbeCount: number,
 ): Partial<WaveformAnalysisConfig> | undefined {
-  if (expectedProbeCount !== 2) return source;
   const base = source ?? {};
-  const quality = normalizeDetectionQualityConfig(base.quality);
+  const normalizedQuality = normalizeDetectionQualityConfig(base.quality);
+
+  if (expectedProbeCount !== 2) {
+    return {
+      ...base,
+      quality: applyAutomaticBGradePolicy(normalizedQuality),
+    };
+  }
+
+  // Disable only the amplitude-ratio gate for the dual-wavelength product. Apply
+  // the automatic B policy after that A-side product override so B derives zero too.
+  const quality = applyAutomaticBGradePolicy({
+    ...normalizedQuality,
+    a: { ...normalizedQuality.a, maxInterferenceRatio: 0 },
+  });
   return {
     ...base,
     noiseProbes: ['probe2', 'probe3'],
     consistencyProbes: ['probe2', 'probe3'],
     interferenceRatio: { numerator: 'probe3', denominator: 'probe2' },
-    // Disable only the amplitude-ratio gate. The ratio is still calculated and
-    // archived; SNR23 remains the authoritative P2/P3 acceptance ratio below.
     maxInterferenceRatio: 0,
-    quality: {
-      ...quality,
-      a: { ...quality.a, maxInterferenceRatio: 0 },
-      b: { ...quality.b, maxInterferenceRatio: 0 },
-    },
+    quality,
   };
 }
