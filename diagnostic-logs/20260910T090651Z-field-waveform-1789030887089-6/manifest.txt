@@ -1,0 +1,11 @@
+Flame detector bench automatic diagnostic upload
+Captured: 2026-09-10T09:06:51.855Z
+Batch: field-waveform-1789030887089-6
+Repository: ming960207/flame-detector-bench-desktop
+Branch: refactor/unified-backend
+Result directory: D:\上位机界面原型版\flame-detector-bench-desktop\logs
+Desktop log directory: D:\上位机界面原型版\flame-detector-bench-desktop\logs
+File count: 3
+backend/test-results-2026-09-10.log: source=D:\上位机界面原型版\flame-detector-bench-desktop\logs\test-results-2026-09-10.log; bytes=649370-659639; truncated=no
+backend/detector-lifecycle.log: source=D:\上位机界面原型版\flame-detector-bench-desktop\logs\detector-lifecycle.log; bytes=6490682-6531028; truncated=no
+backend/latest.log: source=D:\上位机界面原型版\flame-detector-bench-desktop\logs\latest.log; bytes=2058816-2694708; truncated=no
