@@ -160,10 +160,17 @@ function resetLatchedLights(): void {
 }
 
 function updateRelaySession(active: boolean, batchId: string | null): void {
-  // Keep the current test's latches after active becomes false. Clear them only
-  // when the next test starts (active rising edge) or a new test batch appears.
+  // Keep the completed batch's evidence visible while idle. As soon as the next
+  // production process becomes active, or its formal batch id changes, clear all
+  // four LED latches before applying any evidence from the new run.
   const startsNewTest = active && (!relaySessionActive || batchId !== relaySessionBatchId);
-  if (startsNewTest) resetLatchedLights();
+  if (startsNewTest) {
+    resetLatchedLights();
+    // Do not allow a 500 ms cached /api/product-config response from the previous
+    // batch to immediately re-latch LEDs after the new-batch reset.
+    cachedProductConfig = null;
+    lastProductConfigFetchAt = 0;
+  }
   if (active) relaySessionBatchId = batchId;
   relaySessionActive = active;
 }
@@ -196,6 +203,13 @@ function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductC
   const precheck = configPayload?.precheck;
   const evidenceUnits = precheck?.relayFunctionalTest?.units;
   if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
+
+  const evidenceBatchId = precheck?.batchId ?? null;
+  // During a new active test, evidence is valid only when it belongs to the exact
+  // current batch. This prevents the previous batch's completed relay evidence
+  // from being merged during the short interval before the new precheck exists.
+  if (payload.active && evidenceBatchId !== payload.batchId) return payload;
+  if (payload.batchId && evidenceBatchId && payload.batchId !== evidenceBatchId) return payload;
 
   const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.detectorIndex, unit]));
   return {
