@@ -44,7 +44,12 @@ import {
   type InspectionPositionResult,
 } from './field-test-result-log.js';
 
-const POSITION_ONE_PRECHECK_DELAY_MS = 15_000;
+// Product identity/relay commands can briefly pause detector waveform push. Run them
+// at the very beginning of the PLC signal-stabilization stage, then leave the rest
+// of that stage uninterrupted for waveform recovery before formal noise capture.
+const POSITION_ONE_PRECHECK_DELAY_MS = 0;
+const POSITION_ONE_PRECHECK_READY_WAIT_MS = 8_000;
+const POSITION_ONE_PRECHECK_READY_POLL_MS = 100;
 
 export interface PLCProcessStatusSource {
   start(): Promise<void>;
@@ -259,6 +264,7 @@ export function createFieldStatusRuntime(
   let productPrecheckBatchId: string | null = null;
   let productPrecheckDelayTimer: NodeJS.Timeout | null = null;
   let productPrecheckDelayBatchId: string | null = null;
+  let productPrecheckScheduleGeneration = 0;
   let streamingStoppedBatchId: string | null = null;
   let detectorVerdict: FieldDetectorBatchVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState, productPrecheck, productConfig);
   let finalVerdict: FieldFinalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
@@ -343,32 +349,63 @@ export function createFieldStatusRuntime(
   };
 
   const cancelDelayedProductPrecheck = (reason: string) => {
-    if (!productPrecheckDelayTimer) return;
-    clearTimeout(productPrecheckDelayTimer);
-    productPrecheckDelayTimer = null;
-    console.log(`[产品预检] 已取消延迟触发 batch=${productPrecheckDelayBatchId ?? '-'} reason=${reason}`);
+    productPrecheckScheduleGeneration += 1;
+    if (productPrecheckDelayTimer) {
+      clearTimeout(productPrecheckDelayTimer);
+      productPrecheckDelayTimer = null;
+      console.log(`[产品预检] 已取消前半段触发 batch=${productPrecheckDelayBatchId ?? '-'} reason=${reason}`);
+    }
     productPrecheckDelayBatchId = null;
   };
 
   const scheduleDelayedProductPrecheck = (batchId: string | null) => {
     if (productPrecheckDelayTimer || productPrecheckBusy || productPrecheck || !detectors.runProductPrecheck) return;
     const scheduledBatchId = batchId;
-    productPrecheckDelayBatchId = batchId ?? `plc-${currentStatus?.timestamp ?? Date.now()}`;
-    console.log(`[产品预检] 信号稳定阶段开始，前 ${POSITION_ONE_PRECHECK_DELAY_MS}ms 仅保持波形稳定，随后在稳定阶段后段执行预检 batch=${productPrecheckDelayBatchId}`);
+    const scheduledDisplayBatchId = batchId ?? `plc-${currentStatus?.timestamp ?? Date.now()}`;
+    const scheduleGeneration = ++productPrecheckScheduleGeneration;
+    productPrecheckDelayBatchId = scheduledDisplayBatchId;
+    console.log(`[产品预检] 信号稳定阶段开始，立即进入前半段预检准备 batch=${scheduledDisplayBatchId}`);
     productPrecheckDelayTimer = setTimeout(() => {
       productPrecheckDelayTimer = null;
-      const delayedBatchId = productPrecheckDelayBatchId;
       productPrecheckDelayBatchId = null;
-      if (!isPositionOneSignalStabilization(currentStatus)) {
-        console.warn(`[产品预检] 延迟到点但已不在信号稳定阶段，禁止在正式噪声窗口插入预检 batch=${delayedBatchId ?? '-'}`);
-        return;
-      }
-      if (scheduledBatchId && waveformAnalysisState.batchId !== scheduledBatchId) {
-        console.warn(`[产品预检] 延迟到点但批次已切换，跳过旧批次预检 scheduled=${scheduledBatchId} current=${waveformAnalysisState.batchId ?? '-'}`);
-        return;
-      }
-      console.log(`[产品预检] 已进入信号稳定后段，开始读取版本/探头/灵敏度/状态并执行继电器功能检测 batch=${delayedBatchId ?? '-'}`);
-      void runProductPrecheck(waveformAnalysisState.batchId);
+      void (async () => {
+        const deadline = Date.now() + POSITION_ONE_PRECHECK_READY_WAIT_MS;
+        let readyReport = detectors.getReadyReport?.();
+        while (
+          readyReport
+          && !readyReport.ready
+          && Date.now() < deadline
+        ) {
+          if (scheduleGeneration !== productPrecheckScheduleGeneration) return;
+          if (!isPositionOneSignalStabilization(currentStatus)) {
+            console.warn(`[产品预检] 等待探测器就绪期间已离开信号稳定阶段，跳过本批预检 batch=${scheduledDisplayBatchId}`);
+            return;
+          }
+          if (scheduledBatchId && waveformAnalysisState.batchId !== scheduledBatchId) {
+            console.warn(`[产品预检] 等待探测器就绪期间批次已切换，跳过旧批次预检 scheduled=${scheduledBatchId} current=${waveformAnalysisState.batchId ?? '-'}`);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, POSITION_ONE_PRECHECK_READY_POLL_MS));
+          readyReport = detectors.getReadyReport?.();
+        }
+        if (scheduleGeneration !== productPrecheckScheduleGeneration) return;
+        if (!isPositionOneSignalStabilization(currentStatus)) {
+          console.warn(`[产品预检] 前半段准备完成时已不在信号稳定阶段，禁止在正式噪声窗口插入预检 batch=${scheduledDisplayBatchId}`);
+          return;
+        }
+        if (scheduledBatchId && waveformAnalysisState.batchId !== scheduledBatchId) {
+          console.warn(`[产品预检] 前半段准备完成时批次已切换，跳过旧批次预检 scheduled=${scheduledBatchId} current=${waveformAnalysisState.batchId ?? '-'}`);
+          return;
+        }
+        if (readyReport && !readyReport.ready) {
+          const pending = readyReport.units.filter((unit) => !unit.ready).map((unit) => `D${unit.index}`).join(',') || '-';
+          console.warn(`[产品预检] 前半段等待 ${POSITION_ONE_PRECHECK_READY_WAIT_MS}ms 后仍有探测器未 TEST_READY (${pending})，继续正式预检并保留实际失败证据 batch=${scheduledDisplayBatchId}`);
+        }
+        console.log(`[产品预检] 信号稳定前半段开始读取版本/探头/灵敏度/状态并执行继电器功能检测 batch=${scheduledDisplayBatchId}`);
+        await runProductPrecheck(waveformAnalysisState.batchId);
+      })().catch((error) => {
+        wsServer.broadcastError(error instanceof Error ? `PRODUCT_PRECHECK_SCHEDULE_FAILED: ${error.message}` : 'PRODUCT_PRECHECK_SCHEDULE_FAILED');
+      });
     }, POSITION_ONE_PRECHECK_DELAY_MS);
   };
 
@@ -402,7 +439,7 @@ export function createFieldStatusRuntime(
     if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
-    if (signalStabilizationEnded && productPrecheckDelayTimer) cancelDelayedProductPrecheck('LEFT_SIGNAL_STABILIZATION');
+    if (signalStabilizationEnded) cancelDelayedProductPrecheck('LEFT_SIGNAL_STABILIZATION');
     if (heatInterferenceStarted) positionStartedAt.set('DETECTION_POSITION_1_HEAT', status.timestamp);
     if (flashStarted) positionStartedAt.set('DETECTION_POSITION_2_FLASH', status.timestamp);
     if (heatInterferenceCompleted) {
