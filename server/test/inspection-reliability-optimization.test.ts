@@ -150,6 +150,8 @@ function analysisSnapshot(): FieldWaveformAnalysisSnapshot {
       quality: {
         acceptanceGrade: 'B',
         a: { maxNoiseRms: 200, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.8, minSensitivity: 0 },
+        // Intentionally stale legacy B values. New grading must ignore them and
+        // derive B from A (200 -> 220) instead.
         b: { maxNoiseRms: 250, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.75, minSensitivity: 0 },
         ratios: {
           a: { snr21: { min: 0, max: 0 }, snr23: { min: 0.5, max: 1.5 }, snr31: { min: 0, max: 0 } },
@@ -282,10 +284,10 @@ test('infrastructure-only completed precheck failure is blocking but classified 
   assert.equal(final.reason, 'TEST_INVALID_RETEST_REQUIRED');
 });
 
-test('RAW fluctuation above A limit but within B limit is graded B instead of A', () => {
+test('RAW fluctuation above A limit but within automatic 10 percent B tolerance is graded B', () => {
   const waveform = analysisSnapshot();
   const d4 = waveform.units[3]!;
-  d4.noiseTest.metrics.probe2 = { fluctuation: 224, absolute: 271 };
+  d4.noiseTest.metrics.probe2 = { fluctuation: 208, absolute: 271 };
   d4.noiseTest.metrics.probe3 = { fluctuation: 200, absolute: 241 };
 
   const verdict = evaluateFieldDetectorBatch(detectorState(), waveform, passingPrecheckReport(), productConfig());
