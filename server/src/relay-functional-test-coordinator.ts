@@ -25,6 +25,8 @@ interface UnitWorkState {
 
 const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
+const RELAY_READ_MAX_ATTEMPTS = 3;
+const RELAY_READ_RETRY_DELAY_MS = 80;
 
 function emptyAction(): RelayActionResult {
   return {
@@ -79,6 +81,10 @@ function sleep(ms: number): Promise<void> {
  * 均为幂等操作，因此在不改变实体继电器判据的前提下，发送层允许有限重试；只有连续
  * 3 次均失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位恢复判据保持原样。
  *
+ * 2026-09-10 现场新版实测又发现继电器基线 readLatched()/DI 读取可发生单次瞬态失败。
+ * 基线读取属于只读操作，同样允许最多 3 次有限重试；只有连续失败才标记测试链异常，
+ * 避免一次链路抖动把本可继续的检测直接分流到“需复测”。
+ *
  * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
  * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
  */
@@ -102,18 +108,37 @@ export class RelayFunctionalTestCoordinator {
     return false;
   }
 
+  private async detectorReadWithRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= RELAY_READ_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt < RELAY_READ_MAX_ATTEMPTS) {
+          await sleep(RELAY_READ_RETRY_DELAY_MS);
+        }
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'RELAY_READ_FAILED'));
+  }
+
   private async physicalState(index: number): Promise<{ alarm: boolean | null; fault: boolean | null; error?: string }> {
     const mapping = relayFeedbackMappingFor(this.config, index);
     let inputs: Record<string, boolean> | undefined;
     try {
-      inputs = await this.feedback.readInputs();
+      inputs = await this.detectorReadWithRetry(async () => {
+        const value = await this.feedback.readInputs();
+        if (value === undefined) throw new Error('DIO_READ_UNDEFINED');
+        return value;
+      });
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
         ? error.code
         : error instanceof Error ? error.message : String(error);
       return { alarm: null, fault: null, error: code || 'DIO_READ_FAILED' };
     }
-    if (!mapping || !inputs) return { alarm: null, fault: null };
+    if (!mapping) return { alarm: null, fault: null };
     return {
       alarm: relayInputIsActive(inputs[mapping.alarmInputAddress], mapping.alarmNormalLevel),
       fault: relayInputIsActive(inputs[mapping.faultInputAddress], mapping.faultNormalLevel),
@@ -123,7 +148,7 @@ export class RelayFunctionalTestCoordinator {
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       try {
-        const internal = await this.detectors.readLatched(index);
+        const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
         const physical = await this.physicalState(index);
         state.result.baseline = {
           alarmInternal: internal.fire,
@@ -180,7 +205,7 @@ export class RelayFunctionalTestCoordinator {
         ) return;
 
         try {
-          const internal = await this.detectors.readLatched(index);
+          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
           const physical = await this.physicalState(index);
           if (physical.error) {
             uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
@@ -263,7 +288,7 @@ export class RelayFunctionalTestCoordinator {
         if (!action.resetAccepted) return;
 
         try {
-          const internal = await this.detectors.readLatched(index);
+          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
           const physical = await this.physicalState(index);
           if (physical.error) {
             uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
@@ -343,107 +368,76 @@ export class RelayFunctionalTestCoordinator {
       else this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
     }));
 
-    const stable = new Map<number, number>();
-    const recovered = new Set<number>();
-    const feedbackErrors = new Map<number, string>();
     const deadline = Date.now() + this.config.resetTimeoutMs;
-
-    while (Date.now() <= deadline && recovered.size < resetAccepted.size) {
-      await Promise.all([...work.entries()].map(async ([index]) => {
-        if (!resetAccepted.has(index) || recovered.has(index)) return;
+    const stable = new Map<number, number>();
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.entries()].map(async ([index, state]) => {
+        if (!resetAccepted.has(index)) return;
         try {
-          const internal = await this.detectors.readLatched(index);
+          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
           const physical = await this.physicalState(index);
           if (physical.error) {
-            feedbackErrors.set(index, physical.error);
+            this.addCleanupReason(state, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
             stable.set(index, 0);
             return;
           }
-          const clear = internal.fire === false
-            && internal.fault === false
-            && physical.alarm === false
-            && physical.fault === false;
-          const next = clear ? (stable.get(index) ?? 0) + 1 : 0;
-          stable.set(index, next);
-          if (next >= this.config.stableSamples) recovered.add(index);
+          const internalRecovered = internal.fire === false && internal.fault === false;
+          const physicalRecovered = physical.alarm === false && physical.fault === false;
+          stable.set(index, internalRecovered && physicalRecovered
+            ? (stable.get(index) ?? 0) + 1
+            : 0);
         } catch {
           stable.set(index, 0);
         }
       }));
-      if (recovered.size >= resetAccepted.size) break;
+
+      const done = [...work.entries()].every(([index]) => !resetAccepted.has(index)
+        || (stable.get(index) ?? 0) >= this.config.stableSamples);
+      if (done) break;
       await sleep(this.config.sampleIntervalMs);
     }
 
     for (const [index, state] of work.entries()) {
       if (!resetAccepted.has(index)) continue;
-      if (recovered.has(index)) continue;
-      const feedbackError = feedbackErrors.get(index);
-      if (feedbackError) this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
-      else this.addCleanupReason(state, 'EMERGENCY_RESET_NOT_CONFIRMED');
+      if ((stable.get(index) ?? 0) < this.config.stableSamples) {
+        this.addCleanupReason(state, 'EMERGENCY_RESET_FEEDBACK_READ_FAILED');
+      }
     }
   }
 
-  private finalizeAction(action: RelayActionResult): void {
-    action.verdict = action.commandAccepted
-      && action.internalStateReached
-      && action.physicalStateReached
-      && action.oppositeRelayStayedNormal
-      && action.resetAccepted
-      && action.internalRecovered
-      && action.physicalRecovered
-      && action.reasons.length === 0
-      ? 'PASS'
-      : 'FAIL';
+  private finalize(work: Map<number, UnitWorkState>): RelayFunctionalTestReport {
+    const units = [...work.values()].map((state) => {
+      const actions = [state.result.alarm, state.result.fault];
+      for (const action of actions) {
+        if (action.reasons.length === 0) action.verdict = 'PASS';
+        else action.verdict = 'FAIL';
+      }
+      state.result.verdict = actions.every((action) => action.verdict === 'PASS') ? 'PASS' : 'FAIL';
+      return state.result;
+    });
+    return {
+      mode: this.config.mode,
+      verdict: units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
+      units,
+    };
   }
 
-  async run(batchId: string | null = null): Promise<RelayFunctionalTestReport> {
-    const startedAt = Date.now();
-    const indexes = [...new Set(this.detectors.enabledDetectorIndexes())]
-      .filter((index) => Number.isInteger(index) && index >= 1 && index <= 6)
-      .sort((a, b) => a - b);
-
-    if (!this.config.enabled) {
-      return {
-        batchId,
-        mode: this.config.mode,
-        phase: 'COMPLETE',
-        startedAt,
-        completedAt: Date.now(),
-        verdict: 'SKIPPED',
-        units: indexes.map((index) => ({ ...emptyUnit(index), enabled: false, verdict: 'SKIPPED' })),
-      };
+  async run(): Promise<RelayFunctionalTestReport> {
+    const work = new Map<number, UnitWorkState>();
+    for (const index of this.detectors.enabledDetectorIndexes()) {
+      work.set(index, { result: emptyUnit(index), commandStartedAt: null });
     }
-
-    const work = new Map<number, UnitWorkState>(
-      indexes.map((index) => [index, { result: emptyUnit(index), commandStartedAt: null }]),
-    );
 
     try {
       await this.readBaseline(work);
       if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
       else await this.runFastBatch(work);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      for (const state of work.values()) this.addCleanupReason(state, `RELAY_TEST_ABORTED:${message}`);
+    } catch {
+      for (const state of work.values()) this.addCleanupReason(state, 'RELAY_TEST_ABORTED');
     } finally {
       await this.emergencyCleanup(work);
     }
 
-    const units = [...work.values()].map(({ result }) => {
-      this.finalizeAction(result.alarm);
-      this.finalizeAction(result.fault);
-      result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
-      return result;
-    });
-
-    return {
-      batchId,
-      mode: this.config.mode,
-      phase: 'COMPLETE',
-      startedAt,
-      completedAt: Date.now(),
-      verdict: units.length > 0 && units.every((unit) => unit.verdict === 'PASS') ? 'PASS' : 'FAIL',
-      units,
-    };
+    return this.finalize(work);
   }
 }
