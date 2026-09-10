@@ -151,6 +151,32 @@
       color: #ffe36a !important;
       text-shadow: 0 0 6px rgba(250, 204, 21, .62);
     }
+
+    /* B类阈值不再允许独立配置：仅保留A类输入，B由后端按A固定放宽10%。 */
+    .quality-threshold-groups > .quality-threshold-group:nth-child(2),
+    .quality-detector-grades > .quality-snr-grade:nth-child(2) {
+      display: none !important;
+    }
+
+    .quality-threshold-groups,
+    .quality-detector-grades {
+      grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .quality-threshold-groups::after {
+      content: "B类无需单独设置：系统固定按A类数值规则放宽10%（上限×1.10，下限×0.90；区间向两侧扩展10%）。";
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid rgba(250, 204, 21, .46);
+      border-radius: 5px;
+      background: rgba(250, 204, 21, .08);
+      color: #ffe36a;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
   </style>
   <link rel="stylesheet" href="./index.css">
 </head>
@@ -230,6 +256,17 @@
         card.classList.toggle('is-b-grade', gradeText === 'B类合格');
       }
 
+      function updateQualityPolicyText() {
+        const qualityHeading = document.querySelector('.quality-config-heading span');
+        if (qualityHeading) {
+          qualityHeading.textContent = 'A类使用当前设置；B类无需单独设置，系统固定按A类规则自动放宽10%；超过B类容差才判不合格。';
+        }
+        const snrHeading = document.querySelector('.quality-snr-heading span');
+        if (snrHeading) {
+          snrHeading.textContent = '仅设置A类范围；B类范围由系统自动扩展10%（下限×0.90，上限×1.10）。';
+        }
+      }
+
       let scheduled = false;
       function refreshAll() {
         if (scheduled) return;
@@ -238,6 +275,7 @@
           scheduled = false;
           document.querySelectorAll(SELECTOR).forEach(updateCard);
           document.querySelectorAll(RESULT_SELECTOR).forEach(updateResultGradeCard);
+          updateQualityPolicyText();
         });
       }
 
