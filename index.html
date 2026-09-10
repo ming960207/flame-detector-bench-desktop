@@ -140,6 +140,17 @@
       background: #c7d0d5;
       box-shadow: none;
     }
+
+    /* A类继续使用现有绿色 pass 外框；B类使用独立黄色外框和轻微发光，便于现场快速区分。 */
+    .wutos-detector-card.pass.is-b-grade {
+      border-color: #facc15 !important;
+      box-shadow: 0 0 13px rgba(250, 204, 21, .68), inset 0 0 13px rgba(250, 204, 21, .13) !important;
+    }
+
+    .wutos-detector-card.pass.is-b-grade > header span {
+      color: #ffe36a !important;
+      text-shadow: 0 0 6px rgba(250, 204, 21, .62);
+    }
   </style>
   <link rel="stylesheet" href="./index.css">
 </head>
@@ -149,6 +160,7 @@
   <script>
     (() => {
       const SELECTOR = '.wutos-sensor-card';
+      const RESULT_SELECTOR = '.wutos-detector-card';
       const LAMPS = [
         { kind: 'fire', label: '火警', title: '火警状态' },
         { kind: 'fault', label: '故障', title: '故障状态' },
@@ -213,6 +225,11 @@
         });
       }
 
+      function updateResultGradeCard(card) {
+        const gradeText = card.querySelector('header span')?.textContent?.trim() || '';
+        card.classList.toggle('is-b-grade', gradeText === 'B类合格');
+      }
+
       let scheduled = false;
       function refreshAll() {
         if (scheduled) return;
@@ -220,6 +237,7 @@
         requestAnimationFrame(() => {
           scheduled = false;
           document.querySelectorAll(SELECTOR).forEach(updateCard);
+          document.querySelectorAll(RESULT_SELECTOR).forEach(updateResultGradeCard);
         });
       }
 
@@ -228,6 +246,7 @@
         observer.observe(document.documentElement, {
           subtree: true,
           childList: true,
+          characterData: true,
           attributes: true,
           attributeFilter: ['class'],
         });
