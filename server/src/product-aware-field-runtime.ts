@@ -133,7 +133,14 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   });
 
   runtime.app.get('/api/detector-status-lights', (_req, res) => {
-    const flame = detectors.getCurrentState();
+    // Four-state LEDs are latched for one batch so operators can see relay evidence
+    // after the formal relay test resets the detector. The old endpoint always sent
+    // active=false/batchId=null, so the browser could not detect the next batch and
+    // kept the previous batch's four LEDs latched. Publish the real process/batch
+    // boundary so every new test starts from a clean visual state.
+    const snapshot = runtime.snapshot();
+    const summary = snapshot.summary;
+    const flame = snapshot.flame;
     const byIndex = new Map(flame.units.map((unit) => [unit.index, unit]));
     const units = Array.from({ length: 6 }, (_, offset) => {
       const index = offset + 1;
@@ -150,8 +157,8 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       };
     });
     res.json({
-      active: false,
-      batchId: null,
+      active: summary.productSelectionLocked,
+      batchId: summary.waveformAnalysis.batchId,
       updatedAt: flame.timestamp || Date.now(),
       units,
     });
