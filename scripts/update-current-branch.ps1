@@ -40,14 +40,30 @@ $fetchRefspec = "+refs/heads/${targetBranch}:${remoteRef}"
 $runtimeMarker = Join-Path $repoRoot 'logs\runtime-build.json'
 $initialUpdaterHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash
 
-function Fetch-TargetBranch {
-    $fetchSucceeded = $false
+function Test-GitHubAccess([int]$Attempts = 3) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Write-Host "Checking GitHub repository access (attempt $attempt/$Attempts)..."
+        & git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host 'GitHub access: OK' -ForegroundColor Green
+            return $true
+        }
+        if ($attempt -lt $Attempts) {
+            $delay = $attempt * 3
+            Write-Host "WARN: GitHub access check failed. Retrying in $delay seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+        }
+    }
+    return $false
+}
+
+function Fetch-TargetBranch([switch]$BestEffort) {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Write-Host "Fetching target branch (attempt $attempt/3)..."
         & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
         if ($LASTEXITCODE -eq 0) {
-            $fetchSucceeded = $true
-            break
+            & git rev-parse --verify $remoteRef *> $null
+            if ($LASTEXITCODE -eq 0) { return $true }
         }
         if ($attempt -lt 3) {
             $delay = $attempt * 3
@@ -55,24 +71,23 @@ function Fetch-TargetBranch {
             Start-Sleep -Seconds $delay
         }
     }
-    if (-not $fetchSucceeded) {
-        throw 'git fetch failed after 3 attempts. Retry after checking network stability.'
+    if ($BestEffort) {
+        Write-Host 'WARN: GitHub became unavailable after the source was already synchronized. The freshly rebuilt pinned runtime remains valid.' -ForegroundColor Yellow
+        return $false
     }
-    & git rev-parse --verify $remoteRef *> $null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Remote branch $remoteRef was not created after fetch."
-    }
+    throw 'git fetch failed after 3 attempts. Retry after checking network stability.'
 }
 
-function Restart-WithUpdatedUpdaterIfNeeded {
+function Restart-WithUpdatedUpdaterIfNeeded([string]$PinnedCommit) {
     if ($env:FLAME_UPDATER_REEXEC -eq '1') { return }
     $diskHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash
     if ($diskHash -eq $initialUpdaterHash) { return }
 
     Write-Host ''
     Write-Host '[UPDATE] Updater changed during synchronization.' -ForegroundColor Yellow
-    Write-Host '[UPDATE] Restarting with the newly downloaded updater...' -ForegroundColor Yellow
+    Write-Host '[UPDATE] Restarting with the newly downloaded updater at the already-synchronized commit...' -ForegroundColor Yellow
     $env:FLAME_UPDATER_REEXEC = '1'
+    $env:FLAME_UPDATER_PINNED_COMMIT = $PinnedCommit
     $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
     if ($StartAfterUpdate) { $childArgs += '-StartAfterUpdate' }
     & powershell.exe @childArgs
@@ -239,10 +254,23 @@ try {
     Write-Host 'The running project process will be stopped before rebuilding.'
     Write-Host ''
 
-    Write-Host 'Checking GitHub repository access...'
-    & git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" *> $null
-    if ($LASTEXITCODE -ne 0) { Fail 'GitHub repository is not reachable or the target branch does not exist.' }
-    Write-Host 'GitHub access: OK' -ForegroundColor Green
+    # An old updater sets FLAME_UPDATER_REEXEC before starting the newly fetched script.
+    # At that point checkout already succeeded, so the new script must not require another
+    # GitHub round trip before it can rebuild the exact source that is already on disk.
+    $resumeFromSynchronizedCommit = ($env:FLAME_UPDATER_REEXEC -eq '1')
+    $pinnedCommit = $null
+    if ($resumeFromSynchronizedCommit) {
+        $pinnedCommit = $env:FLAME_UPDATER_PINNED_COMMIT
+        if (-not $pinnedCommit) { $pinnedCommit = (& git rev-parse HEAD).Trim() }
+        $currentFull = (& git rev-parse HEAD).Trim()
+        if ($currentFull -ne $pinnedCommit) {
+            throw 'Updater resume commit does not match current HEAD; refusing to build an ambiguous runtime.'
+        }
+        Write-Host "[UPDATE] Resuming at already-synchronized commit $((& git rev-parse --short HEAD).Trim())." -ForegroundColor Green
+        Write-Host '[UPDATE] GitHub refresh is skipped for this rebuild pass; a transient network outage cannot block an already-fetched source commit.' -ForegroundColor Green
+    } else {
+        if (-not (Test-GitHubAccess 3)) { Fail 'GitHub repository is not reachable after 3 attempts or the target branch does not exist.' }
+    }
 
     Stop-ProjectRuntimeProcesses
 
@@ -252,18 +280,24 @@ try {
 
     for ($pass = 1; $pass -le 2; $pass++) {
         Write-Host "`n========== UPDATE PASS $pass/2 ==========" -ForegroundColor Cyan
-        Fetch-TargetBranch
 
-        $remoteCommit = (& git rev-parse $remoteRef).Trim()
-        $remoteShort = (& git rev-parse --short $remoteRef).Trim()
-        Write-Host "Remote commit: $remoteShort"
+        if ($resumeFromSynchronizedCommit -and $pass -eq 1) {
+            $remoteCommit = (& git rev-parse HEAD).Trim()
+            $remoteShort = (& git rev-parse --short HEAD).Trim()
+            Write-Host "Using already-synchronized commit: $remoteShort" -ForegroundColor Green
+        } else {
+            Fetch-TargetBranch | Out-Null
+            $remoteCommit = (& git rev-parse $remoteRef).Trim()
+            $remoteShort = (& git rev-parse --short $remoteRef).Trim()
+            Write-Host "Remote commit: $remoteShort"
 
-        Write-Host "Force switching working tree to $targetBranch..."
-        & git checkout -f -B $targetBranch $remoteRef
-        if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to $targetBranch." }
-        & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+            Write-Host "Force switching working tree to $targetBranch..."
+            & git checkout -f -B $targetBranch $remoteRef
+            if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to $targetBranch." }
+            & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
 
-        Restart-WithUpdatedUpdaterIfNeeded
+            Restart-WithUpdatedUpdaterIfNeeded $remoteCommit
+        }
 
         Write-Host 'Removing non-ignored untracked files and directories...'
         & git clean -fd
@@ -271,15 +305,15 @@ try {
 
         $softwareCommit = (& git rev-parse HEAD).Trim()
         if ($softwareCommit -ne $remoteCommit) {
-            throw 'Verification failed: local source commit does not match fetched remote commit.'
+            throw 'Verification failed: local source commit does not match the pinned/fetched source commit.'
         }
         Write-Host "Source synchronized: $((& git rev-parse --short HEAD).Trim())" -ForegroundColor Green
 
         Invoke-Checked 'Validate Electron main process syntax' 'node.exe' @('--check', 'desktop\main.cjs')
         Ensure-Dependencies
 
-        # dist and server/dist are Git-ignored. They must be deleted explicitly so an
-        # unsuccessful build can never leave an old runtime masquerading as updated.
+        # dist and server/dist are Git-ignored. Delete them explicitly before every build;
+        # an unsuccessful build can therefore never leave an old runtime masquerading as updated.
         Remove-RuntimeOutput 'dist'
         Remove-RuntimeOutput 'server\dist'
 
@@ -294,26 +328,30 @@ try {
         }
         Write-Host '[OK] Runtime artifacts were freshly rebuilt.' -ForegroundColor Green
 
-        # Field logging may advance the same branch. Only real software changes require
-        # another compile; diagnostic/log-only commits do not invalidate this runtime.
-        Fetch-TargetBranch
-        $latestRemoteCommit = (& git rev-parse $remoteRef).Trim()
-        if ($latestRemoteCommit -ne $softwareCommit) {
-            $softwareChanges = @(Get-SoftwareChanges $softwareCommit $latestRemoteCommit)
-            if ($softwareChanges.Count -gt 0) {
-                Write-Host 'WARN: Remote software changed while this update was building:' -ForegroundColor Yellow
-                $softwareChanges | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
-                if ($pass -lt 2) {
-                    Write-Host 'Repeating synchronization and build against the newer software commit...' -ForegroundColor Yellow
-                    continue
+        # A network check after a successful pinned build is intentionally best-effort.
+        # If GitHub is down now, the just-built runtime is still objectively the fresh runtime
+        # for softwareCommit. The next normal updater invocation will discover later source changes.
+        $postBuildFetchSucceeded = Fetch-TargetBranch -BestEffort
+        if ($postBuildFetchSucceeded) {
+            $latestRemoteCommit = (& git rev-parse $remoteRef).Trim()
+            if ($latestRemoteCommit -ne $softwareCommit) {
+                $softwareChanges = @(Get-SoftwareChanges $softwareCommit $latestRemoteCommit)
+                if ($softwareChanges.Count -gt 0) {
+                    Write-Host 'WARN: Remote software changed while this update was building:' -ForegroundColor Yellow
+                    $softwareChanges | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+                    if ($pass -lt 2) {
+                        Write-Host 'Repeating synchronization and build against the newer software commit...' -ForegroundColor Yellow
+                        $resumeFromSynchronizedCommit = $false
+                        continue
+                    }
+                    throw 'Remote software changed again during the second build pass. Run the updater again.'
                 }
-                throw 'Remote software changed again during the second build pass. Run the updater again.'
-            }
 
-            Write-Host 'Remote advanced only by diagnostic/log commits; runtime rebuild remains valid.'
-            & git checkout -f -B $targetBranch $remoteRef
-            if ($LASTEXITCODE -ne 0) { throw 'Unable to fast-forward local branch to the latest log-only remote commit.' }
-            & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+                Write-Host 'Remote advanced only by diagnostic/log commits; runtime rebuild remains valid.'
+                & git checkout -f -B $targetBranch $remoteRef
+                if ($LASTEXITCODE -ne 0) { throw 'Unable to fast-forward local branch to the latest log-only remote commit.' }
+                & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+            }
         }
 
         $repositoryCommit = (& git rev-parse HEAD).Trim()
@@ -341,6 +379,9 @@ try {
     Write-Host "Build marker: $runtimeMarker"
     Write-Host ''
     Write-Host 'The next launch will use the freshly rebuilt runtime.' -ForegroundColor Green
+
+    Remove-Item Env:FLAME_UPDATER_PINNED_COMMIT -ErrorAction SilentlyContinue
+    Remove-Item Env:FLAME_UPDATER_REEXEC -ErrorAction SilentlyContinue
 
     if ($StartAfterUpdate) {
         Write-Host 'Starting desktop application...' -ForegroundColor Cyan
