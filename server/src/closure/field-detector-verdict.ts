@@ -8,10 +8,10 @@ import {
   type ProductType,
 } from '../product-profile.js';
 import { DEFAULT_DETECTION_QUALITY_CONFIG } from './field-waveform-analysis.js';
+import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
 import type {
   ChannelKey,
   DetectionRatioThresholds,
-  DetectionQualityConfig,
   DetectionQualityThresholds,
   FieldWaveformAnalysisSnapshot,
   InterferenceStage,
@@ -102,16 +102,13 @@ function thresholdMatches(
   ratios: DetectionRatioThresholds,
   expectedChannels: ChannelKey[],
 ): string | undefined {
-  const upperBounds: Array<[keyof Pick<FieldDetectorMetrics, 'noiseRms' | 'noiseAbsolute' | 'interferenceRatio'>, number | undefined, string]> = [
-    ['noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT'],
-    ['noiseAbsolute', limits.maxNoiseAbsolute, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT'],
-    ['interferenceRatio', limits.maxInterferenceRatio, 'INTERFERENCE_RATIO_EXCEEDS_LIMIT'],
-  ];
-  for (const [key, limit, reason] of upperBounds) {
-    if (limit == null || limit <= 0) continue;
-    const value = metrics[key];
-    if (value === null) return `${key.toUpperCase()}_MISSING`;
-    if (value > limit) return reason;
+  // Formal noise grading is handled only by noiseThresholdFailure() using the full
+  // window RAW fluctuation=(max-min)/2 and RAW absolute values. noiseRms and the
+  // normalized aggregate noiseAbsolute remain diagnostics and must never silently
+  // downgrade A/B during interference-stage evaluation.
+  if (limits.maxInterferenceRatio > 0) {
+    if (metrics.interferenceRatio === null) return 'INTERFERENCE_RATIO_MISSING';
+    if (metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
   }
 
   if ((limits.minConsistencyTrend ?? 0) > 0) {
@@ -187,6 +184,8 @@ function noiseThresholdFailure(
   for (const key of expectedChannels) {
     const metrics = noiseMetrics[key];
     if (!metrics || !Number.isFinite(metrics.fluctuation)) return `${key.toUpperCase()}_NOISE_RMS_MISSING`;
+    // minNoiseRms is the existing signal-validity/no-data floor shared by both
+    // grades; it is intentionally not a separately configurable B quality limit.
     if (minNoiseRms > 0 && metrics.fluctuation < minNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_BELOW_LIMIT`;
     if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_EXCEEDS_LIMIT`;
     if (limits.maxNoiseAbsolute != null && limits.maxNoiseAbsolute > 0) {
@@ -246,7 +245,11 @@ function evaluateUnit(
   const base = { index: unit.index, address: unit.address, sampledAt: unit.lastUpdate };
   const metrics = detectorMetrics(unit, analysis);
   const complete = analysisSnapshot?.phase === 'COMPLETE';
-  const quality = analysisSnapshot?.thresholds.quality ?? DEFAULT_DETECTION_QUALITY_CONFIG;
+  // Re-derive B here as a defensive boundary: historical snapshots/configs may
+  // still contain old independent B values, but production grading never trusts them.
+  const quality = applyAutomaticBGradePolicy(
+    analysisSnapshot?.thresholds.quality ?? DEFAULT_DETECTION_QUALITY_CONFIG,
+  );
   const expectedProbeCount = productConfig ? selectedProductProfile(productConfig).expectedProbeCount : Math.max(1, unit.probeCount || 3);
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
@@ -333,7 +336,8 @@ function evaluateUnit(
 
   const aReason = firstFailure(quality.a, quality.ratios.a);
   if (!aReason) return result(base, metrics, 'PASS', 'A_PASS', 'ALL_STAGES_A_GRADE_WITHIN_LIMIT', precheck);
-  if (quality.acceptanceGrade === 'A') return result(base, metrics, 'FAIL', 'FAIL', aReason, precheck);
+  // B has no operator-configurable threshold and can no longer be disabled by the
+  // historical acceptanceGrade field. It is always A plus the fixed 10% tolerance.
   const bReason = firstFailure(quality.b, quality.ratios.b);
   if (!bReason) return result(base, metrics, 'PASS', 'B_PASS', `A_GRADE_${aReason}`, precheck);
   return result(base, metrics, 'FAIL', 'FAIL', bReason, precheck);
