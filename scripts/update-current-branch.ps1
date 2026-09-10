@@ -26,6 +26,7 @@ $publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
 $remoteRef = "refs/remotes/origin/$targetBranch"
 $fetchRefspec = "+refs/heads/${targetBranch}:${remoteRef}"
 $runtimeMarker = Join-Path $repoRoot 'logs\runtime-build.json'
+$initialUpdaterHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash
 
 function Fetch-TargetBranch {
     $fetchSucceeded = $false
@@ -49,6 +50,29 @@ function Fetch-TargetBranch {
     if ($LASTEXITCODE -ne 0) {
         throw "Remote branch $remoteRef was not created after fetch."
     }
+}
+
+function Restart-WithUpdatedUpdaterIfNeeded {
+    if ($env:FLAME_UPDATER_REEXEC -eq '1') {
+        return
+    }
+    $diskHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash
+    if ($diskHash -eq $initialUpdaterHash) {
+        return
+    }
+
+    Write-Host ''
+    Write-Host '[UPDATE] The updater itself changed during git synchronization.' -ForegroundColor Yellow
+    Write-Host '[UPDATE] Restarting with the newly downloaded updater before building runtime...' -ForegroundColor Yellow
+
+    $env:FLAME_UPDATER_REEXEC = '1'
+    $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    if ($StartAfterUpdate) {
+        $childArgs += '-StartAfterUpdate'
+    }
+    & powershell.exe @childArgs
+    $childExitCode = $LASTEXITCODE
+    exit $childExitCode
 }
 
 function Stop-ProjectRuntimeProcesses {
@@ -141,6 +165,9 @@ if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
     Fail 'npm is not installed or npm.cmd is not available in PATH.'
 }
+if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) {
+    Fail 'Windows PowerShell is not available in PATH.'
+}
 
 try {
     $insideRepo = (& git rev-parse --is-inside-work-tree 2>$null).Trim()
@@ -198,6 +225,11 @@ try {
             throw "Unable to force switch to $targetBranch."
         }
         & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+
+        # Future updater revisions are allowed to replace this file. If that happens,
+        # restart immediately so the rest of the update uses the new updater logic
+        # instead of continuing with the old script already loaded in memory.
+        Restart-WithUpdatedUpdaterIfNeeded
 
         Write-Host 'Removing non-ignored untracked files and directories...'
         & git clean -fd
