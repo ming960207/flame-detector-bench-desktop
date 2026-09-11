@@ -465,6 +465,20 @@ function acceptedQuality(config: WaveformAnalysisConfig): { limits: DetectionQua
   return { limits: quality[grade], ratios: quality.ratios[grade] };
 }
 
+function buildFormalNoiseMetrics(
+  normalizedSamples: FlameSample[],
+  rawSamples: FlameSample[],
+): Record<ChannelKey, WaveformChannelMetrics> {
+  const normalized = summarizeWaveformChannels(normalizedSamples);
+  const raw = summarizeWaveformChannels(rawSamples.length ? rawSamples : normalizedSamples);
+  return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, {
+    // Align the formal fluctuation metric with the non-PLC bench: adaptive-baseline
+    // normalized waveform followed by (max-min)/2. Keep absolute protection on RAW.
+    fluctuation: normalized[key].fluctuation,
+    absolute: raw[key].absolute,
+  }])) as Record<ChannelKey, WaveformChannelMetrics>;
+}
+
 function noiseFailureReason(
   noise: Statistics | null,
   noiseMetrics: Record<ChannelKey, WaveformChannelMetrics>,
@@ -530,13 +544,13 @@ function publicUnitResult(
   const interferenceSamples = [...stageSamples.heat, ...stageSamples.flash, ...stageSamples.emc];
   const noiseKeys = config.noiseProbes?.length ? config.noiseProbes : CHANNEL_KEYS.slice(0, 3);
   const noise = statistics(noiseSamples, undefined, noiseKeys);
-  const noiseAbsolute = noiseSamples.length ? Number(Math.max(...noiseSamples.flatMap((sample) => noiseKeys.map((key) => Math.abs(Number(sample[key]))).filter(Number.isFinite))).toFixed(3)) : null;
-  const noiseMetricSamples = noiseRawSamples.length ? noiseRawSamples : noiseSamples;
-  const noiseMetrics = summarizeWaveformChannels(noiseMetricSamples);
+  const rawForAbsolute = noiseRawSamples.length ? noiseRawSamples : noiseSamples;
+  const noiseAbsolute = rawForAbsolute.length ? Number(Math.max(...rawForAbsolute.flatMap((sample) => noiseKeys.map((key) => Math.abs(Number(sample[key]))).filter(Number.isFinite))).toFixed(3)) : null;
+  const noiseMetrics = buildFormalNoiseMetrics(noiseSamples, noiseRawSamples);
   const noiseTestComplete = noiseCompleted || phase === 'COMPLETE';
   const noiseFailure = noiseSamples.length < config.minNoiseSamples
     ? 'NOISE_SAMPLES_MISSING'
-    : noiseFailureReason(noise, noiseMetrics, noiseMetricSamples, noiseKeys, config);
+    : noiseFailureReason(noise, noiseMetrics, noiseSamples, noiseKeys, config);
   const noiseTest: NoiseTestResult = {
     verdict: noiseTestComplete ? noiseFailure ? 'FAIL' : 'PASS' : 'PENDING',
     reason: !hasBatch
@@ -686,13 +700,14 @@ export class FieldWaveformAnalysis {
           + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.noiseRawSamples.length},`
           + `ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},`
           + `ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0},`
-          + `Nlast[${compactProbeSummary(accumulator.lastNoiseSamples, false)}],`
+          + `Nlast[${compactProbeSummary(accumulator.lastNoiseSamples, true)}],`
+          + `Ncum[${compactProbeSummary(accumulator.noiseSamples, true)}],`
           + `Rlast[${compactProbeSummary(accumulator.lastNoiseRawSamples, true)}],`
           + `Rcum[${compactProbeSummary(accumulator.noiseRawSamples, true)}]}`;
       })
       .join(' ');
-    // Rlast/Rcum are diagnostics only. Formal judgement still uses the unchanged
-    // complete-window RAW fluctuation=(max-min)/2 and absolute-value limits.
+    // Formal fluctuation uses Ncum: the detector service's adaptive-baseline
+    // normalized samples. RAW remains authoritative only for absolute-value protection.
     this.log(`[噪声窗口][每秒] at=${compactTimestamp(timestamp)} ${devices}`);
   }
 
@@ -829,9 +844,10 @@ export class FieldWaveformAnalysis {
         continue;
       }
 
-      // The service's normalized samples remove the detector carrier/baseline
-      // (for example the signed 0x8001 marker). Raw samples remain a fallback
-      // for producers that do not expose normalized waveform data.
+      // The service applies the same adaptive baseline used by the non-PLC bench:
+      // baseline += 0.02 * (frameAverage - baseline), then normalized = RAW - baseline.
+      // Formal noise fluctuation uses these normalized samples; RAW is retained for
+      // absolute-value protection and diagnostics.
       const normalizedSamples = usableSamples(unit.samples ?? []);
       const rawSamples = usableSamples(unit.rawSamples ?? []);
       const samples = normalizedSamples.length > 0 ? normalizedSamples : rawSamples;
