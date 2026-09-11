@@ -3,6 +3,8 @@ import {
   relayInputIsActive,
   type RelayActionResult,
   type RelayFunctionalTestConfig,
+  type RelayFunctionalTestPhase,
+  type RelayFunctionalTestPhaseEvent,
   type RelayFunctionalTestReport,
   type RelayFunctionalTestUnitResult,
 } from './relay-functional-test.js';
@@ -17,6 +19,8 @@ export interface RelayDetectorPort {
 export interface RelayFeedbackSource {
   readInputs(): Record<string, boolean> | undefined | Promise<Record<string, boolean> | undefined>;
 }
+
+export type RelayFunctionalTestPhaseListener = (event: RelayFunctionalTestPhaseEvent) => void;
 
 interface UnitWorkState {
   result: RelayFunctionalTestUnitResult;
@@ -93,7 +97,16 @@ export class RelayFunctionalTestCoordinator {
     private readonly detectors: RelayDetectorPort,
     private readonly feedback: RelayFeedbackSource,
     private readonly config: RelayFunctionalTestConfig,
+    private readonly onPhase?: RelayFunctionalTestPhaseListener,
   ) {}
+
+  private emitPhase(phase: RelayFunctionalTestPhase, work: Map<number, UnitWorkState>): void {
+    this.onPhase?.({
+      phase,
+      detectorIndexes: [...work.keys()],
+      timestamp: Date.now(),
+    });
+  }
 
   private async detectorCommandWithRetry(operation: () => Promise<void>): Promise<boolean> {
     for (let attempt = 1; attempt <= RELAY_COMMAND_MAX_ATTEMPTS; attempt += 1) {
@@ -329,9 +342,13 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async runActionCycle(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    this.emitPhase(kind === 'alarm' ? 'ALARM_COMMAND' : 'FAULT_COMMAND', work);
     await this.sendCommand(work, kind);
+    this.emitPhase(kind === 'alarm' ? 'ALARM_VERIFY' : 'FAULT_VERIFY', work);
     await this.waitForAction(work, kind);
+    this.emitPhase(kind === 'alarm' ? 'ALARM_RESET' : 'FAULT_RESET', work);
     await this.resetBatch(work, kind);
+    this.emitPhase(kind === 'alarm' ? 'ALARM_RESET_VERIFY' : 'FAULT_RESET_VERIFY', work);
     await this.waitForReset(work, kind);
   }
 
@@ -439,6 +456,7 @@ export class RelayFunctionalTestCoordinator {
     );
 
     try {
+      this.emitPhase('BASELINE', work);
       await this.readBaseline(work);
       if (this.config.mode === 'DIAGNOSTIC') await this.runDiagnostic(work);
       else await this.runFastBatch(work);
@@ -455,6 +473,8 @@ export class RelayFunctionalTestCoordinator {
       result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
       return result;
     });
+
+    this.emitPhase('COMPLETE', work);
 
     return {
       batchId,

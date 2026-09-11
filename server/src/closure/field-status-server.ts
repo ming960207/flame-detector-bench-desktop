@@ -17,6 +17,7 @@ import type { PLCProcessStatus } from '../process-status.js';
 import { FlameDetectorService } from '../modbus/flame-detector-service.js';
 import { WSMessageType, type FlameDetectorState } from '../types.js';
 import type { AutoTestProgress, AutoTestReport, DetectorReadyReport } from '../modbus/flame-detector-service.js';
+import type { RelayFunctionalTestProgress } from '../product-aware-flame-detector-service.js';
 import { evaluateFieldDetectorBatch, type FieldDetectorBatchVerdict } from './field-detector-verdict.js';
 import { evaluateFieldFinalVerdict, type FieldFinalVerdict } from './field-final-verdict.js';
 import {
@@ -72,6 +73,7 @@ export interface FieldStatusSummary {
   productSelectionLocked: boolean;
   productPrecheck: ProductPrecheckReport | null;
   productPrecheckBusy: boolean;
+  relayTest?: RelayFunctionalTestProgress;
   detectorStartup?: DetectorReadyReport;
 }
 
@@ -98,9 +100,10 @@ export interface FlameDetectorStatusSource {
   clearWaveformHistory?(): void;
   prepareWaveformStartup?(batchId?: string): void;
   getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
+  getRelayTestProgress?(): RelayFunctionalTestProgress;
   stopWaveformStreaming?(): Promise<void>;
   runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null): Promise<ProductPrecheckReport>;
-  on(event: 'flame_state' | 'error', listener: (value: any) => void): this;
+  on(event: 'flame_state' | 'error' | 'relay_test_phase', listener: (value: any) => void): this;
   getConfig?(): FlameConfig;
   updateConfig?(config: FlameConfig): void;
   runAutoTest?(onProgress?: (progress: AutoTestProgress) => void, options?: { enabledStepKeys?: string[] }): Promise<AutoTestReport>;
@@ -308,6 +311,7 @@ export function createFieldStatusRuntime(
     productSelectionLocked: processLocksProductSelection(currentStatus),
     productPrecheck,
     productPrecheckBusy,
+    ...(detectors.getRelayTestProgress ? { relayTest: detectors.getRelayTestProgress() } : {}),
     ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
   const broadcastSummary = () => wsServer.broadcastFieldSummary(summary());
@@ -496,6 +500,7 @@ export function createFieldStatusRuntime(
     wsServer.broadcastFlameState(state);
     broadcastSummary();
   });
+  detectors.on('relay_test_phase', () => broadcastSummary());
   detectors.on('error', (error: unknown) => wsServer.broadcastError(error instanceof Error ? error.message : 'FLAME_DETECTOR_READ_FAILED'));
   wsServer.on('client_connected', () => {
     if (currentStatus) wsServer.broadcastPLCProcessStatus(currentStatus);

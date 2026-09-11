@@ -12,6 +12,12 @@ export type RelayFunctionalTestPhase =
   | 'FAULT_RESET_VERIFY'
   | 'COMPLETE';
 
+export interface RelayFunctionalTestPhaseEvent {
+  phase: RelayFunctionalTestPhase;
+  detectorIndexes: number[];
+  timestamp: number;
+}
+
 export type RelayDioReadFunction = 2 | 4;
 
 export interface RelayDioConfig {

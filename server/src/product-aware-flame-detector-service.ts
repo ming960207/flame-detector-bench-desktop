@@ -22,6 +22,7 @@ import {
   normalizeRelayFunctionalTestConfig,
   relayDioConfigReady,
   relayFunctionalTestMissingMappings,
+  type RelayFunctionalTestPhase,
   type RelayFunctionalTestConfig,
   type RelayFunctionalTestReport,
   type RelayFunctionalTestUnitResult,
@@ -39,6 +40,14 @@ export interface ProductAwareBatchContext {
   relayFunctionalTest: RelayFunctionalTestReport | null;
   sensitivityByDetector: Record<number, number | null>;
   updatedAt: number;
+}
+
+export interface RelayFunctionalTestProgress {
+  batchId: string | null;
+  active: boolean;
+  phase: RelayFunctionalTestPhase;
+  detectorIndexes: number[];
+  timestamp: number;
 }
 
 interface PositionOneIdentity {
@@ -157,6 +166,13 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   private precheckAnalysisRecoveryUntil = 0;
   private readonly batchContexts = new Map<string, ProductAwareBatchContext>();
   private readonly productCodeReservations = new Map<string, Promise<ProductCodeAllocation>>();
+  private relayTestProgress: RelayFunctionalTestProgress = {
+    batchId: null,
+    active: false,
+    phase: 'COMPLETE',
+    detectorIndexes: [],
+    timestamp: 0,
+  };
 
   constructor(
     flameConfig: FlameConfig,
@@ -234,6 +250,27 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     if (!batchId) return null;
     const context = this.batchContexts.get(batchId);
     return context ? JSON.parse(JSON.stringify(context)) as ProductAwareBatchContext : null;
+  }
+
+  getRelayTestProgress(): RelayFunctionalTestProgress {
+    return {
+      ...this.relayTestProgress,
+      detectorIndexes: [...this.relayTestProgress.detectorIndexes],
+    };
+  }
+
+  private emitRelayTestProgress(
+    batchId: string | null,
+    progress: Pick<RelayFunctionalTestProgress, 'phase' | 'detectorIndexes' | 'timestamp'>,
+  ): void {
+    this.relayTestProgress = {
+      batchId,
+      active: progress.phase !== 'COMPLETE',
+      phase: progress.phase,
+      detectorIndexes: [...progress.detectorIndexes],
+      timestamp: progress.timestamp,
+    };
+    this.emit('relay_test_phase', this.getRelayTestProgress());
   }
 
   /**
@@ -351,17 +388,30 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     if (!profile.relayFunctionalTestEnabled) return null;
 
     const indexes = this.enabledDetectorIndexes();
+    this.emitRelayTestProgress(batchId, { phase: 'BASELINE', detectorIndexes: indexes, timestamp: Date.now() });
     const missingMappings = relayFunctionalTestMissingMappings(this.relayConfig, indexes);
     const infraReasons: string[] = [];
     if (!this.relayConfig.enabled) infraReasons.push('RELAY_TEST_GLOBAL_DISABLED');
     if (!relayDioConfigReady(this.relayConfig.dio)) infraReasons.push('DIO_NOT_CONFIGURED');
     if (missingMappings.length > 0) infraReasons.push(`RELAY_FEEDBACK_MAPPING_MISSING:${missingMappings.join(',')}`);
     if (infraReasons.length > 0) {
+      this.emitRelayTestProgress(batchId, { phase: 'COMPLETE', detectorIndexes: indexes, timestamp: Date.now() });
       return infrastructureFailureReport(batchId, this.relayConfig.mode, indexes, infraReasons);
     }
 
-    const coordinator = new RelayFunctionalTestCoordinator(this, this.relayFeedback, this.relayConfig);
-    return coordinator.run(batchId);
+    const coordinator = new RelayFunctionalTestCoordinator(
+      this,
+      this.relayFeedback,
+      this.relayConfig,
+      (progress) => this.emitRelayTestProgress(batchId, progress),
+    );
+    try {
+      return await coordinator.run(batchId);
+    } finally {
+      if (this.relayTestProgress.active || this.relayTestProgress.batchId === batchId) {
+        this.emitRelayTestProgress(batchId, { phase: 'COMPLETE', detectorIndexes: indexes, timestamp: Date.now() });
+      }
+    }
   }
 
   /**

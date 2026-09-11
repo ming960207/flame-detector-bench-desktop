@@ -5,6 +5,7 @@ import {
   normalizeRelayFunctionalTestConfig,
   relayFunctionalTestMissingMappings,
   relayFunctionalTestReady,
+  type RelayFunctionalTestPhase,
   type RelayFeedbackMapping,
 } from '../src/relay-functional-test.js';
 
@@ -46,6 +47,7 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
   ]);
   const inputs: Record<string, boolean> = { X1: false, X2: false, X3: false, X4: false };
   const events: string[] = [];
+  const phases: RelayFunctionalTestPhase[] = [];
 
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1, 2],
@@ -76,7 +78,7 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
     resetTimeoutMs: 500,
     mappings: createMapping([1, 2]),
   });
-  const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config);
+  const coordinator = new RelayFunctionalTestCoordinator(detectors, { readInputs: () => ({ ...inputs }) }, config, (event) => phases.push(event.phase));
   const report = await coordinator.run('batch-1');
 
   assert.equal(report.verdict, 'PASS');
@@ -89,6 +91,12 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
   assert.deepEqual(events.slice(6, 8).sort(), ['reset:1', 'reset:2']);
   assert.deepEqual(events.slice(8).sort(), ['reset:1', 'reset:2']);
   assert.equal(events.some((event) => event.includes('alarm+fault')), false);
+  assert.deepEqual(phases, [
+    'BASELINE',
+    'ALARM_COMMAND', 'ALARM_VERIFY', 'ALARM_RESET', 'ALARM_RESET_VERIFY',
+    'FAULT_COMMAND', 'FAULT_VERIFY', 'FAULT_RESET', 'FAULT_RESET_VERIFY',
+    'COMPLETE',
+  ]);
 });
 
 test('DIAGNOSTIC completes one detector before activating the next detector', async () => {

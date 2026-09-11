@@ -235,6 +235,32 @@ function installBackendSessionHeader(window, port) {
   );
 }
 
+function isLocalRendererOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'file:'
+      || ((url.protocol === 'http:' || url.protocol === 'https:')
+        && (url.hostname === '127.0.0.1' || url.hostname === 'localhost'));
+  } catch {
+    return false;
+  }
+}
+
+function installCameraPermissions(window) {
+  const rendererSession = window.webContents.session;
+  rendererSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    if (permission !== 'media' || !isLocalRendererOrigin(requestingOrigin)) return false;
+    return !Array.isArray(details?.mediaTypes) || details.mediaTypes.includes('video');
+  });
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const origin = webContents.getURL();
+    const mediaTypes = details && 'mediaTypes' in details ? details.mediaTypes : undefined;
+    callback(permission === 'media'
+      && isLocalRendererOrigin(origin)
+      && (!Array.isArray(mediaTypes) || mediaTypes.includes('video')));
+  });
+}
+
 function installRendererDiagnostics(window) {
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (level && typeof level === 'object') {
@@ -272,6 +298,7 @@ async function createWindow(port) {
     },
   });
   installBackendSessionHeader(mainWindow, port);
+  installCameraPermissions(mainWindow);
   installRendererDiagnostics(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {

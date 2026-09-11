@@ -7,6 +7,7 @@ import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-
 import type { ProductDetectionConfig, ProductPrecheckReport } from '../server/src/product-profile';
 import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/src/types';
 import type { FlameDetectorConfig } from '../types';
+import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
@@ -39,6 +40,7 @@ interface FieldSummaryPayload {
   productSelectionLocked?: boolean;
   productPrecheck?: ProductPrecheckReport | null;
   productPrecheckBusy?: boolean;
+  relayTest?: RelayFunctionalTestProgress;
 }
 
 function processDisplayLabel(status: PLCProcessStatus | null | undefined) {
@@ -76,6 +78,7 @@ export function FieldProcessStatusApp() {
   const [productLocked, setProductLocked] = useState(false);
   const [productPrecheck, setProductPrecheck] = useState<ProductPrecheckReport | null>(null);
   const [productPrecheckBusy, setProductPrecheckBusy] = useState(false);
+  const [relayTest, setRelayTest] = useState<RelayFunctionalTestProgress | null>(null);
   const [channelOnline, setChannelOnline] = useState(false);
   const [notice, setNotice] = useState('PLC 未接入：工序监测处于待同步状态。');
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -90,6 +93,7 @@ export function FieldProcessStatusApp() {
     setProductLocked(Boolean(summary.productSelectionLocked));
     setProductPrecheck(summary.productPrecheck ?? null);
     setProductPrecheckBusy(Boolean(summary.productPrecheckBusy));
+    setRelayTest(summary.relayTest ?? null);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -233,6 +237,9 @@ export function FieldProcessStatusApp() {
       notice={notice}
       waveformDisplayMode={flameConfig?.waveformDisplayMode || 'normalized'}
       waveformMaxSamples={flameConfig?.waveformMaxSamples || 1000}
+      productPrecheck={productPrecheck}
+      productPrecheckBusy={productPrecheckBusy}
+      relayTest={relayTest}
       resultTitleMeta={<ProductModelSelector config={productConfig} locked={productLocked} busy={productPrecheckBusy} onUpdate={updateProductConfig} />}
       onRefresh={handleRefresh}
       onOpenDetails={() => openDetails('device')}
