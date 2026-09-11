@@ -86,6 +86,10 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   const labelPrintQueue = new LabelPrintQueueStore();
   const recordStore = productionRuns.getStore();
   const mesPublisher = new MESPublisher(mesConfig);
+  const logMESStatus = (): void => {
+    const status = mesPublisher.getPublicStatus();
+    console.log(`[MES] 自动上传状态：${status.enabled ? '已启用' : '已禁用'}，API Key ${status.apiKeyConfigured ? '已配置' : '未配置'}，待上传批次 ${status.pendingJobs}。`);
+  };
   productionRuns.setRecordConfig(inspectionRecordConfig);
   source.on('status', (status) => productionRuns.observeStatus(status));
   productionRuns.on('archive', (archive) => {
@@ -100,8 +104,9 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       });
   });
   productionRuns.on('archive', (archive) => {
-    if (!mesPublisher.getPublicStatus().enabled) return;
-    void mesPublisher.publishArchive(archive, recordStore);
+    void mesPublisher.publishArchive(archive, recordStore).catch((error) => {
+      console.error(`[MES] MES自动上传异常：批次 ${archive.batchId}：`, error instanceof Error ? error.message : String(error));
+    });
   });
 
   const productionConfigPayload = () => {
@@ -344,6 +349,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
 
   const port = await runtime.listen();
   console.log(`[现场状态] 已启动完整产品检测运行时：http://127.0.0.1:${port}`);
+  logMESStatus();
   if (mesConfig.enabled) void mesPublisher.flush();
   return Object.assign(runtime, {
     productionRuns,

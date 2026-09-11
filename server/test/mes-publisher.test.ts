@@ -44,6 +44,7 @@ test('MES 产品录入载荷关联上传附件并区分合格状态', () => {
 test('MES 上传先上传检验报告，再逐个录入产品编号', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'flame-mes-test-'));
   const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const logs: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push({ url, init });
@@ -67,13 +68,33 @@ test('MES 上传先上传检验报告，再逐个录入产品编号', async () =
     },
   } as ProductionRunArchive;
   try {
-    const publisher = new MESPublisher(config, { outboxFile: join(directory, 'outbox.json'), fetchImpl });
+    const publisher = new MESPublisher(config, {
+      outboxFile: join(directory, 'outbox.json'),
+      fetchImpl,
+      log: (message) => logs.push(message),
+    });
     assert.equal(await publisher.publishArchive(archive, recordStore), true);
     assert.equal(calls.length, 3);
     assert.match(calls[0]!.url, /UploadFile$/);
     assert.match(calls[1]!.url, /BriefCreateOrUpdate$/);
     assert.match(calls[2]!.url, /BriefCreateOrUpdate$/);
     assert.equal(publisher.getPublicStatus().pendingJobs, 0);
+    assert.ok(logs.some((message) => message.includes('[MES] MES自动上传成功：批次 batch-1')));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('MES 未启用时记录自动上传跳过原因', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'flame-mes-disabled-test-'));
+  const logs: string[] = [];
+  const publisher = new MESPublisher({ ...config, enabled: false }, {
+    outboxFile: join(directory, 'outbox.json'),
+    log: (message) => logs.push(message),
+  });
+  try {
+    assert.equal(await publisher.publishArchive({ batchId: 'batch-disabled' } as ProductionRunArchive, {} as ProductionInspectionRecordStore), false);
+    assert.ok(logs.some((message) => message.includes('[MES] MES自动上传跳过：批次 batch-disabled，功能未启用')));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

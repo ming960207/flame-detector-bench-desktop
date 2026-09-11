@@ -59,6 +59,13 @@ export interface MESPublicStatus {
   lastUploadedAt?: number;
 }
 
+export interface MESPublisherOptions {
+  outboxFile?: string;
+  fetchImpl?: typeof fetch;
+  log?: (message: string) => void;
+  error?: (message: string) => void;
+}
+
 const DEFAULT_MES_BASE_URL = 'http://10.11.2.144:5051';
 const DEFAULT_OUTBOX_FILE = join(process.env.APP_DATA_DIR || process.cwd(), 'mes-upload-outbox.json');
 const MES_CONFIG_FILE = process.env.MES_CONFIG_FILE
@@ -147,11 +154,15 @@ export class MESPublisher {
   private retryTimer: NodeJS.Timeout | null = null;
   private lastError = '';
   private lastUploadedAt: number | undefined;
+  private readonly log: (message: string) => void;
+  private readonly errorLog: (message: string) => void;
 
-  constructor(config: MESConfig, options: { outboxFile?: string; fetchImpl?: typeof fetch } = {}) {
+  constructor(config: MESConfig, options: MESPublisherOptions = {}) {
     this.config = normalizeMESConfig(config);
     this.outboxFile = options.outboxFile || DEFAULT_OUTBOX_FILE;
     this.fetchImpl = options.fetchImpl || fetch;
+    this.log = options.log || ((message) => console.log(message));
+    this.errorLog = options.error || ((message) => console.error(message));
     this.loadOutbox();
     this.updateRetryTimer();
   }
@@ -187,20 +198,26 @@ export class MESPublisher {
   }
 
   async publishArchive(archive: ProductionRunArchive, recordStore: ProductionInspectionRecordStore): Promise<boolean> {
-    if (!this.config.enabled) return false;
+    if (!this.config.enabled) {
+      this.log(`[MES] MES自动上传跳过：批次 ${archive.batchId}，功能未启用。`);
+      return false;
+    }
     return this.enqueue(async () => {
       try {
         let job = this.jobs.get(archive.batchId);
         if (!job) {
           job = await this.createJob(archive, recordStore);
-          if (job.products.length === 0) return true;
+          if (job.products.length === 0) {
+            this.log(`[MES] MES自动上传跳过：批次 ${archive.batchId}，没有可上传的产品编号。`);
+            return false;
+          }
           this.jobs.set(job.batchId, job);
           await this.saveOutbox();
         }
         return await this.processJob(job);
       } catch (error) {
         this.lastError = errorText(error);
-        console.error(`[MES] 批次 ${archive.batchId} 上传失败:`, this.lastError);
+        this.errorLog(`[MES] MES自动上传失败：批次 ${archive.batchId}，无法创建上传任务：${this.lastError}`);
         await this.saveOutbox();
         return false;
       }
@@ -256,7 +273,7 @@ export class MESPublisher {
       const preserved = `${this.outboxFile}.corrupt-${Date.now()}`;
       try { renameSync(this.outboxFile, preserved); } catch { /* best effort */ }
       this.lastError = `MES_OUTBOX_READ_FAILED:${errorText(error)}`;
-      console.error('[MES] 待上传队列读取失败，原文件已尽量保留:', this.lastError);
+      this.errorLog(`[MES] 待上传队列读取失败，原文件已尽量保留：${this.lastError}`);
     }
   }
 
@@ -317,12 +334,12 @@ export class MESPublisher {
       await this.saveOutbox();
       this.lastError = '';
       this.lastUploadedAt = Date.now();
-      console.log(`[MES] 批次 ${job.batchId} 已上传 ${job.products.length} 个产品编号，并关联检验报告附件。`);
+      this.log(`[MES] MES自动上传成功：批次 ${job.batchId} 已上传 ${job.products.length} 个产品编号，并关联检验报告附件。`);
       return true;
     } catch (error) {
       this.lastError = errorText(error);
       await this.saveOutbox();
-      console.error(`[MES] 批次 ${job.batchId} 待重试:`, this.lastError);
+      this.errorLog(`[MES] MES自动上传失败：批次 ${job.batchId}，已保留待重试：${this.lastError}`);
       return false;
     }
   }
