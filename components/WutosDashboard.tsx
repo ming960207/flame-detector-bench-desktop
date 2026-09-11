@@ -638,8 +638,6 @@ const LiveWaveformPanel: FC<{
   const samples = activeUnit?.online
     ? waveformSamples(activeUnit, waveformDisplayMode, waveformMaxSamples)
     : [];
-  const probes = waveformKeys(samples, activeUnit);
-  const domain = waveformDomain(samples, probes);
   const activeIndex = activeUnit?.index ?? selectedIndex ?? 1;
   const isLive = Boolean(activeUnit?.online && samples.length >= 2);
   const activeAnalysis = waveformAnalysis?.units.find((unit) => unit.index === activeIndex);
@@ -664,58 +662,6 @@ const LiveWaveformPanel: FC<{
         </div>
         {expanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
       </button>
-      {expanded && <>
-        <div className="wutos-live-waveform__chart">
-          {samples.length >= 2 ? (
-            <svg viewBox="0 0 240 90" preserveAspectRatio="none" role="img" aria-label={`探测器${activeIndex}实时波形监视`}>
-              <path className="wutos-live-waveform__grid" d="M0 22.5H240 M0 45H240 M0 67.5H240 M48 0V90 M96 0V90 M144 0V90 M192 0V90" />
-              {probes.map((key, channel) => {
-                const path = miniWavePath(samples, key, domain, 240, 90);
-                return path ? <path key={key} className={`wutos-live-waveform__line channel-${channel + 1}`} d={path} /> : null;
-              })}
-            </svg>
-          ) : (
-            <span className="wutos-live-waveform__empty">{stateLabel}</span>
-          )}
-        </div>
-        <div className="wutos-live-waveform__data">
-          <div className="wutos-live-waveform__values-title"><b>探头数据</b><span>波动 / 绝对 · mV</span></div>
-          <div className="wutos-live-waveform__values" aria-label="实时探头数值">
-            {probes.map((key, channel) => {
-              const fluctuation = probeFluctuation(activeUnit, key);
-              const absolute = probeAbsolute(activeUnit, key);
-              return <span key={key}>
-                <i className={`channel-${channel + 1}`} />
-                <label>探头{channel + 1}</label>
-                <b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b>
-                <small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small>
-              </span>;
-            })}
-            {probes.length === 0 && <span className="is-empty">等待探头数据</span>}
-          </div>
-        </div>
-        <footer className="wutos-live-waveform__footer">
-          <div className="wutos-live-waveform__legend">
-            {probes.map((key, channel) => <span key={key}><i className={`channel-${channel + 1}`} />探头{channel + 1}</span>)}
-            {probes.length === 0 && <span><i />等待通道</span>}
-          </div>
-          <div className="wutos-live-waveform__devices" aria-label="选择探测器">
-            {units.map((unit, index) => {
-              const deviceIndex = index + 1;
-              return <button
-                key={deviceIndex}
-                type="button"
-                className={deviceIndex === activeIndex ? 'is-selected' : ''}
-                onClick={() => setSelectedIndex(deviceIndex)}
-                aria-label={`查看探测器${deviceIndex}波形`}
-                aria-pressed={deviceIndex === activeIndex}
-              >
-                <i className={unit?.online ? 'is-online' : ''} />{deviceIndex}
-              </button>;
-            })}
-          </div>
-        </footer>
-      </>}
       <IndicatorCameraPanel
         expanded={expanded}
         batchId={productPrecheck?.batchId ?? waveformAnalysis?.batchId ?? relayTest?.batchId ?? null}
