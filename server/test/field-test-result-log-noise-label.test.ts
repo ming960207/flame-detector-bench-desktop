@@ -17,7 +17,7 @@ const stage = {
   snr31: 0,
 };
 
-test('result log reports RAW fluctuation as the formal noise metric and RMS as diagnostic only', () => {
+test('result log reports adaptive-baseline normalized fluctuation as formal and RAW absolute separately', () => {
   const directory = mkdtempSync(join(tmpdir(), 'flame-result-log-'));
   try {
     const logger = new FileFieldTestResultLogger(directory);
@@ -132,12 +132,14 @@ test('result log reports RAW fluctuation as the formal noise metric and RMS as d
     const output = logger.record(fixture);
     assert.ok(output);
     const content = readFileSync(output, 'utf8');
-    assert.match(content, /噪声波动值\(RAW\)/);
-    assert.match(content, /P2 RAW波动/);
-    assert.match(content, /P2波动 215 > B上限 200/);
-    assert.match(content, /RMS\(辅助\)/);
+    assert.match(content, /噪声波动值\(自适应归一化\)/);
+    assert.match(content, /P2 归一化波动/);
+    assert.match(content, /P2归一化波动 215 > B上限 200/);
+    assert.match(content, /噪声绝对值\(RAW\)/);
+    assert.match(content, /RMS\(归一化辅助\)/);
+    assert.match(content, /EMA 跟踪（α=0\.02）/);
     assert.match(content, /真实 RMS 仅作为分析辅助参数，不参与合格判定/);
-    assert.doesNotMatch(content, /噪声 RMS 超过上限/);
+    assert.doesNotMatch(content, /正式噪声判定使用有效探头 RAW 波动值/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
