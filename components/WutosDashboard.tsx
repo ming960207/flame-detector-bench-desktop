@@ -580,20 +580,15 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
   const domain = waveformDomain(samples, probes);
   const state = unit?.fault ? 'fault' : unit?.fire ? 'fire' : unit?.online ? 'online' : 'offline';
   const stateLabel = detectorStartupLabel(unit) ?? signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
-  const p1 = probeFluctuation(unit, 'probe1');
   const p2 = probeFluctuation(unit, 'probe2');
   const p3 = probeFluctuation(unit, 'probe3');
   const ratio = (reported: number | undefined, numerator: number, denominator: number) => Number.isFinite(reported) && Number(reported) > 0 ? Number(reported) : denominator > 0 ? numerator / denominator : NaN;
-  const ratios = [
-    ['P2/P1', ratio(unit?.snr21, p2, p1)],
-    ['P2/P3', ratio(unit?.snr23, p2, p3)],
-    ['P3/P1', ratio(unit?.snr31, p3, p1)],
-  ] as const;
+  const ratio23 = ratio(unit?.snr23, p2, p3);
 
   return <article className={`wutos-sensor-card is-${state}`} aria-label={`探测器${index}实时状态`}>
     <header>
       <div><span><i />探测器 {index}</span><small>地址 {unit?.address ?? index} · {probes.length === 4 ? '四波长' : '三波长'} · {probes.length} 路探头</small></div>
-      <b>{stateLabel}</b>
+      <b title={stateLabel}>{stateLabel}</b>
     </header>
     <div className="wutos-sensor-caption"><strong>实时波形预览</strong><span>{waveformDisplayMode === 'raw' ? '原始值' : '归一化值'} · {samples.length} 点</span></div>
     <div className="wutos-sensor-wave">
@@ -611,17 +606,11 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
       {probes.map((key, channel) => {
         const fluctuation = probeFluctuation(unit, key);
         const absolute = probeAbsolute(unit, key);
-        return <span key={key}>探头{channel + 1}<b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b><small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small></span>;
+        return <span key={key}><label>探头{channel + 1}</label><b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b><small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small></span>;
       })}
     </div>
-    <div className="wutos-sensor-section-title"><b>探头比值</b><span>实时 SNR</span></div>
     <div className="wutos-sensor-values wutos-sensor-values--ratios">
-      {ratios.map(([label, value]) => <span key={label}>{label}<b>{Number.isFinite(value) ? value.toFixed(2) : '--'}</b><small>×</small></span>)}
-    </div>
-    <div className="wutos-sensor-quality">
-      <span>噪声 RMS(辅助)<b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span>
-      <span>干扰比<b>{analysis?.interferenceRatio == null ? '--' : `${analysis.interferenceRatio.toFixed(2)}×`}</b></span>
-      <span>样本<b>{analysis ? `${analysis.noiseSampleCount}/${analysis.interferenceSampleCount}` : '--'}</b></span>
+      <span><label>探头比值 <em>P2/P3</em></label><b>{Number.isFinite(ratio23) ? ratio23.toFixed(2) : '--'}</b><small>×</small></span>
     </div>
     <footer><span><i />{unit?.online ? '实时波形流正常' : '等待探测器通讯'}</span></footer>
   </article>;

@@ -24,44 +24,6 @@
     .neon-text { text-shadow: 0 0 5px rgba(6, 182, 212, 0.8); }
     .active-step-glow { box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); border-color: #22c55e; }
 
-    /* 中央设备卡片：P2/P3 是双波长产品的主比值，保持其他比值可见但降低视觉权重。 */
-    .wutos-sensor-values--ratios {
-      grid-template-columns: minmax(0, .72fr) minmax(0, 1.56fr) minmax(0, .72fr) !important;
-      align-items: stretch;
-      gap: 2% !important;
-    }
-    .wutos-sensor-values--ratios > span:nth-child(1),
-    .wutos-sensor-values--ratios > span:nth-child(3) {
-      opacity: .72;
-    }
-    .wutos-sensor-values--ratios > span:nth-child(2) {
-      display: grid;
-      grid-template-columns: 1fr;
-      place-items: center;
-      padding: 3px 2px !important;
-      border-color: rgba(5, 142, 207, .58) !important;
-      border-radius: 3px;
-      background: linear-gradient(180deg, rgba(223, 247, 255, .98), rgba(196, 235, 249, .94));
-      box-shadow: 0 0 7px rgba(0, 147, 219, .22), inset 0 0 6px rgba(22, 150, 205, .09);
-      color: #176384 !important;
-      font-weight: 900;
-      letter-spacing: .01em;
-    }
-    .wutos-sensor-values--ratios > span:nth-child(2) b {
-      display: block !important;
-      margin: 1px 0 0 !important;
-      color: #006fa7 !important;
-      font-size: clamp(9px, .82cqw, 13px) !important;
-      font-weight: 900 !important;
-      line-height: .95 !important;
-      text-shadow: 0 0 4px rgba(0, 142, 207, .2);
-    }
-    .wutos-sensor-values--ratios > span:nth-child(2) small {
-      margin-left: 0 !important;
-      color: #5c899e !important;
-      font-size: clamp(3px, .28cqw, 5px) !important;
-    }
-
     /* 1280×1080 现场屏：取消5:3信箱式缩放，充分利用纵向空间，提高中央卡片可读性。 */
     @media (min-width: 1180px) and (max-width: 1320px) and (min-height: 900px) {
       .wutos-dashboard {
@@ -72,47 +34,6 @@
         height: calc(100vh - 16px) !important;
         max-height: none !important;
         aspect-ratio: auto !important;
-      }
-      .wutos-sensor-card {
-        grid-template-rows: auto auto minmax(72px, 1fr) auto auto auto auto auto auto !important;
-        padding: 3% 5% 3% !important;
-        row-gap: 1.35% !important;
-      }
-      .wutos-sensor-card header {
-        font-size: 9px !important;
-      }
-      .wutos-sensor-card header small {
-        font-size: 5px !important;
-      }
-      .wutos-sensor-caption,
-      .wutos-sensor-section-title {
-        font-size: 6px !important;
-      }
-      .wutos-sensor-values span {
-        font-size: 5px !important;
-        padding: 2px 1px !important;
-      }
-      .wutos-sensor-values b {
-        font-size: 7px !important;
-      }
-      .wutos-sensor-values small {
-        font-size: 4px !important;
-      }
-      .wutos-sensor-values--ratios > span:nth-child(2) {
-        padding: 5px 2px !important;
-      }
-      .wutos-sensor-values--ratios > span:nth-child(2) b {
-        font-size: 13px !important;
-      }
-      .wutos-sensor-quality span {
-        font-size: 4px !important;
-        padding: 2px !important;
-      }
-      .wutos-sensor-quality b {
-        font-size: 6px !important;
-      }
-      .wutos-sensor-card footer {
-        font-size: 5px !important;
       }
     }
 
