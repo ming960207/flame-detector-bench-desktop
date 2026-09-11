@@ -3,17 +3,18 @@ setlocal EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0"
-title Flame Detector Test Bench - Source Runtime
+title Flame Detector Test Bench - Browser Runtime
 
 echo ========================================
-echo   Flame Detector Test Bench - Source Runtime
+echo   Flame Detector Test Bench - Browser Runtime
 echo ========================================
 echo.
-echo This launcher now uses the SAME Electron runtime/logging path as the packaged app.
+echo This launcher starts the field backend and Vite, then opens the system browser.
+echo Electron is reserved for packaged desktop builds.
 echo.
 echo Project : %CD%
-echo Log dir : %CD%\logs
-echo Latest  : %CD%\logs\latest.log
+echo Backend : http://127.0.0.1:3001
+echo Frontend: http://127.0.0.1:3002
 echo.
 
 :: ========================================
@@ -35,7 +36,7 @@ echo.
 :: 1. Check Node.js / npm
 :: ========================================
 where node >nul 2>&1
-if %ERRORLEVEL% neq 0 (
+if errorlevel 1 (
     echo [ERROR] Node.js not found!
     echo         Please install Node.js 22 x64.
     echo.
@@ -44,8 +45,9 @@ if %ERRORLEVEL% neq 0 (
 )
 
 where npm >nul 2>&1
-if %ERRORLEVEL% neq 0 (
+if errorlevel 1 (
     echo [ERROR] npm not found! Please reinstall Node.js.
+    echo.
     pause
     exit /b 1
 )
@@ -64,21 +66,15 @@ set NEED_FRONTEND_INSTALL=0
 if not exist "node_modules" (
     set NEED_FRONTEND_INSTALL=1
     echo [INFO] node_modules not found
-) else (
-    if not exist "node_modules\vite" (
-        set NEED_FRONTEND_INSTALL=1
-        echo [INFO] vite package missing
-    )
-    if not exist "node_modules\electron" (
-        set NEED_FRONTEND_INSTALL=1
-        echo [INFO] electron package missing
-    )
+) else if not exist "node_modules\vite" (
+    set NEED_FRONTEND_INSTALL=1
+    echo [INFO] vite package missing
 )
 
 if !NEED_FRONTEND_INSTALL! == 1 (
     echo [INSTALL] Installing frontend dependencies...
     call npm install
-    if %ERRORLEVEL% neq 0 goto :error
+    if errorlevel 1 goto :error
     echo [OK] Frontend dependencies installed
 ) else (
     echo [OK] Frontend dependencies ready
@@ -108,7 +104,7 @@ if not exist "server\node_modules" (
 if !NEED_SERVER_INSTALL! == 1 (
     echo [INSTALL] Installing backend dependencies...
     call npm install --prefix server
-    if %ERRORLEVEL% neq 0 goto :error
+    if errorlevel 1 goto :error
     echo [OK] Backend dependencies installed
 ) else (
     echo [OK] Backend dependencies ready
@@ -116,74 +112,52 @@ if !NEED_SERVER_INSTALL! == 1 (
 echo.
 
 :: ========================================
-:: 4. Validate Electron main process
+:: 4. Start the source services in the background
 :: ========================================
-echo [CHECK] Electron main process syntax...
-node --check desktop\main.cjs
-if %ERRORLEVEL% neq 0 goto :error
-echo [OK] Electron main process syntax valid
-echo.
+echo [START] Unified field backend and Vite frontend...
+set "NODE_ENV=development"
+set "CLOSURE_MODE=field"
+set "SERVER_PORT=3001"
+start "Flame Detector Backend" /min cmd /c "npm run dev --prefix server"
 
-:: ========================================
-:: 5. Build source exactly for Electron runtime
-:: ========================================
-echo [BUILD] Unified backend...
-call npm run build:server
-if %ERRORLEVEL% neq 0 goto :error
+set "VITE_RUNTIME_MODE=field"
+set "VITE_BACKEND_API_URL=http://127.0.0.1:3001"
+set "VITE_BACKEND_WS_URL=ws://127.0.0.1:3001"
+start "Flame Detector Vite" /min cmd /c "npm run dev"
 
-echo.
-echo [BUILD] Desktop web frontend...
-call npm run build:web
-if %ERRORLEVEL% neq 0 goto :error
+set "NODE_ENV="
+set "CLOSURE_MODE="
+set "SERVER_PORT="
+set "VITE_RUNTIME_MODE="
+set "VITE_BACKEND_API_URL="
+set "VITE_BACKEND_WS_URL="
 
-echo.
-echo ========================================
-echo   Starting Electron source runtime...
-echo ========================================
-echo.
-echo Runtime logging is shared with packaged app:
-echo   %CD%\logs\latest.log
-echo   %CD%\logs\flame-detector-^<timestamp^>-pid^<pid^>.log
-echo.
-echo Captured scopes include:
-echo   BOOT / BACKEND / STDOUT / STDERR / PROCESS
-
-echo   RENDERER / NETWORK / WaveformDiag[WS] / WaveformDiag[UI]
-echo.
-echo NOTE: latest.log is recreated on each launch.
-echo       Preserve the session log if multiple runs are needed.
-echo.
-
-:: IMPORTANT:
-:: npm run desktop -> electron . -> desktop/main.cjs
-:: This is the same main-process logging implementation used by the packaged app.
-call npm run desktop
-set APP_EXIT=%ERRORLEVEL%
-
-echo.
-echo ========================================
-echo   Electron runtime exited: %APP_EXIT%
-echo ========================================
-echo Latest log:
-echo   %CD%\logs\latest.log
-echo.
-
-if not "%APP_EXIT%"=="0" (
-    echo [WARN] Runtime exited with non-zero code. Check latest.log first.
+echo [WAIT] Waiting for backend and frontend to become ready...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$deadline = (Get-Date).AddSeconds(30); $frontendReady = $false; $backendReady = $false; while ((Get-Date) -lt $deadline) { try { $frontend = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3002/' -TimeoutSec 1; $frontendReady = $frontend.StatusCode -ge 200 -and $frontend.StatusCode -lt 500 } catch { $frontendReady = $false }; try { $backend = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3001/api/health' -TimeoutSec 1; $backendReady = $backend.StatusCode -ge 200 -and $backend.StatusCode -lt 500 } catch { $backendReady = $false }; if ($frontendReady -and $backendReady) { exit 0 }; Start-Sleep -Milliseconds 250 }; exit 1"
+if errorlevel 1 (
+    echo [ERROR] Backend or frontend did not become ready within 30 seconds.
+    echo         Check the running field runtime console for the concrete error.
+    goto :error
 )
 
+echo [OK] Backend and frontend are ready
+echo [OPEN] Opening the system default browser...
+start "" "http://127.0.0.1:3002/"
+echo.
+echo Browser page: http://127.0.0.1:3002/
+echo Backend    : http://127.0.0.1:3001/
+echo.
+echo The field runtime is running in the background. Run scripts\stop-all.ps1 to stop it.
+echo.
 pause
-exit /b %APP_EXIT%
+exit /b 0
 
 :error
 echo.
 echo ========================================
-echo   Build/start preparation failed
-
+echo   Browser runtime preparation failed
 echo ========================================
-echo Please review the console output above.
-echo If Electron started before the failure, also check:
-echo   %CD%\logs\latest.log
+echo Please review the service console output above.
 echo.
 pause
 exit /b 1
