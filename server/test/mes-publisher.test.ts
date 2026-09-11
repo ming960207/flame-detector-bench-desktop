@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   buildMESProductPayload,
+  defaultMESConfig,
   MESPublisher,
   type MESConfig,
   type MESProductSubmission,
@@ -24,6 +25,17 @@ const config: MESConfig = {
   operatorName: '',
   requestTimeoutMs: 2_000,
 };
+
+test('MES 无历史配置时默认启用自动上传', () => {
+  const previous = process.env.MES_ENABLED;
+  try {
+    delete process.env.MES_ENABLED;
+    assert.equal(defaultMESConfig().enabled, true);
+  } finally {
+    if (previous === undefined) delete process.env.MES_ENABLED;
+    else process.env.MES_ENABLED = previous;
+  }
+});
 
 test('MES 产品录入载荷关联上传附件并区分合格状态', () => {
   const submission: MESProductSubmission = {

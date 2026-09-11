@@ -87,7 +87,7 @@ function localMESConfig(): { baseUrl?: string; apiKey?: string } {
 export function defaultMESConfig(): MESConfig {
   const local = localMESConfig();
   return {
-    enabled: process.env.MES_ENABLED === 'true',
+    enabled: !['false', '0', 'off', 'no'].includes((process.env.MES_ENABLED || '').trim().toLowerCase()),
     baseUrl: process.env.MES_BASE_URL || local.baseUrl || DEFAULT_MES_BASE_URL,
     apiKey: process.env.MES_API_KEY || local.apiKey || '',
     operatorName: process.env.MES_OPERATOR_NAME || '',
