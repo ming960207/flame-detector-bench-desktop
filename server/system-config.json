@@ -207,7 +207,7 @@
       "minNoiseSamples": 400,
       "minInterferenceSamples": 80,
       "minNoiseRms": 50,
-      "maxNoiseRms": 250,
+      "maxNoiseRms": 220,
       "maxNoiseAbsolute": 1000,
       "maxInterferenceRatio": 1.5,
       "minConsistencyTrend": 0.75,
@@ -233,7 +233,7 @@
           "minSensitivity": 0
         },
         "b": {
-          "maxNoiseRms": 250,
+          "maxNoiseRms": 220,
           "maxNoiseAbsolute": 1000,
           "maxInterferenceRatio": 1.5,
           "minConsistencyTrend": 0.75,

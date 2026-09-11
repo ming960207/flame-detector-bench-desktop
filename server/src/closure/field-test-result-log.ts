@@ -19,6 +19,7 @@ import {
   type WaveformAnalysisConfig,
   type WaveformAnalysisUnitResult,
 } from './field-waveform-analysis.js';
+import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
 
 export interface CompletedFieldTest {
   batchId: string;
@@ -153,6 +154,7 @@ const REASON_TEXT: Record<string, string> = {
   MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
   NOISE_RMS_EXCEEDS_LIMIT: '噪声波动值超过上限',
+  NOISE_ROLLING_WINDOW_MISSING: '不足完整10秒 RAW 滚动窗口',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
   INTERFERENCE_RATIO_EXCEEDS_LIMIT: '干扰比超过上限',
   CONSISTENCY_TREND_BELOW_LIMIT: '一致性低于下限',
@@ -272,7 +274,7 @@ function stageReason(reason: string | undefined): string {
 
 function noiseReason(reason: string | undefined): string {
   if (!reason) return '未采集';
-  if (reason === 'NOISE_WITHIN_LIMIT') return '归一化噪声波动值/RAW绝对值在限值内';
+  if (reason === 'NOISE_WITHIN_LIMIT') return 'RAW 10秒滚动最大波动值/RAW绝对值在限值内';
   if (reason === 'NOISE_SAMPLES_MISSING') return '噪声采样不足';
   if (reason === 'WAITING_FOR_NOISE_SAMPLES') return '等待噪声采样';
   if (reason === 'WAITING_FOR_NOISE_WINDOW_COMPLETE') return '等待噪声采集窗口结束';
@@ -299,6 +301,15 @@ function noiseMetric(
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function noiseDiagnosticMetric(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  key: ChannelKey,
+  field: 'currentRolling10s' | 'maxRolling10s' | 'fullStageRawFluctuation' | 'rawAbsoluteMax',
+): number | null {
+  const value = analysis?.noiseTest?.[field]?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function noiseMetricSummary(
   analysis: WaveformAnalysisUnitResult | undefined,
   channels: ChannelKey[],
@@ -321,10 +332,10 @@ function formalNoiseFailureDetails(
     const fluctuation = noiseMetric(analysis, key, 'fluctuation');
     const absolute = noiseMetric(analysis, key, 'absolute');
     if (fluctuation !== null && minFluctuation > 0 && fluctuation < minFluctuation) {
-      details.push(`${channelLabel(key)}归一化波动 ${roundedValueText(fluctuation)} < 下限 ${roundedValueText(minFluctuation)}`);
+      details.push(`${channelLabel(key)}RAW滚动10秒波动 ${roundedValueText(fluctuation)} < 下限 ${roundedValueText(minFluctuation)}`);
     }
     if (fluctuation !== null && maxFluctuation > 0 && fluctuation > maxFluctuation) {
-      details.push(`${channelLabel(key)}归一化波动 ${roundedValueText(fluctuation)} > B上限 ${roundedValueText(maxFluctuation)}`);
+      details.push(`${channelLabel(key)}RAW滚动10秒波动 ${roundedValueText(fluctuation)} > B上限 ${roundedValueText(maxFluctuation)}`);
     }
     if (absolute !== null && maxAbsolute != null && maxAbsolute > 0 && absolute > maxAbsolute) {
       details.push(`${channelLabel(key)}RAW绝对值 ${roundedValueText(absolute)} > B上限 ${roundedValueText(maxAbsolute)}`);
@@ -338,10 +349,10 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
   record(test: CompletedFieldTest): string {
     mkdirSync(this.directory, { recursive: true });
-    const quality = normalizeDetectionQualityConfig(
+    const quality = applyAutomaticBGradePolicy(normalizeDetectionQualityConfig(
       test.thresholds.quality,
       DEFAULT_DETECTION_QUALITY_CONFIG,
-    );
+    ));
     const file = join(this.directory, `test-results-${datePart(test.completedAt)}.log`);
     rotateCorruptLog(file);
     const units = test.detectorVerdict.units;
@@ -431,7 +442,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
     const noiseHeaders = [
       '设备', '采样数',
-      ...expectedChannels.flatMap((key) => [`${channelLabel(key)} 归一化波动`, `${channelLabel(key)} RAW绝对值`]),
+      ...expectedChannels.flatMap((key) => [`${channelLabel(key)} RAW滚动10秒最大波动`, `${channelLabel(key)} RAW绝对值`]),
       '结果', '说明',
     ];
     const noiseRows = units.map((unit) => {
@@ -446,6 +457,17 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
         analysis?.noiseTest ? resultText(analysis.noiseTest.verdict) : '未采集',
         noiseReason(analysis?.noiseTest?.reason),
       ];
+    });
+
+    const noiseRollingRows = units.flatMap((unit) => {
+      const analysis = analysisByIndex.get(unit.index);
+      return expectedChannels.map((key) => [
+        String(unit.index), channelLabel(key),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'currentRolling10s')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'maxRolling10s')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'fullStageRawFluctuation')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'rawAbsoluteMax')),
+      ]);
     });
 
     const startupRows = units.map((unit) => {
@@ -499,19 +521,22 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
         : ['未记录产品预检结果']),
       '',
       '设备结果明细',
-      '说明：正式噪声判定使用有效探头自适应基线归一化波动值=(max-min)/2 与 RAW 绝对值；归一化基线采用与非PLC检测台一致的 EMA 跟踪（α=0.02）。',
-      '说明：真实 RMS 仅作为分析辅助参数，不参与合格判定；RAW 波形仍保留在诊断日志中用于追溯基线漂移与原始极值。',
+      '说明：正式噪声判定使用有效探头 RAW 最近10秒滚动窗口波动值=(max-min)/2 的全过程最大值与 RAW 绝对值；窗口按样本时间戳滚动。',
+      '说明：归一化 RMS、全阶段 RAW 波动等仅作为分析辅助参数或追溯证据，不参与正式波动判定。',
       '说明：测试链路/读取/命令类持续异常标记为“需复测”，不计入产品 NG；仍阻止本轮放行。',
-      '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为归一化噪声波动值下限/上限；采集窗口、采样门槛和 A/B 阈值规则保持不变。',
+      '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为 RAW滚动10秒波动值下限/上限；A=200、B=220 的正式阈值由质量配置统一派生。',
       ...table(
-        ['设备', '地址', '结果', '噪声波动值(自适应归一化)', '噪声绝对值(RAW)', 'RMS(归一化辅助)', '最大波动(归一化辅助)', '最大绝对值(RAW辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
+        ['设备', '地址', '结果', '噪声波动值(RAW 10秒滚动最大)', '噪声绝对值(RAW)', 'RMS(归一化辅助)', '最大波动(归一化辅助)', '最大绝对值(RAW辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
         deviceRows,
       ),
       '',
       '噪声采集诊断',
       `窗口开始：${localDateTime(noiseWindowStart)} | 窗口结束：${localDateTime(noiseWindowEnd)} | 有效采集时长：${noiseWindowDurationMs === null ? '-' : `${(noiseWindowDurationMs / 1000).toFixed(1)}秒`} | 最低采样数：${test.thresholds.minNoiseSamples}`,
-      `判定通道：${expectedChannels.map(channelLabel).join('/')} | 归一化波动下限：${valueText(test.thresholds.minNoiseRms)} | A类归一化波动上限：${valueText(quality.a.maxNoiseRms)} | B类归一化波动上限：${valueText(quality.b.maxNoiseRms)} | RAW绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
+      `判定通道：${expectedChannels.map(channelLabel).join('/')} | RAW滚动10秒波动下限：${valueText(test.thresholds.minNoiseRms)} | A类RAW滚动10秒波动上限：${valueText(quality.a.maxNoiseRms)} | B类RAW滚动10秒波动上限：${valueText(quality.b.maxNoiseRms)} | RAW绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
       ...table(noiseHeaders, noiseRows),
+      '',
+      '噪声滚动窗口诊断',
+      ...table(['设备', '通道', '当前10秒RAW波动', '全过程最大10秒RAW波动', '全阶段RAW波动', 'RAW绝对峰值'], noiseRollingRows),
       '',
       '探测器启动诊断',
       ...table(

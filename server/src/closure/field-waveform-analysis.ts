@@ -1,6 +1,5 @@
 import { isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../types.js';
-import { summarizeWaveformChannels } from '../modbus/flame-data-decoder.js';
 import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
 
 export type WaveformAnalysisPhase = 'IDLE' | 'NOISE' | 'INTERFERENCE' | 'COMPLETE';
@@ -13,6 +12,7 @@ export type WaveformAnalysisLogger = (message: string) => void;
 // sampling by 5 seconds to keep the signal stable before measurement.
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
+const NOISE_ROLLING_WINDOW_MS = 10_000;
 
 export interface DetectionSNRRange {
   min: number;
@@ -98,14 +98,14 @@ function defaultRatioGrades(): DetectionQualityConfig['ratios'] {
 export const DEFAULT_DETECTION_QUALITY_CONFIG: DetectionQualityConfig = {
   acceptanceGrade: 'B',
   a: {
-    maxNoiseRms: 180,
+    maxNoiseRms: 200,
     maxNoiseAbsolute: 1000,
     maxInterferenceRatio: 1.5,
     minConsistencyTrend: 0.8,
     minSensitivity: 0,
   },
   b: {
-    maxNoiseRms: 200,
+    maxNoiseRms: 220,
     maxNoiseAbsolute: 1000,
     maxInterferenceRatio: 1.5,
     minConsistencyTrend: 0.75,
@@ -204,6 +204,14 @@ export interface NoiseTestResult {
   reason: string;
   sampleCount: number;
   metrics: Record<ChannelKey, WaveformChannelMetrics>;
+  /** 当前样本时间戳向前 10 秒内的 RAW 波动值。 */
+  currentRolling10s?: Record<ChannelKey, number | null>;
+  /** 噪声测试开始后所有完整 10 秒 RAW 窗口波动值的最大值。 */
+  maxRolling10s?: Record<ChannelKey, number | null>;
+  /** 整个噪声阶段 RAW 的 min/max 波动，仅作诊断，不参与正式波动判定。 */
+  fullStageRawFluctuation?: Record<ChannelKey, number | null>;
+  /** 整个噪声阶段 RAW 的逐通道最大绝对值，参与绝对值保护。 */
+  rawAbsoluteMax?: Record<ChannelKey, number | null>;
 }
 
 export type InterferenceStage = 'heat' | 'flash' | 'emc';
@@ -262,7 +270,8 @@ interface UnitAccumulator {
   index: number;
   address: number;
   noiseSamples: FlameSample[];
-  noiseRawSamples: FlameSample[];
+  rollingRawSamples: Array<{ timestamp: number; sample: FlameSample }>;
+  rawStageRanges: Record<ChannelKey, RawChannelRange>;
   interferenceSamples: Record<InterferenceStage, FlameSample[]>;
   latest: LatestUnitState;
   stageRatios: Record<InterferenceStage, { snr21: number | null; snr23: number | null; snr31: number | null }>;
@@ -276,6 +285,15 @@ interface UnitAccumulator {
   noiseMaxGapMs: number;
   noiseTotalSampleCount: number;
   noiseTotalRawSampleCount: number;
+  currentRolling10s: Record<ChannelKey, number | null>;
+  maxRolling10s: Record<ChannelKey, number | null>;
+}
+
+interface RawChannelRange {
+  count: number;
+  min: number;
+  max: number;
+  absoluteMax: number;
 }
 
 interface Statistics {
@@ -388,6 +406,83 @@ function channelAmplitude(samples: FlameSample[], key: ChannelKey): number | nul
   return (Math.max(...values) - Math.min(...values)) / 2;
 }
 
+function emptyChannelNumberMap(): Record<ChannelKey, number | null> {
+  return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, null])) as Record<ChannelKey, number | null>;
+}
+
+function emptyRawChannelRanges(): Record<ChannelKey, RawChannelRange> {
+  return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, {
+    count: 0,
+    min: Infinity,
+    max: -Infinity,
+    absoluteMax: 0,
+  }])) as Record<ChannelKey, RawChannelRange>;
+}
+
+function updateRawStageRanges(
+  ranges: Record<ChannelKey, RawChannelRange>,
+  samples: FlameSample[],
+): void {
+  for (const sample of samples) {
+    for (const key of CHANNEL_KEYS) {
+      const value = Number(sample[key]);
+      if (!Number.isFinite(value)) continue;
+      const range = ranges[key];
+      range.count += 1;
+      range.min = Math.min(range.min, value);
+      range.max = Math.max(range.max, value);
+      range.absoluteMax = Math.max(range.absoluteMax, Math.abs(value));
+    }
+  }
+}
+
+function rangeFluctuation(range: RawChannelRange): number | null {
+  return range.count > 0 ? (range.max - range.min) / 2 : null;
+}
+
+function rangeMetricMap(
+  ranges: Record<ChannelKey, RawChannelRange>,
+  field: 'fluctuation' | 'absoluteMax',
+): Record<ChannelKey, number | null> {
+  return Object.fromEntries(CHANNEL_KEYS.map((key) => {
+    const range = ranges[key];
+    return [key, range.count > 0 ? field === 'fluctuation' ? rangeFluctuation(range) : range.absoluteMax : null];
+  })) as Record<ChannelKey, number | null>;
+}
+
+function rollingFluctuationMap(
+  samples: Array<{ timestamp: number; sample: FlameSample }>,
+): Record<ChannelKey, number | null> {
+  const values = samples.map((item) => item.sample);
+  return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, channelAmplitude(values, key)])) as Record<ChannelKey, number | null>;
+}
+
+function appendRawRollingSamples(
+  accumulator: UnitAccumulator,
+  samples: FlameSample[],
+  frameAt: number,
+): void {
+  updateRawStageRanges(accumulator.rawStageRanges, samples);
+  // FlameSample has no per-point timestamp; a decoded frame's lastUpdate is the
+  // finest timestamp available and is assigned to every sample in that frame.
+  accumulator.rollingRawSamples.push(...samples.map((sample) => ({ timestamp: frameAt, sample })));
+  const windowEnd = Math.max(
+    frameAt,
+    ...accumulator.rollingRawSamples.map((item) => item.timestamp),
+  );
+  accumulator.rollingRawSamples = accumulator.rollingRawSamples.filter(
+    (item) => item.timestamp >= windowEnd - NOISE_ROLLING_WINDOW_MS,
+  );
+  const firstFrameAt = accumulator.noiseFirstFrameAt;
+  if (firstFrameAt === null || windowEnd - firstFrameAt < NOISE_ROLLING_WINDOW_MS) return;
+  accumulator.currentRolling10s = rollingFluctuationMap(accumulator.rollingRawSamples);
+  for (const key of CHANNEL_KEYS) {
+    const current = accumulator.currentRolling10s[key];
+    if (current === null) continue;
+    accumulator.maxRolling10s[key] = Math.max(accumulator.maxRolling10s[key] ?? 0, current);
+  }
+}
+
 function blankLatest(address: number): LatestUnitState {
   return { address, online: false, fault: false, sourceReady: false, syncOk: false, lastUpdate: 0, seen: false };
 }
@@ -397,7 +492,8 @@ function newAccumulator(index: number, address = index): UnitAccumulator {
     index,
     address,
     noiseSamples: [],
-    noiseRawSamples: [],
+    rollingRawSamples: [],
+    rawStageRanges: emptyRawChannelRanges(),
     interferenceSamples: { heat: [], flash: [], emc: [] },
     latest: blankLatest(address),
     stageRatios: {
@@ -415,6 +511,8 @@ function newAccumulator(index: number, address = index): UnitAccumulator {
     noiseMaxGapMs: 0,
     noiseTotalSampleCount: 0,
     noiseTotalRawSampleCount: 0,
+    currentRolling10s: emptyChannelNumberMap(),
+    maxRolling10s: emptyChannelNumberMap(),
   };
 }
 
@@ -449,6 +547,32 @@ function compactProbeSummary(samples: FlameSample[], includeFluctuation: boolean
   }).join(';');
 }
 
+function compactMetricMap(metrics: Record<ChannelKey, number | null>): string {
+  return CHANNEL_KEYS
+    .map((key) => `${key.replace('probe', 'P')}=${metrics[key] === null ? '-' : compactNumber(metrics[key]!)}`)
+    .join(',');
+}
+
+function compactRawStageSummary(
+  ranges: Record<ChannelKey, RawChannelRange>,
+  lastSamples: FlameSample[],
+): string {
+  return CHANNEL_KEYS.map((key) => {
+    const range = ranges[key];
+    if (range.count === 0) return `${key.replace('probe', 'P')}{n=0}`;
+    const last = channelValues(lastSamples, key).at(-1);
+    const fields = [
+      `n=${range.count}`,
+      `min=${compactNumber(range.min)}`,
+      `max=${compactNumber(range.max)}`,
+      `last=${compactNumber(last ?? NaN)}`,
+      `fluct=${compactNumber(rangeFluctuation(range)!)}`,
+      `abs=${compactNumber(range.absoluteMax)}`,
+    ];
+    return `${key.replace('probe', 'P')}{${fields.join(',')}}`;
+  }).join(';');
+}
+
 function finiteRatio(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -466,30 +590,28 @@ function acceptedQuality(config: WaveformAnalysisConfig): { limits: DetectionQua
 }
 
 function buildFormalNoiseMetrics(
-  normalizedSamples: FlameSample[],
-  rawSamples: FlameSample[],
+  maxRolling10s: Record<ChannelKey, number | null>,
+  rawAbsoluteMax: Record<ChannelKey, number | null>,
 ): Record<ChannelKey, WaveformChannelMetrics> {
-  const normalized = summarizeWaveformChannels(normalizedSamples);
-  const raw = summarizeWaveformChannels(rawSamples.length ? rawSamples : normalizedSamples);
   return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, {
-    // Align the formal fluctuation metric with the non-PLC bench: adaptive-baseline
-    // normalized waveform followed by (max-min)/2. Keep absolute protection on RAW.
-    fluctuation: normalized[key].fluctuation,
-    absolute: raw[key].absolute,
+    // Formal fluctuation is the maximum complete time-based RAW window. Absolute
+    // protection remains the maximum absolute RAW value over the whole stage.
+    fluctuation: maxRolling10s[key] ?? 0,
+    absolute: rawAbsoluteMax[key] ?? 0,
   }])) as Record<ChannelKey, WaveformChannelMetrics>;
 }
 
 function noiseFailureReason(
   noise: Statistics | null,
   noiseMetrics: Record<ChannelKey, WaveformChannelMetrics>,
-  noiseMetricSamples: FlameSample[],
+  maxRolling10s: Record<ChannelKey, number | null>,
   noiseKeys: ChannelKey[],
   config: WaveformAnalysisConfig,
 ): string | undefined {
   if (!noise) return undefined;
   const { limits } = acceptedQuality(config);
   for (const key of noiseKeys) {
-    if (channelValues(noiseMetricSamples, key).length === 0) continue;
+    if (maxRolling10s[key] === null) return 'NOISE_ROLLING_WINDOW_MISSING';
     const metrics = noiseMetrics[key];
     if (config.minNoiseRms > 0 && metrics.fluctuation < config.minNoiseRms) return 'NOISE_RMS_BELOW_LIMIT';
     if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return 'NOISE_RMS_EXCEEDS_LIMIT';
@@ -538,19 +660,22 @@ function publicUnitResult(
   completedStages: ReadonlySet<InterferenceStage>,
 ): WaveformAnalysisUnitResult {
   const noiseSamples = usableSamples(accumulator.noiseSamples);
-  const noiseRawSamples = usableSamples(accumulator.noiseRawSamples);
   const stageSamples = Object.fromEntries((['heat', 'flash', 'emc'] as InterferenceStage[])
     .map((stage) => [stage, usableSamples(accumulator.interferenceSamples[stage])])) as Record<InterferenceStage, FlameSample[]>;
   const interferenceSamples = [...stageSamples.heat, ...stageSamples.flash, ...stageSamples.emc];
   const noiseKeys = config.noiseProbes?.length ? config.noiseProbes : CHANNEL_KEYS.slice(0, 3);
   const noise = statistics(noiseSamples, undefined, noiseKeys);
-  const rawForAbsolute = noiseRawSamples.length ? noiseRawSamples : noiseSamples;
-  const noiseAbsolute = rawForAbsolute.length ? Number(Math.max(...rawForAbsolute.flatMap((sample) => noiseKeys.map((key) => Math.abs(Number(sample[key]))).filter(Number.isFinite))).toFixed(3)) : null;
-  const noiseMetrics = buildFormalNoiseMetrics(noiseSamples, noiseRawSamples);
+  const fullStageRawFluctuation = rangeMetricMap(accumulator.rawStageRanges, 'fluctuation');
+  const rawAbsoluteMax = rangeMetricMap(accumulator.rawStageRanges, 'absoluteMax');
+  const noiseAbsoluteValues = noiseKeys
+    .map((key) => rawAbsoluteMax[key])
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const noiseAbsolute = noiseAbsoluteValues.length ? Number(Math.max(...noiseAbsoluteValues).toFixed(3)) : null;
+  const noiseMetrics = buildFormalNoiseMetrics(accumulator.maxRolling10s, rawAbsoluteMax);
   const noiseTestComplete = noiseCompleted || phase === 'COMPLETE';
   const noiseFailure = noiseSamples.length < config.minNoiseSamples
     ? 'NOISE_SAMPLES_MISSING'
-    : noiseFailureReason(noise, noiseMetrics, noiseSamples, noiseKeys, config);
+    : noiseFailureReason(noise, noiseMetrics, accumulator.maxRolling10s, noiseKeys, config);
   const noiseTest: NoiseTestResult = {
     verdict: noiseTestComplete ? noiseFailure ? 'FAIL' : 'PASS' : 'PENDING',
     reason: !hasBatch
@@ -560,6 +685,10 @@ function publicUnitResult(
         : noiseSamples.length < config.minNoiseSamples ? 'WAITING_FOR_NOISE_SAMPLES' : 'WAITING_FOR_NOISE_WINDOW_COMPLETE',
     sampleCount: noiseSamples.length,
     metrics: noiseMetrics,
+    currentRolling10s: { ...accumulator.currentRolling10s },
+    maxRolling10s: { ...accumulator.maxRolling10s },
+    fullStageRawFluctuation,
+    rawAbsoluteMax,
   };
   const interference = noise ? statistics(interferenceSamples, noise.means, noiseKeys) : null;
   const ratioConfig = config.interferenceRatio ?? { numerator: 'probe2' as ChannelKey, denominator: 'probe3' as ChannelKey };
@@ -697,17 +826,20 @@ export class FieldWaveformAnalysis {
       .map((accumulator) => {
         const ageMs = accumulator.noiseLastFrameAt === null ? '-' : Math.max(0, timestamp - accumulator.noiseLastFrameAt);
         return `D${accumulator.index}{frames=${accumulator.noiseAcceptedFrameCount},reject=${accumulator.noiseRejectedFrameCount},`
-          + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.noiseRawSamples.length},`
+          + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.rollingRawSamples.length},`
           + `ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},`
           + `ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0},`
           + `Nlast[${compactProbeSummary(accumulator.lastNoiseSamples, true)}],`
           + `Ncum[${compactProbeSummary(accumulator.noiseSamples, true)}],`
           + `Rlast[${compactProbeSummary(accumulator.lastNoiseRawSamples, true)}],`
-          + `Rcum[${compactProbeSummary(accumulator.noiseRawSamples, true)}]}`;
+          + `Rrolling[${compactProbeSummary(accumulator.rollingRawSamples.map((item) => item.sample), true)}],`
+          + `Rcum[${compactRawStageSummary(accumulator.rawStageRanges, accumulator.lastNoiseRawSamples)}],`
+          + `currentRolling10s[${compactMetricMap(accumulator.currentRolling10s)}],`
+          + `maxRolling10s[${compactMetricMap(accumulator.maxRolling10s)}]}`;
       })
       .join(' ');
-    // Formal fluctuation uses Ncum: the detector service's adaptive-baseline
-    // normalized samples. RAW remains authoritative only for absolute-value protection.
+    // Formal fluctuation uses the maximum complete 10-second RAW window. The
+    // cumulative RAW range and absolute maximum remain diagnostic/protection data.
     this.log(`[噪声窗口][每秒] at=${compactTimestamp(timestamp)} ${devices}`);
   }
 
@@ -721,10 +853,16 @@ export class FieldWaveformAnalysis {
       const ageMs = accumulator.noiseLastFrameAt === null ? '-' : Math.max(0, timestamp - accumulator.noiseLastFrameAt);
       this.log(
         `[噪声窗口][D${accumulator.index}] frames=${accumulator.noiseAcceptedFrameCount},reject=${accumulator.noiseRejectedFrameCount},`
-        + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.noiseRawSamples.length},`
+        + `samples=${accumulator.noiseTotalSampleCount}/${accumulator.noiseSamples.length},rawSamples=${accumulator.noiseTotalRawSampleCount}/${accumulator.rollingRawSamples.length},`
         + `firstFrameAt=${compactTimestamp(accumulator.noiseFirstFrameAt)},lastFrameAt=${compactTimestamp(accumulator.noiseLastFrameAt)},`
         + `ageMs=${ageMs},maxGapMs=${accumulator.noiseMaxGapMs},ready=${accumulator.latest.sourceReady ? 1 : 0},sync=${accumulator.latest.syncOk ? 1 : 0} `
-        + `N[${compactProbeSummary(accumulator.noiseSamples, true)}] R[${compactProbeSummary(accumulator.noiseRawSamples, true)}]`,
+        + `N[${compactProbeSummary(accumulator.noiseSamples, true)}] `
+        + `R[${compactRawStageSummary(accumulator.rawStageRanges, accumulator.lastNoiseRawSamples)}] `
+        + `Rrolling[${compactProbeSummary(accumulator.rollingRawSamples.map((item) => item.sample), true)}] `
+        + `currentRolling10s[${compactMetricMap(accumulator.currentRolling10s)}] `
+        + `maxRolling10s[${compactMetricMap(accumulator.maxRolling10s)}] `
+        + `fullStageRawFluctuation[${compactMetricMap(rangeMetricMap(accumulator.rawStageRanges, 'fluctuation'))}] `
+        + `rawAbsoluteMax[${compactMetricMap(rangeMetricMap(accumulator.rawStageRanges, 'absoluteMax'))}]`,
       );
     }
   }
@@ -844,31 +982,31 @@ export class FieldWaveformAnalysis {
         continue;
       }
 
-      // The service applies the same adaptive baseline used by the non-PLC bench:
-      // baseline += 0.02 * (frameAverage - baseline), then normalized = RAW - baseline.
-      // Formal noise fluctuation uses these normalized samples; RAW is retained for
-      // absolute-value protection and diagnostics.
+      // Normalized samples remain useful for RMS/interference diagnostics, but formal
+      // noise grading always consumes the detector's original RAW samples.
       const normalizedSamples = usableSamples(unit.samples ?? []);
       const rawSamples = usableSamples(unit.rawSamples ?? []);
       const samples = normalizedSamples.length > 0 ? normalizedSamples : rawSamples;
       const capturedRawSamples = rawSamples.length > 0 ? rawSamples : samples;
-      const eventKey = `${state.timestamp}:${unit.lastUpdate}:${samples.length}:${sampleFingerprint(samples)}`;
+      const frameAt = Number.isFinite(unit.lastUpdate) && unit.lastUpdate > 0 ? unit.lastUpdate : state.timestamp;
+      const eventKey = `${frameAt}:${samples.length}:${sampleFingerprint(samples)}:${capturedRawSamples.length}:${sampleFingerprint(capturedRawSamples)}`;
       if (eventKey === accumulator.lastEventKey) continue;
       accumulator.lastEventKey = eventKey;
       if (this.capturePhase === 'NOISE') {
         accumulator.noiseSamples.push(...samples);
-        accumulator.noiseRawSamples.push(...capturedRawSamples);
         accumulator.noiseTotalSampleCount += samples.length;
         accumulator.noiseTotalRawSampleCount += capturedRawSamples.length;
-        const frameAt = Number.isFinite(unit.lastUpdate) && unit.lastUpdate > 0 ? unit.lastUpdate : state.timestamp;
         if (accumulator.noiseLastFrameAt !== null) {
           accumulator.noiseMaxGapMs = Math.max(accumulator.noiseMaxGapMs, Math.max(0, frameAt - accumulator.noiseLastFrameAt));
         }
-        accumulator.noiseFirstFrameAt ??= frameAt;
-        accumulator.noiseLastFrameAt = frameAt;
+        if (accumulator.noiseFirstFrameAt === null || frameAt < accumulator.noiseFirstFrameAt) accumulator.noiseFirstFrameAt = frameAt;
+        accumulator.noiseLastFrameAt = accumulator.noiseLastFrameAt === null
+          ? frameAt
+          : Math.max(accumulator.noiseLastFrameAt, frameAt);
         accumulator.lastNoiseSamples = samples;
         accumulator.lastNoiseRawSamples = capturedRawSamples;
         accumulator.noiseAcceptedFrameCount += 1;
+        appendRawRollingSamples(accumulator, capturedRawSamples, frameAt);
       }
       if (this.capturePhase === 'INTERFERENCE' && this.captureStage) {
         accumulator.interferenceSamples[this.captureStage].push(...samples);
@@ -880,7 +1018,6 @@ export class FieldWaveformAnalysis {
         };
       }
       accumulator.noiseSamples = accumulator.noiseSamples.slice(-2_000);
-      accumulator.noiseRawSamples = accumulator.noiseRawSamples.slice(-2_000);
       for (const stage of ['heat', 'flash', 'emc'] as InterferenceStage[]) {
         accumulator.interferenceSamples[stage] = accumulator.interferenceSamples[stage].slice(-2_000);
       }

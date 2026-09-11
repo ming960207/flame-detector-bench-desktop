@@ -17,7 +17,7 @@ const stage = {
   snr31: 0,
 };
 
-test('result log reports adaptive-baseline normalized fluctuation as formal and RAW absolute separately', () => {
+test('result log reports rolling RAW fluctuation as formal and keeps diagnostics separate', () => {
   const directory = mkdtempSync(join(tmpdir(), 'flame-result-log-'));
   try {
     const logger = new FileFieldTestResultLogger(directory);
@@ -66,8 +66,8 @@ test('result log reports adaptive-baseline normalized fluctuation as formal and 
         minConsistencyTrend: 0.75,
         quality: {
           acceptanceGrade: 'B',
-          a: { maxNoiseRms: 180, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.8, minSensitivity: 0 },
-          b: { maxNoiseRms: 200, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.75, minSensitivity: 0 },
+          a: { maxNoiseRms: 200, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.8, minSensitivity: 0 },
+          b: { maxNoiseRms: 220, maxNoiseAbsolute: 1000, maxInterferenceRatio: 0, minConsistencyTrend: 0.75, minSensitivity: 0 },
           ratios: {
             a: { snr21: { min: 0, max: 0 }, snr23: { min: 0.5, max: 1.5 }, snr31: { min: 0, max: 0 } },
             b: { snr21: { min: 0, max: 0 }, snr23: { min: 0.48, max: 1.5 }, snr31: { min: 0, max: 0 } },
@@ -116,7 +116,7 @@ test('result log reports adaptive-baseline normalized fluctuation as formal and 
             sampleCount: 600,
             metrics: {
               probe1: { fluctuation: 5, absolute: 10 },
-              probe2: { fluctuation: 215, absolute: 480 },
+              probe2: { fluctuation: 225, absolute: 480 },
               probe3: { fluctuation: 180, absolute: 450 },
               probe4: { fluctuation: 0, absolute: 0 },
             },
@@ -132,14 +132,15 @@ test('result log reports adaptive-baseline normalized fluctuation as formal and 
     const output = logger.record(fixture);
     assert.ok(output);
     const content = readFileSync(output, 'utf8');
-    assert.match(content, /噪声波动值\(自适应归一化\)/);
-    assert.match(content, /P2 归一化波动/);
-    assert.match(content, /P2归一化波动 215 > B上限 200/);
+    assert.match(content, /噪声波动值\(RAW 10秒滚动最大\)/);
+    assert.match(content, /P2 RAW滚动10秒最大波动/);
+    assert.match(content, /P2RAW滚动10秒波动 225 > B上限 220/);
     assert.match(content, /噪声绝对值\(RAW\)/);
     assert.match(content, /RMS\(归一化辅助\)/);
-    assert.match(content, /EMA 跟踪（α=0\.02）/);
-    assert.match(content, /真实 RMS 仅作为分析辅助参数，不参与合格判定/);
-    assert.doesNotMatch(content, /正式噪声判定使用有效探头 RAW 波动值/);
+    assert.match(content, /噪声滚动窗口诊断/);
+    assert.match(content, /窗口按样本时间戳滚动/);
+    assert.match(content, /归一化 RMS、全阶段 RAW 波动等仅作为分析辅助参数/);
+    assert.doesNotMatch(content, /正式噪声判定使用有效探头自适应基线归一化波动值/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

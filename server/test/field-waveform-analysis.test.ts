@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FieldWaveformAnalysis } from '../src/closure/field-waveform-analysis.js';
+import { DEFAULT_DETECTION_QUALITY_CONFIG, FieldWaveformAnalysis } from '../src/closure/field-waveform-analysis.js';
 import type { PLCProcessStatus } from '../src/process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState } from '../src/types.js';
 
@@ -109,6 +109,11 @@ test('noise capture waits 10 seconds for signal stabilization before opening', (
   assert.equal(snapshot.noiseStartedAt, 11_000);
 });
 
+test('default formal noise quality thresholds are A 200 and B 220', () => {
+  assert.equal(DEFAULT_DETECTION_QUALITY_CONFIG.a.maxNoiseRms, 200);
+  assert.equal(DEFAULT_DETECTION_QUALITY_CONFIG.b.maxNoiseRms, 220);
+});
+
 test('a ready detector contributes noise samples while another detector has no signal', () => {
   const analysis = new FieldWaveformAnalysis();
   const samples = [
@@ -136,7 +141,65 @@ test('a ready detector contributes noise samples while another detector has no s
   assert.equal(readyResult?.noiseSampleCount, samples.length);
 });
 
-test('formal noise fluctuation uses adaptive-baseline normalized samples while absolute stays RAW', () => {
+test('formal noise uses the maximum complete 10-second rolling RAW fluctuation', () => {
+  const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 1, minNoiseRms: 0 });
+  const values = [
+    [11_100, 0], [12_100, 200], [13_100, 0], [14_100, 200], [15_100, 0],
+    [16_100, 200], [17_100, 0], [18_100, 200], [19_100, 0], [20_100, 200],
+    [21_100, 0], [22_100, 300], [23_100, 310], [24_100, 320], [25_100, 330],
+    [26_100, 340], [27_100, 350], [28_100, 360], [29_100, 370], [30_100, 380],
+    [31_100, 390], [32_100, 400],
+  ] as const;
+
+  analysis.observeProcess(status(1_000));
+  analysis.observeProcess(status(11_000));
+  for (const [timestamp, rawValue] of values) {
+    analysis.observeDetectors(detectorState(timestamp, detectorUnit(
+      timestamp,
+      [{ probe1: 0, probe2: 0, probe3: 0 }],
+      [{ probe1: 0, probe2: rawValue, probe3: rawValue }],
+    )));
+  }
+  closeNoiseWindow(analysis, 34_000);
+
+  const noise = analysis.snapshot().units[0]!.noiseTest;
+  assert.equal(noise.metrics.probe2.fluctuation, 195);
+  assert.equal(noise.metrics.probe3.fluctuation, 195);
+  assert.equal(noise.metrics.probe2.absolute, 400);
+  assert.equal(noise.currentRolling10s?.probe2, 50);
+  assert.equal(noise.maxRolling10s?.probe2, 195);
+  assert.equal(noise.fullStageRawFluctuation?.probe2, 200);
+  assert.equal(noise.rawAbsoluteMax?.probe2, 400);
+});
+
+test('rolling RAW samples expire by timestamp rather than point count', () => {
+  const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 1, minNoiseRms: 0 });
+  const values = [
+    [11_100, 0],
+    [11_200, 200],
+    [30_900, 10],
+    [31_300, 20],
+  ] as const;
+
+  analysis.observeProcess(status(1_000));
+  analysis.observeProcess(status(11_000));
+  for (const [timestamp, rawValue] of values) {
+    analysis.observeDetectors(detectorState(timestamp, detectorUnit(
+      timestamp,
+      [{ probe1: 0, probe2: 0, probe3: 0 }],
+      [{ probe1: 0, probe2: rawValue, probe3: rawValue }],
+    )));
+  }
+  closeNoiseWindow(analysis, 32_000);
+
+  const noise = analysis.snapshot().units[0]!.noiseTest;
+  assert.equal(noise.currentRolling10s?.probe2, 5);
+  assert.equal(noise.maxRolling10s?.probe2, 5);
+  assert.equal(noise.fullStageRawFluctuation?.probe2, 100);
+  assert.equal(noise.rawAbsoluteMax?.probe2, 200);
+});
+
+test('formal noise fluctuation uses rolling RAW samples while absolute stays RAW', () => {
   const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 4, minNoiseRms: 0 });
   const normalized = [
     { probe1: 0, probe2: -50, probe3: -40 },
@@ -145,22 +208,28 @@ test('formal noise fluctuation uses adaptive-baseline normalized samples while a
     { probe1: 0, probe2: 50, probe3: 40 },
   ];
   const rawWithSlowDrift = [
-    { probe1: 0, probe2: 0, probe3: 20 },
     { probe1: 0, probe2: 100, probe3: 100 },
-    { probe1: 0, probe2: 400, probe3: 420 },
-    { probe1: 0, probe2: 500, probe3: 500 },
+    { probe1: 0, probe2: 120, probe3: 120 },
+    { probe1: 0, probe2: 100, probe3: 100 },
+    { probe1: 0, probe2: 120, probe3: 120 },
   ];
+  const rawWithSecondBaseline = rawWithSlowDrift.map((sample) => ({
+    ...sample,
+    probe2: sample.probe2 + 280,
+    probe3: sample.probe3 + 280,
+  }));
 
   analysis.observeProcess(status(1_000));
   analysis.observeProcess(status(11_000));
   analysis.observeDetectors(detectorState(11_100, detectorUnit(11_100, normalized, rawWithSlowDrift)));
-  closeNoiseWindow(analysis, 12_000);
+  analysis.observeDetectors(detectorState(21_100, detectorUnit(21_100, normalized, rawWithSecondBaseline)));
+  closeNoiseWindow(analysis, 22_000);
 
   const result = analysis.snapshot().units[0];
-  assert.equal(result.noiseTest.metrics.probe2.fluctuation, 50);
-  assert.equal(result.noiseTest.metrics.probe3.fluctuation, 40);
-  assert.equal(result.noiseTest.metrics.probe2.absolute, 500);
-  assert.equal(result.noiseTest.metrics.probe3.absolute, 500);
+  assert.equal(result.noiseTest.metrics.probe2.fluctuation, 150);
+  assert.equal(result.noiseTest.metrics.probe3.fluctuation, 150);
+  assert.equal(result.noiseTest.metrics.probe2.absolute, 400);
+  assert.equal(result.noiseTest.metrics.probe3.absolute, 400);
   assert.equal(result.noiseTest.verdict, 'PASS');
 });
 
@@ -174,24 +243,25 @@ test('RAW absolute-value protection still fails a normalized-stable waveform', (
   ];
   const rawHighAbsolute = [
     { probe1: 0, probe2: 1_050, probe3: 100 },
-    { probe1: 0, probe2: 1_100, probe3: 120 },
-    { probe1: 0, probe2: 1_150, probe3: 140 },
-    { probe1: 0, probe2: 1_200, probe3: 160 },
+    { probe1: 0, probe2: 1_130, probe3: 180 },
+    { probe1: 0, probe2: 1_050, probe3: 100 },
+    { probe1: 0, probe2: 1_130, probe3: 180 },
   ];
 
   analysis.observeProcess(status(1_000));
   analysis.observeProcess(status(11_000));
   analysis.observeDetectors(detectorState(11_100, detectorUnit(11_100, normalized, rawHighAbsolute)));
-  closeNoiseWindow(analysis, 12_000);
+  analysis.observeDetectors(detectorState(21_100, detectorUnit(21_100, normalized, rawHighAbsolute)));
+  closeNoiseWindow(analysis, 22_000);
 
   const result = analysis.snapshot().units[0];
   assert.equal(result.noiseTest.metrics.probe2.fluctuation, 40);
-  assert.equal(result.noiseTest.metrics.probe2.absolute, 1_200);
+  assert.equal(result.noiseTest.metrics.probe2.absolute, 1_130);
   assert.equal(result.noiseTest.verdict, 'FAIL');
   assert.equal(result.noiseTest.reason, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT');
 });
 
-test('noise window diagnostics log boundaries, gaps, and normalized/raw probe summaries', () => {
+test('noise window diagnostics log boundaries, gaps, and rolling/raw probe summaries', () => {
   const logs: string[] = [];
   const analysis = new FieldWaveformAnalysis(undefined, (message) => logs.push(message));
   const samples = [
@@ -211,6 +281,7 @@ test('noise window diagnostics log boundaries, gaps, and normalized/raw probe su
 
   assert.ok(logs.some((line) => line.includes('[噪声窗口] 开始') && line.includes('plcOpenAt=')));
   assert.ok(logs.some((line) => line.includes('[噪声窗口][每秒]') && line.includes('D1') && line.includes('Ncum[') && line.includes('Rcum[')));
+  assert.ok(logs.some((line) => line.includes('Rrolling[') && line.includes('currentRolling10s[') && line.includes('maxRolling10s[')));
   assert.ok(logs.some((line) => line.includes('[噪声窗口] 结束') && line.includes('durationMs=2000')));
   assert.ok(logs.some((line) => line.includes('[噪声窗口][D1]')
     && line.includes('frames=2')
