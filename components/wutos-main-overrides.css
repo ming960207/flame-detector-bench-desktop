@@ -135,6 +135,34 @@
 .wutos-detail-content { position: relative; z-index: 1; padding: 14px 18px 18px; }
 .wutos-detail-content .detector-workbench { margin: 0; max-width: none; }
 
+.wutos-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wutos-detail-header-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.wutos-detail-header-actions .wutos-detail-release-button {
+  padding: 7px 10px;
+  color: #b9eff7;
+  border: 1px solid rgba(56, 215, 231, .55);
+  background: rgba(7, 38, 53, .86);
+  font: 700 11px "Microsoft YaHei UI", sans-serif;
+  cursor: pointer;
+}
+
+.wutos-detail-header-actions .wutos-detail-release-button:hover {
+  color: #fff;
+  border-color: #43dced;
+  box-shadow: 0 0 9px rgba(67, 220, 237, .24);
+}
+
 .wutos-detail-product,
 .wutos-detail-production {
   min-height: 210px;

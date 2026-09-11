@@ -8,6 +8,7 @@ import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from '.
 import { mountTestProgramRoutes, type EmbeddedTestProgramRuntime } from './test-program/test-program-routes.js';
 import type { TestProgramArchive } from './test-program/test-program-types.js';
 import type { ConnectionStatus } from './types.js';
+import { SoftwareReleaseService } from './software-release.js';
 
 export interface UnifiedAuxiliaryRuntime {
   readonly testProgram: EmbeddedTestProgramRuntime;
@@ -52,6 +53,7 @@ function explicitEnvMQTTOverrides(): Record<string, unknown> {
 
 export async function startUnifiedAuxiliaryServices(fieldRuntime: ProductAwareFieldStatusRuntime): Promise<UnifiedAuxiliaryRuntime> {
   const backendUrl = localBackendUrl();
+  const softwareRelease = new SoftwareReleaseService();
 
   // The observer has always expected this endpoint, but the old field server
   // never exposed it. Return only the plan reference data it actually needs;
@@ -64,6 +66,60 @@ export async function startUnifiedAuxiliaryServices(fieldRuntime: ProductAwareFi
         lastUpdated: store.lastUpdated,
       } : null,
     });
+  });
+
+  fieldRuntime.app.get('/api/software/version', async (_req, res) => {
+    try {
+      return res.json(await softwareRelease.snapshot());
+    } catch (error) {
+      return res.status(500).json({ code: 'SOFTWARE_VERSION_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  fieldRuntime.app.post('/api/software/update', requireDesktopMutation, async (_req, res) => {
+    if (fieldRuntime.snapshot().summary.productSelectionLocked) {
+      return res.status(409).json({ code: 'SOFTWARE_UPDATE_LOCKED_DURING_PROCESS' });
+    }
+    try {
+      return res.status(202).json(await softwareRelease.startUpdate());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === 'SOFTWARE_OPERATION_BUSY' ? 409 : message.includes('ENOENT') ? 501 : 500;
+      return res.status(status).json({ code: 'SOFTWARE_UPDATE_START_FAILED', error: message });
+    }
+  });
+
+  fieldRuntime.app.post('/api/software/rollback', requireDesktopMutation, async (req, res) => {
+    if (fieldRuntime.snapshot().summary.productSelectionLocked) {
+      return res.status(409).json({ code: 'SOFTWARE_ROLLBACK_LOCKED_DURING_PROCESS' });
+    }
+    try {
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body as Record<string, unknown>
+        : {};
+      return res.status(202).json(await softwareRelease.startRollback(body.commit));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === 'SOFTWARE_OPERATION_BUSY' ? 409 : message === 'SOFTWARE_ROLLBACK_COMMIT_INVALID' ? 400 : message.includes('ENOENT') ? 501 : 500;
+      return res.status(status).json({ code: 'SOFTWARE_ROLLBACK_START_FAILED', error: message });
+    }
+  });
+
+  fieldRuntime.app.post('/api/software/logs/submit', requireDesktopMutation, async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body as Record<string, unknown>
+        : {};
+      return res.status(202).json(await softwareRelease.submitLogs({
+        issueReference: body.issueReference,
+        issueNote: body.issueNote,
+        batchId: body.batchId,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === 'SOFTWARE_OPERATION_BUSY' ? 409 : message.includes('ENOENT') ? 501 : 500;
+      return res.status(status).json({ code: 'SOFTWARE_LOG_SUBMIT_FAILED', error: message });
+    }
   });
 
   const testProgram = mountTestProgramRoutes(fieldRuntime.app, {

@@ -1,6 +1,8 @@
 param(
     [switch]$Automatic,
-    [string]$BatchId = ''
+    [string]$BatchId = '',
+    [string]$IssueReference = '',
+    [string]$IssueNote = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,7 +124,9 @@ $manifest = @(
     "Branch: $branch",
     "Source commit: $head",
     "Git author: $deviceGitName <$deviceGitEmail>",
-    "File count: $copied"
+    "File count: $copied",
+    "Issue reference: $(if ($IssueReference) { $IssueReference } else { '-' })",
+    "Issue note: $(if ($IssueNote) { $IssueNote } else { '-' })"
 )
 Set-Content -LiteralPath (Join-Path $archivePath 'manifest.txt') -Value $manifest -Encoding ASCII
 Write-Host ''

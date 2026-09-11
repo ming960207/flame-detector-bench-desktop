@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Info, X } from 'lucide-react';
 import { hasActivePLCProcessAlarm, type PLCProcessStatus } from '../server/src/process-status';
 import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdict';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
@@ -14,6 +14,7 @@ import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
 import { LabelPrinterPanel } from './LabelPrinterPanel';
 import { TestObserverPanel } from './TestObserverPanel';
+import { SoftwareReleasePanel } from './SoftwareReleasePanel';
 import { labelPrinterRuntime } from './label-printer-runtime';
 import { WutosDashboard } from './WutosDashboard';
 import './field-process-status.css';
@@ -83,6 +84,7 @@ export function FieldProcessStatusApp() {
   const [notice, setNotice] = useState('PLC 未接入：工序监测处于待同步状态。');
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('device');
+  const [softwareReleaseOpen, setSoftwareReleaseOpen] = useState(false);
 
   const applySummary = useCallback((summary: FieldSummaryPayload) => {
     setStatus(summary.process ?? null);
@@ -253,7 +255,10 @@ export function FieldProcessStatusApp() {
             <h2 id="wutos-detail-title">检测台详情与生产配置</h2>
             <p>主屏仅保留操作员需要的实时状态；波形、产品配置、测试监听、检验记录和生产配置统一在此查看。</p>
           </div>
-          <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
+          <div className="wutos-detail-header-actions">
+            <button type="button" className="wutos-detail-release-button" onClick={() => setSoftwareReleaseOpen(true)}><Info size={15} />关于 / 版本</button>
+            <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
+          </div>
         </header>
 
         <nav className="wutos-detail-tabs" aria-label="详情页面">
@@ -290,6 +295,7 @@ export function FieldProcessStatusApp() {
           </div>}
         </div>
       </section>
+      {softwareReleaseOpen && <SoftwareReleasePanel backendHttpUrl={HTTP} onClose={() => setSoftwareReleaseOpen(false)} />}
     </div>}
   </>;
 }
