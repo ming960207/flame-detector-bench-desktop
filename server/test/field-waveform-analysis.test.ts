@@ -47,7 +47,11 @@ function status(timestamp: number): PLCProcessStatus {
   };
 }
 
-function detectorUnit(lastUpdate: number, samples: FlameDetectorUnitState['samples']): FlameDetectorUnitState {
+function detectorUnit(
+  lastUpdate: number,
+  samples: FlameDetectorUnitState['samples'],
+  rawSamples: FlameDetectorUnitState['rawSamples'] = samples,
+): FlameDetectorUnitState {
   return {
     index: 1,
     address: 1,
@@ -70,15 +74,24 @@ function detectorUnit(lastUpdate: number, samples: FlameDetectorUnitState['sampl
     probeCount: 2,
     lastUpdate,
     samples,
-    rawSamples: samples,
+    rawSamples,
     historySamples: samples,
-    rawHistorySamples: samples,
+    rawHistorySamples: rawSamples,
     historySampleTotal: samples?.length ?? 0,
   };
 }
 
 function detectorState(timestamp: number, unit: FlameDetectorUnitState): FlameDetectorState {
   return { units: [unit], onlineCount: 1, fireCount: 0, faultCount: 0, timestamp };
+}
+
+function closeNoiseWindow(analysis: FieldWaveformAnalysis, timestamp: number): void {
+  const end = status(timestamp);
+  end.io!.internal!.noiseCaptureWindow = false;
+  end.io!.internal!.signalStabilizing = false;
+  end.io!.steps!.stepM10_4 = true;
+  end.heatSubstage = 'HEAT_INTERFERENCE';
+  analysis.observeProcess(end);
 }
 
 test('noise capture waits 10 seconds for signal stabilization before opening', () => {
@@ -123,7 +136,62 @@ test('a ready detector contributes noise samples while another detector has no s
   assert.equal(readyResult?.noiseSampleCount, samples.length);
 });
 
-test('noise window diagnostics log boundaries, gaps, and compact probe summaries', () => {
+test('formal noise fluctuation uses adaptive-baseline normalized samples while absolute stays RAW', () => {
+  const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 4, minNoiseRms: 0 });
+  const normalized = [
+    { probe1: 0, probe2: -50, probe3: -40 },
+    { probe1: 0, probe2: 50, probe3: 40 },
+    { probe1: 0, probe2: -50, probe3: -40 },
+    { probe1: 0, probe2: 50, probe3: 40 },
+  ];
+  const rawWithSlowDrift = [
+    { probe1: 0, probe2: 0, probe3: 20 },
+    { probe1: 0, probe2: 100, probe3: 100 },
+    { probe1: 0, probe2: 400, probe3: 420 },
+    { probe1: 0, probe2: 500, probe3: 500 },
+  ];
+
+  analysis.observeProcess(status(1_000));
+  analysis.observeProcess(status(11_000));
+  analysis.observeDetectors(detectorState(11_100, detectorUnit(11_100, normalized, rawWithSlowDrift)));
+  closeNoiseWindow(analysis, 12_000);
+
+  const result = analysis.snapshot().units[0];
+  assert.equal(result.noiseTest.metrics.probe2.fluctuation, 50);
+  assert.equal(result.noiseTest.metrics.probe3.fluctuation, 40);
+  assert.equal(result.noiseTest.metrics.probe2.absolute, 500);
+  assert.equal(result.noiseTest.metrics.probe3.absolute, 500);
+  assert.equal(result.noiseTest.verdict, 'PASS');
+});
+
+test('RAW absolute-value protection still fails a normalized-stable waveform', () => {
+  const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 4, minNoiseRms: 0 });
+  const normalized = [
+    { probe1: 0, probe2: -40, probe3: -40 },
+    { probe1: 0, probe2: 40, probe3: 40 },
+    { probe1: 0, probe2: -40, probe3: -40 },
+    { probe1: 0, probe2: 40, probe3: 40 },
+  ];
+  const rawHighAbsolute = [
+    { probe1: 0, probe2: 1_050, probe3: 100 },
+    { probe1: 0, probe2: 1_100, probe3: 120 },
+    { probe1: 0, probe2: 1_150, probe3: 140 },
+    { probe1: 0, probe2: 1_200, probe3: 160 },
+  ];
+
+  analysis.observeProcess(status(1_000));
+  analysis.observeProcess(status(11_000));
+  analysis.observeDetectors(detectorState(11_100, detectorUnit(11_100, normalized, rawHighAbsolute)));
+  closeNoiseWindow(analysis, 12_000);
+
+  const result = analysis.snapshot().units[0];
+  assert.equal(result.noiseTest.metrics.probe2.fluctuation, 40);
+  assert.equal(result.noiseTest.metrics.probe2.absolute, 1_200);
+  assert.equal(result.noiseTest.verdict, 'FAIL');
+  assert.equal(result.noiseTest.reason, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT');
+});
+
+test('noise window diagnostics log boundaries, gaps, and normalized/raw probe summaries', () => {
   const logs: string[] = [];
   const analysis = new FieldWaveformAnalysis(undefined, (message) => logs.push(message));
   const samples = [
@@ -139,15 +207,10 @@ test('noise window diagnostics log boundaries, gaps, and compact probe summaries
     { probe1: 15, probe2: 25, probe3: 35 },
   ])));
 
-  const end = status(13_000);
-  end.io!.internal!.noiseCaptureWindow = false;
-  end.io!.internal!.signalStabilizing = false;
-  end.io!.steps!.stepM10_4 = true;
-  end.heatSubstage = 'HEAT_INTERFERENCE';
-  analysis.observeProcess(end);
+  closeNoiseWindow(analysis, 13_000);
 
   assert.ok(logs.some((line) => line.includes('[噪声窗口] 开始') && line.includes('plcOpenAt=')));
-  assert.ok(logs.some((line) => line.includes('[噪声窗口][每秒]') && line.includes('D1')));
+  assert.ok(logs.some((line) => line.includes('[噪声窗口][每秒]') && line.includes('D1') && line.includes('Ncum[') && line.includes('Rcum[')));
   assert.ok(logs.some((line) => line.includes('[噪声窗口] 结束') && line.includes('durationMs=2000')));
   assert.ok(logs.some((line) => line.includes('[噪声窗口][D1]')
     && line.includes('frames=2')
