@@ -296,12 +296,12 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
               <label style={labelStyle}>表单编号<input disabled={locked} value={recordConfig.formNumber} onChange={(e) => setRecordConfig({ ...recordConfig, formNumber: e.target.value })} style={inputStyle} /></label>
               <label style={labelStyle}>版本<input disabled={locked} value={recordConfig.formVersion} onChange={(e) => setRecordConfig({ ...recordConfig, formVersion: e.target.value })} style={inputStyle} /></label>
             </div>
-            <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>本配置在正式批次启动时冻结；完成后自动保存结构化 JSON、完整原始归档、打印 HTML 与 Word 兼容 `.doc`，正式记录同时进入 MQTT 可靠上传队列。</p>
+            <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>本配置在正式批次启动时冻结；完成后自动保存结构化 JSON、完整原始归档与 Word 兼容表格 `.doc`，正式记录同时进入 MQTT 可靠上传队列。</p>
           </section>
 
           <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-              <div><b style={{ color: palette.title, fontSize: 13 }}>最近生产检验记录</b><div style={{ marginTop: 3, color: palette.dim, fontSize: 10 }}>最近 20 批 · 自动归档 · 可查看打印或导出 Word</div></div>
+              <div><b style={{ color: palette.title, fontSize: 13 }}>最近生产检验记录</b><div style={{ marginTop: 3, color: palette.dim, fontSize: 10 }}>最近 20 批 · 自动归档 · 可查看表格预览或导出 `.doc`</div></div>
               <button type="button" disabled={recordsLoading} onClick={() => void loadRecords()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '6px 9px', cursor: recordsLoading ? 'wait' : 'pointer', opacity: recordsLoading ? .5 : 1, font: 'inherit', fontSize: 10 }}><RefreshCw size={12} />刷新</button>
             </div>
             <div style={{ marginTop: 10, borderTop: `1px solid ${palette.borderSoft}` }}>
@@ -313,7 +313,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
                 <b style={{ color: record.conclusion === '合格' ? palette.pass : palette.fail }}>{record.conclusion}</b>
                 <div style={{ display: 'flex', gap: 5 }}>
                   <button type="button" onClick={() => openRecord(record.batchId)} title="查看/打印记录" style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.cyan, cursor: 'pointer' }}><ExternalLink size={12} /></button>
-                  <a href={`${backendHttpUrl}/api/production-records/${encodeURIComponent(record.batchId)}/doc`} title="导出 Word 兼容记录" style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, textDecoration: 'none' }}><Download size={12} /></a>
+                  <a href={`${backendHttpUrl}/api/production-records/${encodeURIComponent(record.batchId)}/doc`} title="导出 Word 表格 .doc" style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, textDecoration: 'none' }}><Download size={12} /></a>
                 </div>
               </div>)}
             </div>

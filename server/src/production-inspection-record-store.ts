@@ -233,8 +233,13 @@ function indicatorVisionCell(value: IndicatorVisionInspectionValue | undefined, 
     captureCount: 0,
     phases: [],
   };
-  const detail = `绿灯 ${item.runningGreen.status} · 红灯 ${item.fireRed.status} · 黄灯 ${item.faultYellow.status} · 抓拍 ${item.captureCount} 张`;
-  return `${statusCell(item.status)}<small class="vision-detail">${escapeHtml(detail)}</small>`;
+  const detail = [
+    `绿灯：${escapeHtml(item.runningGreen.status)}`,
+    `红灯：${escapeHtml(item.fireRed.status)}`,
+    `黄灯：${escapeHtml(item.faultYellow.status)}`,
+    `抓拍：${escapeHtml(item.captureCount)} 张`,
+  ].join('<br>');
+  return `${statusCell(item.status)}<br><span class="vision-detail">${detail}</span>`;
 }
 
 function combinedStatus(statuses: InspectionItemStatus[]): InspectionItemStatus {
@@ -246,17 +251,28 @@ function combinedStatus(statuses: InspectionItemStatus[]): InspectionItemStatus 
 
 function productDefaultSettingsCell(product: ProductionInspectionProductResult): string {
   const status = combinedStatus([product.softwareVersion.status, product.productInfo.status]);
-  const detail = `版本 ${product.softwareVersion.value ?? '-'} · 探头 ${product.productInfo.value.probeCount ?? '-'} · 灵敏度 ${product.productInfo.value.sensitivityLevel ?? '-'}`;
-  return `${statusCell(status)}<small class="vision-detail">${escapeHtml(detail)}</small>`;
+  const detail = [
+    `版本：${escapeHtml(product.softwareVersion.value ?? '-')}`,
+    `探头：${escapeHtml(product.productInfo.value.probeCount ?? '-')}`,
+    `灵敏度：${escapeHtml(product.productInfo.value.sensitivityLevel ?? '-')}`,
+  ].join('<br>');
+  return `${statusCell(status)}<br><span class="vision-detail">${detail}</span>`;
 }
 
-export function productionInspectionRecordHtml(record: ProductionInspectionRecord): string {
+/**
+ * 生成参考 WUTOS/IMS-JL836 格式的 Word 兼容表格文档。
+ *
+ * 文档内容是带 Word 命名空间的 HTML，使用 .doc 扩展名后可由 Word/WPS
+ * 直接打开，同时保留浏览器预览和打印能力。表格列数跟随当前真实槽位数，
+ * 当前检测台固定为 6 个槽位。
+ */
+export function productionInspectionRecordDocument(record: ProductionInspectionRecord): string {
   const itemRows: Array<[string, (product: ProductionInspectionProductResult) => string]> = [
     ['工作电流检验', (p) => statusCell(p.workCurrent.status)],
     ['火警动作检验', (p) => statusCell(p.fireAction.status)],
     ['故障动作检验', (p) => statusCell(p.faultAction.status)],
     ['LED 显示检验', (p) => indicatorVisionCell(p.indicatorVision, p.ledDisplay)],
-    ['幅值测试', (p) => `${escapeHtml(p.amplitude.values.join('，') || '-')} / ${statusCell(p.amplitude.status)}`],
+    ['幅值测试', (p) => `${escapeHtml(p.amplitude.values.join('，') || '-')}<br>${statusCell(p.amplitude.status)}`],
     ['产品默认设置', productDefaultSettingsCell],
     ['抗干扰测试', (p) => statusCell(p.interferenceResistance.status)],
     ['电源波动试验', (p) => statusCell(p.powerFluctuation.status)],
@@ -264,22 +280,197 @@ export function productionInspectionRecordHtml(record: ProductionInspectionRecor
     ['低温运行试验', (p) => statusCell(p.lowTemp.status)],
   ];
 
-  const productHeaders = record.products.map((product) => `<th>产品${product.slot}</th>`).join('');
+  const productCount = record.products.length;
+  const productColumnWidth = (60 / Math.max(productCount, 1)).toFixed(2);
+  const productHeaders = record.products.map((product) => `<th style="width: ${productColumnWidth}%">${product.slot}</th>`).join('');
   const codeCells = record.products.map((product) => `<td>${escapeHtml(product.productCode ?? '未生成')}</td>`).join('');
-  const rows = itemRows.map(([label, render], index) => `<tr><td>${index + 1}</td><td class="item">${escapeHtml(label)}</td>${record.products.map((product) => `<td>${render(product)}</td>`).join('')}</tr>`).join('\n');
+  const rows = itemRows.map(([label, render], index) => {
+    const categoryCell = index === 0
+      ? `<td rowspan="${itemRows.length}" class="v-text">生产检验项目</td>`
+      : '';
+    return `<tr>${categoryCell}<td class="index">${index + 1}</td><td class="item">${escapeHtml(label)}</td>${record.products.map((product) => `<td>${render(product)}</td>`).join('')}</tr>`;
+  }).join('\n');
+  const totalColumns = productCount + 3;
 
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(record.productModel)}生产检验记录</title>
+  return `\ufeff<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(record.productModel)} 点型红外火焰探测器检验记录表</title>
+<!--[if gte mso 9]>
+<xml>
+ <w:WordDocument>
+  <w:View>Print</w:View>
+  <w:Zoom>100</w:Zoom>
+  <w:DoNotOptimizeForBrowser/>
+ </w:WordDocument>
+</xml>
+<![endif]-->
 <style>
-body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111;margin:24px;background:#fff}h1{text-align:center;font-size:22px;margin:0 0 14px}.meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:6px 0}.meta span{white-space:nowrap}table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}th,td{border:1px solid #222;padding:7px 5px;text-align:center;vertical-align:middle}.item{text-align:left;font-weight:600}th:first-child,td:first-child{width:38px}th:nth-child(2),td:nth-child(2){width:175px}.pass{font-weight:700}.fail{font-weight:700;text-decoration:underline}.not-tested{font-weight:700;text-decoration:underline}.not-applicable{font-weight:600}.vision-detail{display:block;margin-top:3px;color:#555;font-size:10px;line-height:1.35}.footer{display:grid;grid-template-columns:2fr 1fr 1fr;margin-top:12px;border:1px solid #222}.footer>div{padding:10px;border-right:1px solid #222}.footer>div:last-child{border-right:0}@media print{body{margin:8mm}.no-print{display:none}}
-</style></head><body>
-<h1>点型红外火焰探测器生产检验记录</h1>
-<div class="meta"><span>产品型号：${escapeHtml(record.productModel)}</span><span>检验数量：${record.quantity}</span><span>检验标准：${escapeHtml(record.standard)}</span></div>
-<div class="meta"><span>表单编号：${escapeHtml(record.formNumber)}</span><span>版本：${escapeHtml(record.formVersion)}</span><span>批次：${escapeHtml(record.batchId)}</span></div>
-<table><thead><tr><th>编号</th><th>检验内容</th>${productHeaders}</tr><tr><th></th><th>产品编号</th>${codeCells}</tr></thead><tbody>${rows}</tbody></table>
-<div class="footer"><div>综合结论：${statusCell(record.conclusion)}</div><div>检验员：${escapeHtml(record.inspector || '-')}</div><div>日期：${dateText(record.productionDate)}</div></div>
-</body></html>`;
+@page {
+  size: 841.9pt 595.3pt;
+  mso-page-orientation: landscape;
+  margin: 19.85pt 34pt 19.85pt 34pt;
+  mso-header-margin: 0pt;
+  mso-footer-margin: 0pt;
 }
+@page Section1 {
+  size: 841.9pt 595.3pt;
+  mso-page-orientation: landscape;
+  margin: 19.85pt 34pt 19.85pt 34pt;
+  mso-header-margin: 0pt;
+  mso-footer-margin: 0pt;
+  mso-paper-source: 0;
+}
+div.Section1 { page: Section1; }
+body {
+  font-family: 'SimSun', '宋体', serif;
+  font-size: 8.5pt;
+  color: #000;
+  margin: 0;
+  padding: 0;
+  line-height: 1.1;
+}
+p { margin: 0; padding: 0; }
+.page-container { width: 100%; page-break-inside: avoid; }
+.doc-title {
+  text-align: center;
+  font-size: 14pt;
+  font-family: 'SimSun', '宋体', serif;
+  font-weight: normal;
+  letter-spacing: 1.5pt;
+  margin: 0 0 3pt 0;
+  line-height: 1.2;
+}
+.meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2pt;
+  font-size: 8.5pt;
+  table-layout: fixed;
+}
+.meta-table td {
+  border: 0;
+  padding: 1pt 3pt;
+  white-space: nowrap;
+}
+.w-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5pt solid #000;
+  text-align: center;
+  font-size: 8.5pt;
+  table-layout: fixed;
+  mso-padding-alt: 1.5pt 1pt 1.5pt 1pt;
+}
+.w-table td, .w-table th {
+  border: 0.75pt solid #000;
+  padding: 2pt 1.5pt;
+  height: 20pt;
+  vertical-align: middle;
+  word-break: break-all;
+  overflow: hidden;
+}
+.w-table th { font-weight: normal; }
+.w-table .index { width: 5%; }
+.w-table .item { width: 27%; text-align: left; padding-left: 4pt; }
+.sample-code-label { text-align: left; padding-left: 4pt !important; }
+.t-left { text-align: left !important; padding-left: 4pt !important; }
+.t-right { text-align: right !important; padding-right: 4pt !important; }
+.no-wrap { white-space: nowrap !important; }
+.v-text {
+  writing-mode: vertical-lr;
+  mso-direction-alt: auto;
+  letter-spacing: 1pt;
+  width: 8%;
+  font-size: 8.5pt;
+  padding: 1pt 0;
+}
+.pass { font-weight: 700; }
+.fail { font-weight: 700; text-decoration: underline; }
+.not-tested { font-weight: 700; text-decoration: underline; }
+.not-applicable { font-weight: 600; }
+.vision-detail {
+  color: #444;
+  font-size: 7.5pt;
+  line-height: 1.15;
+  white-space: normal;
+}
+.record-note {
+  text-align: left;
+  padding: 3pt 6pt !important;
+  height: 24pt !important;
+  line-height: 1.25;
+}
+@media screen {
+  body { margin: 24px; background: #fff; }
+  .w-table { font-size: 12px; }
+  .w-table td, .w-table th { padding: 7px 5px; height: 28px; }
+  .vision-detail { font-size: 10px; }
+}
+@media print { body { margin: 8mm; } }
+</style>
+</head>
+<body>
+<div class="Section1">
+<div class="page-container">
+  <div class="doc-title">${escapeHtml(record.productModel)}&nbsp;&nbsp;点型红外火焰探测器检验记录表</div>
+
+  <table class="meta-table">
+    <tr>
+      <td style="width: 25%;" class="t-left">表单编号：${escapeHtml(record.formNumber)}</td>
+      <td style="width: 25%;" class="t-left">版本：${escapeHtml(record.formVersion)}</td>
+      <td style="width: 25%;" class="t-left">检验数量：${escapeHtml(record.quantity)} 台</td>
+      <td style="width: 25%;" class="t-right">生产日期：${dateText(record.productionDate)}</td>
+    </tr>
+    <tr>
+      <td colspan="2" class="t-left">检验依据：${escapeHtml(record.standard)}</td>
+      <td class="t-left">批次：${escapeHtml(record.batchId)}</td>
+      <td class="t-right">检验员：${escapeHtml(record.inspector || '-')}</td>
+    </tr>
+  </table>
+
+  <table class="w-table">
+    <colgroup>
+      <col style="width: 8%;">
+      <col style="width: 5%;">
+      <col style="width: 27%;">
+      ${record.products.map(() => `<col style="width: ${productColumnWidth}%;">`).join('')}
+    </colgroup>
+    <thead>
+      <tr>
+        <th colspan="3" style="height: 22pt;">编号<br>检验内容</th>
+        ${productHeaders}
+      </tr>
+      <tr>
+        <th></th>
+        <th></th>
+        <th class="sample-code-label">产品编号</th>
+        ${codeCells}
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+      <tr>
+        <td colspan="${totalColumns}" class="t-right no-wrap" style="height: 23pt;">
+          检验结论：${statusCell(record.conclusion)}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;检验员：${escapeHtml(record.inspector || '-')} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;日期：${dateText(record.productionDate)}
+        </td>
+      </tr>
+      <tr>
+        <td colspan="${totalColumns}" class="record-note">
+          不合格现象记录：无。摄像头视觉证据按槽位记录运行绿灯、火警红灯、故障黄灯状态；LED 显示检验结果以照片判定结果为准。
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</div>
+</body>
+</html>`;
+}
+
+/** @deprecated 使用 productionInspectionRecordDocument，保留用于浏览器预览调用方。 */
+export const productionInspectionRecordHtml = productionInspectionRecordDocument;
 
 function safeName(value: string): string {
   return value.replace(/[^0-9A-Za-z._-]/g, '_').slice(0, 120) || 'batch';
@@ -289,19 +480,20 @@ export class ProductionInspectionRecordStore {
   constructor(private readonly directory = join(process.env.APP_DATA_DIR || process.cwd(), 'production-records')) {}
 
   private jsonPath(batchId: string): string { return join(this.directory, `${safeName(batchId)}.json`); }
-  private htmlPath(batchId: string): string { return join(this.directory, `${safeName(batchId)}.html`); }
+  private documentPath(batchId: string): string { return join(this.directory, `${safeName(batchId)}.doc`); }
+  private legacyHtmlPath(batchId: string): string { return join(this.directory, `${safeName(batchId)}.html`); }
   private latestPath(): string { return join(this.directory, 'latest.json'); }
 
-  async save(record: ProductionInspectionRecord): Promise<{ jsonPath: string; htmlPath: string }> {
+  async save(record: ProductionInspectionRecord): Promise<{ jsonPath: string; documentPath: string }> {
     await fs.mkdir(this.directory, { recursive: true });
     const jsonPath = this.jsonPath(record.batchId);
-    const htmlPath = this.htmlPath(record.batchId);
+    const documentPath = this.documentPath(record.batchId);
     const json = `${JSON.stringify(record, null, 2)}\n`;
-    const html = productionInspectionRecordHtml(record);
+    const document = productionInspectionRecordDocument(record);
     await this.atomicWrite(jsonPath, json);
-    await this.atomicWrite(htmlPath, html);
+    await this.atomicWrite(documentPath, document);
     await this.atomicWrite(this.latestPath(), json);
-    return { jsonPath, htmlPath };
+    return { jsonPath, documentPath };
   }
 
   private async atomicWrite(path: string, content: string): Promise<void> {
@@ -334,13 +526,23 @@ export class ProductionInspectionRecordStore {
     }
   }
 
-  async loadHtml(batchId: string): Promise<string | null> {
+  async loadDocument(batchId: string): Promise<string | null> {
     try {
-      return await fs.readFile(this.htmlPath(batchId), 'utf8');
+      return await fs.readFile(this.documentPath(batchId), 'utf8');
     } catch (error: any) {
-      if (error?.code === 'ENOENT') return null;
-      throw error;
+      if (error?.code !== 'ENOENT') throw error;
+      try {
+        return await fs.readFile(this.legacyHtmlPath(batchId), 'utf8');
+      } catch (legacyError: any) {
+        if (legacyError?.code === 'ENOENT') return null;
+        throw legacyError;
+      }
     }
+  }
+
+  /** @deprecated 使用 loadDocument；旧记录仍允许通过该别名预览。 */
+  async loadHtml(batchId: string): Promise<string | null> {
+    return this.loadDocument(batchId);
   }
 
   async list(limit = 50): Promise<Array<{ batchId: string; generatedAt: number; productModel: string; conclusion: InspectionItemStatus }>> {

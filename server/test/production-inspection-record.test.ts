@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import test from 'node:test';
-import { buildProductionInspectionRecord, productionInspectionRecordHtml } from '../src/production-inspection-record-store.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  buildProductionInspectionRecord,
+  productionInspectionRecordDocument,
+  ProductionInspectionRecordStore,
+} from '../src/production-inspection-record-store.js';
 import { DEFAULT_PRODUCT_DETECTION_CONFIG, normalizeProductDetectionConfig } from '../src/product-profile.js';
 import { DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG } from '../src/production-inspection-record.js';
 
@@ -143,10 +150,10 @@ test('record keeps code status separate and reports P2/P3 noise fluctuations as 
   assert.equal(record.products[0]?.fireAction.status, '不适用');
   assert.deepEqual(record.products[0]?.amplitude.values, [110, 105]);
   assert.equal(record.conclusion, '合格');
-  const html = productionInspectionRecordHtml(record);
-  assert.match(html, /未生成/);
-  assert.match(html, /110，105/);
-  assert.match(html, /不适用/);
+  const document = productionInspectionRecordDocument(record);
+  assert.match(document, /未生成/);
+  assert.match(document, /110，105/);
+  assert.match(document, /不适用/);
 });
 
 test('indicator vision evidence is included in the production report template', () => {
@@ -178,9 +185,9 @@ test('indicator vision evidence is included in the production report template', 
   });
   assert.equal(record.products[0]?.indicatorVision?.status, '合格');
   assert.equal(record.products[0]?.indicatorVision?.captureCount, 3);
-  const html = productionInspectionRecordHtml(record);
-  assert.match(html, /LED 显示检验/);
-  assert.match(html, /绿灯 合格/);
+  const document = productionInspectionRecordDocument(record);
+  assert.match(document, /LED 显示检验/);
+  assert.match(document, /绿灯：合格/);
 });
 
 test('production report follows the official inspection item order', () => {
@@ -194,8 +201,8 @@ test('production report follows the official inspection item order', () => {
     recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
     productionDate: Date.now(),
   });
-  const html = productionInspectionRecordHtml(record);
-  const labels = [...html.matchAll(/<td class="item">([^<]+)<\/td>/g)].map((match) => match[1]);
+  const document = productionInspectionRecordDocument(record);
+  const labels = [...document.matchAll(/<td class="item">([^<]+)<\/td>/g)].map((match) => match[1]);
   assert.deepEqual(labels, [
     '工作电流检验',
     '火警动作检验',
@@ -212,8 +219,39 @@ test('production report follows the official inspection item order', () => {
   assert.equal(record.products[0]?.powerFluctuation.status, '合格');
   assert.equal(record.products[0]?.highTemp.status, '合格');
   assert.equal(record.products[0]?.lowTemp.status, '合格');
-  assert.match(html, /产品默认设置/);
-  assert.match(html, /90\.26\.08\.11/);
+  assert.match(document, /产品默认设置/);
+  assert.match(document, /90\.26\.08\.11/);
+});
+
+test('production report is a Word-compatible table document saved with a .doc extension', async () => {
+  const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-document',
+    productConfig,
+    precheck: precheck(false),
+    detectorVerdict: detectorVerdict(),
+    waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+    productionDate: new Date(2026, 7, 31).getTime(),
+  });
+  const document = productionInspectionRecordDocument(record);
+  assert.match(document, /xmlns:w="urn:schemas-microsoft-com:office:word"/);
+  assert.match(document, /mso-page-orientation: landscape/);
+  assert.match(document, /<table class="w-table">/);
+  assert.match(document, /检验数量：6 台/);
+  assert.equal([...document.matchAll(/<td class="item">/g)].length, 10);
+
+  const directory = await mkdtemp(join(tmpdir(), 'flame-production-record-test-'));
+  try {
+    const store = new ProductionInspectionRecordStore(directory);
+    const saved = await store.save(record);
+    assert.match(saved.documentPath, /\.doc$/);
+    assert.equal(await readFile(saved.documentPath, 'utf8'), document);
+    assert.equal(await store.loadDocument(record.batchId), document);
+    assert.ok(!(await readdir(directory)).some((name) => name.endsWith('.html')));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('enabled relay test gates the slot verdict independently', () => {

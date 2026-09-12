@@ -290,8 +290,8 @@ export class MESPublisher {
   }
 
   private async createJob(archive: ProductionRunArchive, recordStore: ProductionInspectionRecordStore): Promise<PendingMESBatch> {
-    const reportHtml = await recordStore.loadHtml(archive.batchId);
-    if (!reportHtml) throw new Error('MES_REPORT_ATTACHMENT_NOT_FOUND');
+    const reportDocument = await recordStore.loadDocument(archive.batchId);
+    if (!reportDocument) throw new Error('MES_REPORT_ATTACHMENT_NOT_FOUND');
     const record = archive.inspectionRecord;
     const jbrName = record.inspector.trim() || this.config.operatorName.trim();
     if (!jbrName) throw new Error('MES_OPERATOR_NAME_REQUIRED');
@@ -309,7 +309,7 @@ export class MESPublisher {
       version: 1,
       batchId: archive.batchId,
       reportFileName: `${safeName(record.productModel)}_${safeName(record.batchId)}_生产检验记录.doc`,
-      reportHtml,
+      reportHtml: reportDocument,
       files: null,
       products,
       queuedAt: Date.now(),

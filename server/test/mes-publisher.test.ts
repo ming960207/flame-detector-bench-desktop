@@ -69,7 +69,7 @@ test('MES 上传先上传检验报告，再逐个录入产品编号', async () =
     assert.match(body.files, /report-1/);
     return new Response(JSON.stringify({ code: 1, msg: '操作成功', data: null }), { status: 200 });
   };
-  const recordStore = { loadHtml: async () => '<html><body>检验报告</body></html>' } as unknown as ProductionInspectionRecordStore;
+  const recordStore = { loadDocument: async () => '<html><body>检验报告</body></html>' } as unknown as ProductionInspectionRecordStore;
   const archive = {
     batchId: 'batch-1',
     inspectionRecord: {

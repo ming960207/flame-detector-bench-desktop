@@ -244,24 +244,24 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   });
   runtime.app.get('/api/production-records/:batchId/html', async (req, res) => {
     try {
-      const html = await recordStore.loadHtml(req.params.batchId);
-      if (!html) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
-      return res.type('html').send(html);
+      const document = await recordStore.loadDocument(req.params.batchId);
+      if (!document) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
+      return res.type('html').send(document);
     } catch (error) {
       return res.status(500).json({ code: 'PRODUCTION_RECORD_HTML_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
   });
   runtime.app.get('/api/production-records/:batchId/doc', async (req, res) => {
     try {
-      const [html, record] = await Promise.all([
-        recordStore.loadHtml(req.params.batchId),
+      const [document, record] = await Promise.all([
+        recordStore.loadDocument(req.params.batchId),
         recordStore.load(req.params.batchId),
       ]);
-      if (!html || !record) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
+      if (!document || !record) return res.status(404).send('PRODUCTION_RECORD_NOT_FOUND');
       const filename = `${safeDownloadName(record.productModel)}_${safeDownloadName(record.batchId)}_生产检验记录.doc`;
       res.setHeader('Content-Type', 'application/msword; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
-      return res.send(html);
+      return res.send(document);
     } catch (error) {
       return res.status(500).json({ code: 'PRODUCTION_RECORD_DOC_READ_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
