@@ -10,6 +10,7 @@ import {
 } from './product-code.js';
 import type { ProductCodeAllocation } from './product-code-store.js';
 import type { RelayFunctionalTestReport } from './relay-functional-test.js';
+import type { IndicatorVisionReport } from './indicator-vision.js';
 import profileDefaults from '../product-profiles.json' assert { type: 'json' };
 
 export type ProductType = 'DUAL_WAVELENGTH' | 'THREE_WAVELENGTH' | 'FOUR_WAVELENGTH' | 'IMAGE_DETECTOR';
@@ -61,6 +62,7 @@ export interface ProductPrecheckReport {
   productionDate?: number;
   productCodeAllocation?: ProductCodeAllocation | null;
   relayFunctionalTest?: RelayFunctionalTestReport | null;
+  indicatorVision?: IndicatorVisionReport | null;
   startedAt: number;
   completedAt: number;
   verdict: ProductPrecheckVerdict;

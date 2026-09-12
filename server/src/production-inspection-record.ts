@@ -27,6 +27,14 @@ export interface InspectionMeasuredValue<T> extends InspectionStatusValue {
   value: T;
 }
 
+export interface IndicatorVisionInspectionValue extends InspectionStatusValue {
+  runningGreen: InspectionStatusValue;
+  fireRed: InspectionStatusValue;
+  faultYellow: InspectionStatusValue;
+  captureCount: number;
+  phases: string[];
+}
+
 export interface ProductionInspectionProductResult {
   slot: number;
   productCode: string | null;
@@ -36,6 +44,8 @@ export interface ProductionInspectionProductResult {
   fireAction: InspectionStatusValue;
   faultAction: InspectionStatusValue;
   ledDisplay: InspectionStatusValue;
+  /** 摄像头按槽位记录的运行绿/火警红/故障黄视觉证据。 */
+  indicatorVision?: IndicatorVisionInspectionValue;
   amplitude: {
     /** 按 P2、P3 顺序记录本批噪声窗口的相对波动值。 */
     values: number[];
@@ -76,6 +86,17 @@ export function notTested(reason: string): InspectionStatusValue {
 
 export function notApplicable(reason: string): InspectionStatusValue {
   return { status: '不适用', source: 'NOT_APPLICABLE', reason };
+}
+
+export function indicatorVisionNotApplicable(reason = 'INDICATOR_VISION_NOT_SUBMITTED'): IndicatorVisionInspectionValue {
+  return {
+    ...notApplicable(reason),
+    runningGreen: notApplicable(reason),
+    fireRed: notApplicable(reason),
+    faultYellow: notApplicable(reason),
+    captureCount: 0,
+    phases: [],
+  };
 }
 
 export function autoStatus(passed: boolean, reason?: string): InspectionStatusValue {

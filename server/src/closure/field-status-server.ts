@@ -44,6 +44,7 @@ import {
   type InspectionPositionId,
   type InspectionPositionResult,
 } from './field-test-result-log.js';
+import { normalizeIndicatorVisionReport } from '../indicator-vision.js';
 
 // Product identity/relay commands can briefly pause detector waveform push. Run them
 // at the very beginning of the PLC signal-stabilization stage, then leave the rest
@@ -534,6 +535,18 @@ export function createFieldStatusRuntime(
   });
   app.get('/api/product-config', (_req, res) => {
     res.json({ config: productConfig, locked: processLocksProductSelection(currentStatus), precheck: productPrecheck });
+  });
+  app.post('/api/indicator-vision/evidence', requireDesktopMutation, (req, res) => {
+    const expectedBatchId = productPrecheck?.batchId ?? waveformAnalysisState.batchId ?? null;
+    const report = normalizeIndicatorVisionReport(req.body, expectedBatchId);
+    if (!report) return res.status(400).json({ code: 'INDICATOR_VISION_EVIDENCE_INVALID' });
+    if (!productPrecheck || !expectedBatchId || report.batchId !== expectedBatchId) {
+      return res.status(409).json({ code: 'INDICATOR_VISION_BATCH_NOT_READY' });
+    }
+    productPrecheck = { ...productPrecheck, indicatorVision: report };
+    recomputeVerdicts();
+    broadcastSummary();
+    return res.json({ success: true, report });
   });
   app.put('/api/product-config', requireDesktopMutation, async (req, res) => {
     if (processLocksProductSelection(currentStatus)) return res.status(409).json({ code: 'PRODUCT_CONFIG_LOCKED_DURING_PROCESS' });

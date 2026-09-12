@@ -149,6 +149,40 @@ test('record keeps code status separate and reports P2/P3 noise fluctuations as 
   assert.match(html, /不适用/);
 });
 
+test('indicator vision evidence is included in the production report template', () => {
+  const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const checked = precheck(false) as any;
+  checked.indicatorVision = {
+    batchId: 'batch-1',
+    capturedAt: 4,
+    source: 'UVC_HSV',
+    captureCount: 3,
+    phases: ['ALARM_VERIFY', 'FAULT_VERIFY'],
+    verdict: 'PASS',
+    units: Array.from({ length: 6 }, (_, offset) => ({
+      slot: offset + 1,
+      runningGreen: 'PASS',
+      fireRed: 'PASS',
+      faultYellow: 'PASS',
+      verdict: 'PASS',
+    })),
+  };
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-1',
+    productConfig,
+    precheck: checked,
+    detectorVerdict: detectorVerdict(),
+    waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+    productionDate: Date.now(),
+  });
+  assert.equal(record.products[0]?.indicatorVision?.status, '合格');
+  assert.equal(record.products[0]?.indicatorVision?.captureCount, 3);
+  const html = productionInspectionRecordHtml(record);
+  assert.match(html, /指示灯视觉检测（绿灯\/红灯\/黄灯）/);
+  assert.match(html, /绿灯 合格/);
+});
+
 test('enabled relay test gates the slot verdict independently', () => {
   const productConfig = normalizeProductDetectionConfig({
     ...DEFAULT_PRODUCT_DETECTION_CONFIG,

@@ -8,6 +8,7 @@ import type { ProductDetectionConfig, ProductPrecheckReport } from '../server/sr
 import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/src/types';
 import type { FlameDetectorConfig } from '../types';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
+import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
@@ -146,6 +147,17 @@ export function FieldProcessStatusApp() {
     await refresh();
   }, [refresh]);
 
+  const submitIndicatorVision = useCallback(async (report: IndicatorVisionReport) => {
+    const response = await fetch(`${HTTP}/api/indicator-vision/evidence`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(report),
+    });
+    const payload = await response.json() as { report?: IndicatorVisionReport; error?: string; code?: string };
+    if (!response.ok) throw new Error(payload.error || payload.code || `指示灯视觉证据提交失败 (${response.status})`);
+    if (payload.report) setProductPrecheck((current) => current ? { ...current, indicatorVision: payload.report } : current);
+  }, []);
+
   const handleRefresh = useCallback(() => {
     void refresh().catch(() => setNotice('PLC 未接入：工序监测处于待同步状态。'));
   }, [refresh]);
@@ -242,6 +254,7 @@ export function FieldProcessStatusApp() {
       productPrecheck={productPrecheck}
       productPrecheckBusy={productPrecheckBusy}
       relayTest={relayTest}
+      onSubmitIndicatorVision={submitIndicatorVision}
       resultTitleMeta={<ProductModelSelector config={productConfig} locked={productLocked} busy={productPrecheckBusy} onUpdate={updateProductConfig} />}
       onRefresh={handleRefresh}
       onOpenDetails={() => openDetails('device')}

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
+import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import './indicator-camera.css';
 
 export type IndicatorColor = 'green' | 'red' | 'yellow';
@@ -304,6 +305,7 @@ export interface IndicatorCameraPanelProps {
   precheckBusy: boolean;
   relayTest: RelayFunctionalTestProgress | null | undefined;
   relayFunctionalTest: ProductPrecheckReport['relayFunctionalTest'] | null | undefined;
+  onSubmitEvidence?: (report: IndicatorVisionReport) => Promise<void>;
 }
 
 export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
@@ -312,6 +314,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   precheckBusy,
   relayTest,
   relayFunctionalTest,
+  onSubmitEvidence,
 }) => {
   const captureVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -326,6 +329,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const lastPhaseRef = useRef<IndicatorPhase>('MANUAL');
   const wasBusyRef = useRef(false);
   const lastBatchKeyRef = useRef<string | null>(batchId);
+  const submittedBatchRef = useRef<string | null>(null);
 
   const [slotRois, setSlotRois] = useState<IndicatorSlotRoi[]>(loadSlotRois);
   const [devices, setDevices] = useState<CameraDeviceOption[]>([]);
@@ -365,6 +369,46 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     return { slot: roi.slot, roi, verdict, lights, frames: Math.max(runSamplesRef.current.length, alarm?.frames ?? 0, fault?.frames ?? 0) };
   }), []);
 
+  const submitCompletedEvidence = useCallback(async () => {
+    if (
+      !onSubmitEvidence
+      || !batchId
+      || !relayFunctionalTest
+      || relayTest?.phase !== 'COMPLETE'
+      || precheckBusy
+      || captures.length === 0
+      || submittedBatchRef.current === batchId
+    ) return;
+    const lightVerdict = (state: IndicatorState): 'PASS' | 'FAIL' | 'PENDING' => state === 'ON' ? 'PASS' : state === 'OFF' ? 'FAIL' : 'PENDING';
+    const units = completedResults().map((unit) => ({
+      slot: unit.slot,
+      runningGreen: lightVerdict(unit.lights.green.state),
+      fireRed: lightVerdict(unit.lights.red.state),
+      faultYellow: lightVerdict(unit.lights.yellow.state),
+      verdict: unit.verdict === 'WAITING' ? 'PENDING' : unit.verdict,
+    }));
+    const lightStates = units.flatMap((unit) => [unit.runningGreen, unit.fireRed, unit.faultYellow]);
+    const verdict = lightStates.every((state) => state === 'PASS')
+      ? 'PASS'
+      : lightStates.some((state) => state === 'FAIL')
+        ? 'FAIL'
+        : 'PENDING';
+    submittedBatchRef.current = batchId;
+    try {
+      await onSubmitEvidence({
+        batchId,
+        capturedAt: Date.now(),
+        source: 'UVC_HSV',
+        captureCount: captures.length,
+        phases: [...new Set(captures.map((capture) => capture.phase))],
+        verdict,
+        units,
+      });
+    } catch {
+      submittedBatchRef.current = null;
+    }
+  }, [batchId, captures, completedResults, onSubmitEvidence, precheckBusy, relayFunctionalTest, relayTest?.phase]);
+
   useEffect(() => {
     slotRoisRef.current = slotRois;
     try { window.localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(slotRois)); } catch { /* best effort */ }
@@ -375,6 +419,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       phaseSamplesRef.current = [];
       runSamplesRef.current = [];
       phaseResultsRef.current.clear();
+      submittedBatchRef.current = null;
       setCaptures([]);
       setSelectedCaptureId(null);
       setLiveResults([]);
@@ -387,6 +432,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       phaseSamplesRef.current = [];
       runSamplesRef.current = [];
       phaseResultsRef.current.clear();
+      submittedBatchRef.current = null;
       setCaptures([]);
       setSelectedCaptureId(null);
       setLiveResults([]);
@@ -534,6 +580,8 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   useEffect(() => {
     if (relayFunctionalTest && relayTest?.phase === 'COMPLETE' && !precheckBusy) setLiveResults(completedResults());
   }, [completedResults, precheckBusy, relayFunctionalTest, relayTest?.phase]);
+
+  useEffect(() => { void submitCompletedEvidence(); }, [submitCompletedEvidence]);
 
   const handleViewportClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (calibratingSlot === null) return;

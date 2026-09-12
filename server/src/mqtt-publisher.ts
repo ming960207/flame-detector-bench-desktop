@@ -234,6 +234,7 @@ export function buildProductionInspectionPayload(
           fire_action: product.fireAction,
           fault_action: product.faultAction,
           led_display: product.ledDisplay,
+          indicator_vision: product.indicatorVision ?? null,
           amplitude: product.amplitude,
           software_version: product.softwareVersion,
           product_info: product.productInfo,

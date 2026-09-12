@@ -32,6 +32,7 @@ import type { FlameDetectorState, FlameDetectorUnitState } from '../server/src/t
 import type { FlameSample } from '../server/src/types';
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
+import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
 import './wutos-dashboard.css';
@@ -628,7 +629,8 @@ const LiveWaveformPanel: FC<{
   productPrecheck: ProductPrecheckReport | null;
   productPrecheckBusy: boolean;
   relayTest: RelayFunctionalTestProgress | null;
-}> = ({ units, status, waveformAnalysis, waveformDisplayMode, waveformMaxSamples, productPrecheck, productPrecheckBusy, relayTest }) => {
+  onSubmitIndicatorVision?: (report: IndicatorVisionReport) => Promise<void>;
+}> = ({ units, status, waveformAnalysis, waveformDisplayMode, waveformMaxSamples, productPrecheck, productPrecheckBusy, relayTest, onSubmitIndicatorVision }) => {
   const [expanded, setExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const selectedUnit = selectedIndex === null
@@ -668,6 +670,7 @@ const LiveWaveformPanel: FC<{
         precheckBusy={productPrecheckBusy}
         relayTest={relayTest}
         relayFunctionalTest={productPrecheck?.relayFunctionalTest}
+        onSubmitEvidence={onSubmitIndicatorVision}
       />
     </section>
   );
@@ -689,6 +692,7 @@ export interface WutosDashboardProps {
   productPrecheck?: ProductPrecheckReport | null;
   productPrecheckBusy?: boolean;
   relayTest?: RelayFunctionalTestProgress | null;
+  onSubmitIndicatorVision?: (report: IndicatorVisionReport) => Promise<void>;
 }
 
 export function WutosDashboard({
@@ -707,6 +711,7 @@ export function WutosDashboard({
   productPrecheck = null,
   productPrecheckBusy = false,
   relayTest = null,
+  onSubmitIndicatorVision,
 }: WutosDashboardProps) {
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => {
@@ -770,7 +775,7 @@ export function WutosDashboard({
             {units.slice(0, 3).map((unit, index) => <SensorLiveCard key={index + 1} index={index + 1} unit={unit} status={status} analysis={waveformAnalysis?.units.find((item) => item.index === index + 1)} captureAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} />)}
           </div>
           <img src={asset('machine-real.png')} className="wutos-machine wutos-machine--real" alt="火焰探测器检测台" />
-          <LiveWaveformPanel units={units} status={status} waveformAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} productPrecheck={productPrecheck} productPrecheckBusy={productPrecheckBusy} relayTest={relayTest} />
+          <LiveWaveformPanel units={units} status={status} waveformAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} productPrecheck={productPrecheck} productPrecheckBusy={productPrecheckBusy} relayTest={relayTest} onSubmitIndicatorVision={onSubmitIndicatorVision} />
           <div className="wutos-stage__sensors wutos-stage__sensors--right">
             {units.slice(3, 6).map((unit, index) => <SensorLiveCard key={index + 4} index={index + 4} unit={unit} status={status} analysis={waveformAnalysis?.units.find((item) => item.index === index + 4)} captureAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} />)}
           </div>
