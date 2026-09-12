@@ -225,21 +225,7 @@ function statusCell(status: InspectionItemStatus): string {
 }
 
 function indicatorVisionCell(value: IndicatorVisionInspectionValue | undefined, fallback: InspectionStatusValue): string {
-  const item = value ?? {
-    ...fallback,
-    runningGreen: fallback,
-    fireRed: fallback,
-    faultYellow: fallback,
-    captureCount: 0,
-    phases: [],
-  };
-  const detail = [
-    `绿灯：${escapeHtml(item.runningGreen.status)}`,
-    `红灯：${escapeHtml(item.fireRed.status)}`,
-    `黄灯：${escapeHtml(item.faultYellow.status)}`,
-    `抓拍：${escapeHtml(item.captureCount)} 张`,
-  ].join('<br>');
-  return `${statusCell(item.status)}<br><span class="vision-detail">${detail}</span>`;
+  return statusCell(value?.status ?? fallback.status);
 }
 
 function combinedStatus(statuses: InspectionItemStatus[]): InspectionItemStatus {
@@ -281,9 +267,9 @@ export function productionInspectionRecordDocument(record: ProductionInspectionR
   ];
 
   const productCount = record.products.length;
-  const productColumnWidth = (60 / Math.max(productCount, 1)).toFixed(2);
+  const productColumnWidth = (66 / Math.max(productCount, 1)).toFixed(2);
   const productHeaders = record.products.map((product) => `<th style="width: ${productColumnWidth}%">${product.slot}</th>`).join('');
-  const codeCells = record.products.map((product) => `<td>${escapeHtml(product.productCode ?? '未生成')}</td>`).join('');
+  const codeCells = record.products.map((product) => `<td class="sample-code">${escapeHtml(product.productCode ?? '未生成')}</td>`).join('');
   const rows = itemRows.map(([label, render], index) => {
     const categoryCell = index === 0
       ? `<td rowspan="${itemRows.length}" class="v-text">生产检验项目</td>`
@@ -372,9 +358,10 @@ p { margin: 0; padding: 0; }
   overflow: hidden;
 }
 .w-table th { font-weight: normal; }
-.w-table .index { width: 5%; }
-.w-table .item { width: 27%; text-align: left; padding-left: 4pt; }
+.w-table .index { width: 4%; }
+.w-table .item { width: 24%; text-align: left; padding-left: 4pt; }
 .sample-code-label { text-align: left; padding-left: 4pt !important; }
+.sample-code { white-space: nowrap !important; word-break: keep-all !important; font-size: 7.5pt; letter-spacing: -0.1pt; }
 .t-left { text-align: left !important; padding-left: 4pt !important; }
 .t-right { text-align: right !important; padding-right: 4pt !important; }
 .no-wrap { white-space: nowrap !important; }
@@ -382,7 +369,7 @@ p { margin: 0; padding: 0; }
   writing-mode: vertical-lr;
   mso-direction-alt: auto;
   letter-spacing: 1pt;
-  width: 8%;
+  width: 6%;
   font-size: 8.5pt;
   padding: 1pt 0;
 }
@@ -396,17 +383,12 @@ p { margin: 0; padding: 0; }
   line-height: 1.15;
   white-space: normal;
 }
-.record-note {
-  text-align: left;
-  padding: 3pt 6pt !important;
-  height: 24pt !important;
-  line-height: 1.25;
-}
 @media screen {
   body { margin: 24px; background: #fff; }
   .w-table { font-size: 12px; }
   .w-table td, .w-table th { padding: 7px 5px; height: 28px; }
   .vision-detail { font-size: 10px; }
+  .sample-code { font-size: 10px; letter-spacing: -0.2px; }
 }
 @media print { body { margin: 8mm; } }
 </style>
@@ -432,9 +414,9 @@ p { margin: 0; padding: 0; }
 
   <table class="w-table">
     <colgroup>
-      <col style="width: 8%;">
-      <col style="width: 5%;">
-      <col style="width: 27%;">
+      <col style="width: 6%;">
+      <col style="width: 4%;">
+      <col style="width: 24%;">
       ${record.products.map(() => `<col style="width: ${productColumnWidth}%;">`).join('')}
     </colgroup>
     <thead>
@@ -454,11 +436,6 @@ p { margin: 0; padding: 0; }
       <tr>
         <td colspan="${totalColumns}" class="t-right no-wrap" style="height: 23pt;">
           检验结论：${statusCell(record.conclusion)}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;检验员：${escapeHtml(record.inspector || '-')} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;日期：${dateText(record.productionDate)}
-        </td>
-      </tr>
-      <tr>
-        <td colspan="${totalColumns}" class="record-note">
-          不合格现象记录：无。摄像头视觉证据按槽位记录运行绿灯、火警红灯、故障黄灯状态；LED 显示检验结果以照片判定结果为准。
         </td>
       </tr>
     </tbody>

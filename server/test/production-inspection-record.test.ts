@@ -187,7 +187,10 @@ test('indicator vision evidence is included in the production report template', 
   assert.equal(record.products[0]?.indicatorVision?.captureCount, 3);
   const document = productionInspectionRecordDocument(record);
   assert.match(document, /LED 显示检验/);
-  assert.match(document, /绿灯：合格/);
+  const ledRow = document.match(/<td class="index">4<\/td><td class="item">LED 显示检验<\/td>([\s\S]*?)<\/tr>/)?.[1];
+  if (!ledRow) throw new Error('LED 显示检验行缺失');
+  assert.match(ledRow, /<span class="pass">合格<\/span>/);
+  assert.doesNotMatch(ledRow, /绿灯|红灯|黄灯|抓拍|vision-detail/);
 });
 
 test('production report follows the official inspection item order', () => {
@@ -239,6 +242,9 @@ test('production report is a Word-compatible table document saved with a .doc ex
   assert.match(document, /mso-page-orientation: landscape/);
   assert.match(document, /<table class="w-table">/);
   assert.match(document, /检验数量：6 台/);
+  assert.match(document, /<td class="sample-code">/);
+  assert.match(document, /\.sample-code \{[^}]*white-space: nowrap/);
+  assert.doesNotMatch(document, /不合格现象记录/);
   assert.equal([...document.matchAll(/<td class="item">/g)].length, 10);
 
   const directory = await mkdtemp(join(tmpdir(), 'flame-production-record-test-'));
