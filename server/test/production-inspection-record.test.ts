@@ -137,8 +137,8 @@ test('record keeps code status separate and reports P2/P3 noise fluctuations as 
   assert.equal(record.products[0]?.productCode, null);
   assert.equal(record.products[0]?.productCodeStatus, 'RULE_MISSING');
   assert.equal(record.products[0]?.verdict, '合格');
-  assert.equal(record.products[0]?.workCurrent.source, 'NOT_APPLICABLE');
-  assert.equal(record.products[0]?.workCurrent.status, '不适用');
+  assert.equal(record.products[0]?.workCurrent.source, 'AUTO');
+  assert.equal(record.products[0]?.workCurrent.status, '合格');
   assert.equal(record.products[0]?.fireAction.source, 'NOT_APPLICABLE');
   assert.equal(record.products[0]?.fireAction.status, '不适用');
   assert.deepEqual(record.products[0]?.amplitude.values, [110, 105]);
@@ -179,8 +179,41 @@ test('indicator vision evidence is included in the production report template', 
   assert.equal(record.products[0]?.indicatorVision?.status, '合格');
   assert.equal(record.products[0]?.indicatorVision?.captureCount, 3);
   const html = productionInspectionRecordHtml(record);
-  assert.match(html, /指示灯视觉检测（绿灯\/红灯\/黄灯）/);
+  assert.match(html, /LED 显示检验/);
   assert.match(html, /绿灯 合格/);
+});
+
+test('production report follows the official inspection item order', () => {
+  const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-1',
+    productConfig,
+    precheck: precheck(false),
+    detectorVerdict: detectorVerdict(),
+    waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+    productionDate: Date.now(),
+  });
+  const html = productionInspectionRecordHtml(record);
+  const labels = [...html.matchAll(/<td class="item">([^<]+)<\/td>/g)].map((match) => match[1]);
+  assert.deepEqual(labels, [
+    '工作电流检验',
+    '火警动作检验',
+    '故障动作检验',
+    'LED 显示检验',
+    '幅值测试',
+    '产品默认设置',
+    '抗干扰测试',
+    '电源波动试验',
+    '高温运行试验',
+    '低温运行试验',
+  ]);
+  assert.equal(record.products[0]?.workCurrent.status, '合格');
+  assert.equal(record.products[0]?.powerFluctuation.status, '合格');
+  assert.equal(record.products[0]?.highTemp.status, '合格');
+  assert.equal(record.products[0]?.lowTemp.status, '合格');
+  assert.match(html, /产品默认设置/);
+  assert.match(html, /90\.26\.08\.11/);
 });
 
 test('enabled relay test gates the slot verdict independently', () => {

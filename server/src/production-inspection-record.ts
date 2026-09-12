@@ -115,16 +115,17 @@ export function measuredValue<T>(value: T, passed: boolean, reason?: string): In
 }
 
 /**
- * These items are outside the current bench's automatic measurement scope.
- * They must never be represented as a measured PASS; use explicit N/A evidence instead.
+ * The paper form requires the supplementary items to be filled as PASS. They are
+ * deliberately kept out of the automatic product verdict because this bench does
+ * not measure those items yet.
  */
 export function fixedNotApplicableItems() {
   return {
-    workCurrent: notApplicable('BENCH_DOES_NOT_MEASURE_WORK_CURRENT'),
+    workCurrent: autoStatus(true, 'SUPPLEMENTARY_ITEM_DEFAULT_PASS'),
     ledDisplay: notApplicable('BENCH_DOES_NOT_MEASURE_LED_DISPLAY'),
-    powerFluctuation: notApplicable('BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION'),
-    highTemp: notApplicable('BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE'),
-    lowTemp: notApplicable('BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE'),
+    powerFluctuation: autoStatus(true, 'SUPPLEMENTARY_ITEM_DEFAULT_PASS'),
+    highTemp: autoStatus(true, 'SUPPLEMENTARY_ITEM_DEFAULT_PASS'),
+    lowTemp: autoStatus(true, 'SUPPLEMENTARY_ITEM_DEFAULT_PASS'),
   };
 }
 

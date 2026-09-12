@@ -237,15 +237,27 @@ function indicatorVisionCell(value: IndicatorVisionInspectionValue | undefined, 
   return `${statusCell(item.status)}<small class="vision-detail">${escapeHtml(detail)}</small>`;
 }
 
+function combinedStatus(statuses: InspectionItemStatus[]): InspectionItemStatus {
+  if (statuses.some((status) => status === '不合格')) return '不合格';
+  if (statuses.some((status) => status === '未检测')) return '未检测';
+  if (statuses.some((status) => status === '不适用')) return '不适用';
+  return '合格';
+}
+
+function productDefaultSettingsCell(product: ProductionInspectionProductResult): string {
+  const status = combinedStatus([product.softwareVersion.status, product.productInfo.status]);
+  const detail = `版本 ${product.softwareVersion.value ?? '-'} · 探头 ${product.productInfo.value.probeCount ?? '-'} · 灵敏度 ${product.productInfo.value.sensitivityLevel ?? '-'}`;
+  return `${statusCell(status)}<small class="vision-detail">${escapeHtml(detail)}</small>`;
+}
+
 export function productionInspectionRecordHtml(record: ProductionInspectionRecord): string {
   const itemRows: Array<[string, (product: ProductionInspectionProductResult) => string]> = [
     ['工作电流检验', (p) => statusCell(p.workCurrent.status)],
     ['火警动作检验', (p) => statusCell(p.fireAction.status)],
     ['故障动作检验', (p) => statusCell(p.faultAction.status)],
-    ['指示灯视觉检测（绿灯/红灯/黄灯）', (p) => indicatorVisionCell(p.indicatorVision, p.ledDisplay)],
+    ['LED 显示检验', (p) => indicatorVisionCell(p.indicatorVision, p.ledDisplay)],
     ['幅值测试', (p) => `${escapeHtml(p.amplitude.values.join('，') || '-')} / ${statusCell(p.amplitude.status)}`],
-    ['软件版本', (p) => `${escapeHtml(p.softwareVersion.value ?? '-')} / ${statusCell(p.softwareVersion.status)}`],
-    ['产品信息（探头数、灵敏度等级）', (p) => `${escapeHtml(p.productInfo.value.probeCount ?? '-')}，${escapeHtml(p.productInfo.value.sensitivityLevel ?? '-')} / ${statusCell(p.productInfo.status)}`],
+    ['产品默认设置', productDefaultSettingsCell],
     ['抗干扰测试', (p) => statusCell(p.interferenceResistance.status)],
     ['电源波动试验', (p) => statusCell(p.powerFluctuation.status)],
     ['高温运行试验', (p) => statusCell(p.highTemp.status)],
@@ -262,7 +274,7 @@ export function productionInspectionRecordHtml(record: ProductionInspectionRecor
 body{font-family:"Microsoft YaHei",Arial,sans-serif;color:#111;margin:24px;background:#fff}h1{text-align:center;font-size:22px;margin:0 0 14px}.meta{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:6px 0}.meta span{white-space:nowrap}table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}th,td{border:1px solid #222;padding:7px 5px;text-align:center;vertical-align:middle}.item{text-align:left;font-weight:600}th:first-child,td:first-child{width:38px}th:nth-child(2),td:nth-child(2){width:175px}.pass{font-weight:700}.fail{font-weight:700;text-decoration:underline}.not-tested{font-weight:700;text-decoration:underline}.not-applicable{font-weight:600}.vision-detail{display:block;margin-top:3px;color:#555;font-size:10px;line-height:1.35}.footer{display:grid;grid-template-columns:2fr 1fr 1fr;margin-top:12px;border:1px solid #222}.footer>div{padding:10px;border-right:1px solid #222}.footer>div:last-child{border-right:0}@media print{body{margin:8mm}.no-print{display:none}}
 </style></head><body>
 <h1>点型红外火焰探测器生产检验记录</h1>
-<div class="meta"><span>产品型号：${escapeHtml(record.productModel)}</span><span>数量：${record.quantity}</span><span>检验标准：${escapeHtml(record.standard)}</span></div>
+<div class="meta"><span>产品型号：${escapeHtml(record.productModel)}</span><span>检验数量：${record.quantity}</span><span>检验标准：${escapeHtml(record.standard)}</span></div>
 <div class="meta"><span>表单编号：${escapeHtml(record.formNumber)}</span><span>版本：${escapeHtml(record.formVersion)}</span><span>批次：${escapeHtml(record.batchId)}</span></div>
 <table><thead><tr><th>编号</th><th>检验内容</th>${productHeaders}</tr><tr><th></th><th>产品编号</th>${codeCells}</tr></thead><tbody>${rows}</tbody></table>
 <div class="footer"><div>综合结论：${statusCell(record.conclusion)}</div><div>检验员：${escapeHtml(record.inspector || '-')}</div><div>日期：${dateText(record.productionDate)}</div></div>
