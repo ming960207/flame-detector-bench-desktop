@@ -256,7 +256,7 @@ export function FieldProcessStatusApp() {
             <p>主屏仅保留操作员需要的实时状态；波形、产品配置、测试监听、检验记录和生产配置统一在此查看。</p>
           </div>
           <div className="wutos-detail-header-actions">
-            <button type="button" className="wutos-detail-release-button" onClick={() => setSoftwareReleaseOpen(true)}><Info size={15} />关于 / 版本</button>
+            <button type="button" className="wutos-detail-release-button" onClick={() => setSoftwareReleaseOpen(true)} title="关于与版本管理" aria-label="关于与版本管理"><Info size={15} /></button>
             <button type="button" onClick={() => setDetailsOpen(false)} aria-label="关闭详情"><X size={18} /></button>
           </div>
         </header>

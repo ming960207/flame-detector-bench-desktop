@@ -149,7 +149,9 @@
 }
 
 .wutos-detail-header-actions .wutos-detail-release-button {
-  padding: 7px 10px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   color: #b9eff7;
   border: 1px solid rgba(56, 215, 231, .55);
   background: rgba(7, 38, 53, .86);
