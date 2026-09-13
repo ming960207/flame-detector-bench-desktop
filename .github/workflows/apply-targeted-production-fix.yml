@@ -1,0 +1,54 @@
+name: Apply targeted production fix
+
+on:
+  push:
+    branches:
+      - refactor/unified-backend
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply source changes
+        run: python .github/scripts/apply_targeted_readiness_amplitude_fix.py
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci --prefix server
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Run regression suite
+        run: npm run test:product --prefix server
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/src/modbus/flame-detector-service.ts
+          git add server/src/production-inspection-record-store.ts
+          git add server/test/detector-startup.test.ts
+          git add server/test/production-inspection-record.test.ts
+          git rm .github/scripts/apply_targeted_readiness_amplitude_fix.py
+          git rm .github/workflows/apply-targeted-production-fix.yml
+          git rm .github/workflows/tmp-apply-readiness-amplitude-fix.yml
+          git commit -m "fix: enforce readiness timeout and dynamic amplitude channels"
+          git push origin HEAD:refactor/unified-backend
