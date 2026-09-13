@@ -1,6 +1,6 @@
-import express from 'express';
+import express, { type Express } from 'express';
 import cors from 'cors';
-import { createServer, type Server } from 'http';
+import { createServer } from 'http';
 import { type AddressInfo } from 'net';
 import {
   config,
@@ -16,16 +16,27 @@ import { PLCProcessMonitor } from '../plc-process-monitor.js';
 import type { PLCProcessStatus } from '../process-status.js';
 import { FlameDetectorService } from '../modbus/flame-detector-service.js';
 import { WSMessageType, type FlameDetectorState } from '../types.js';
-import type { AutoTestProgress, AutoTestReport } from '../modbus/flame-detector-service.js';
+import type { AutoTestProgress, AutoTestReport, DetectorReadyReport } from '../modbus/flame-detector-service.js';
+import type { RelayFunctionalTestProgress } from '../product-aware-flame-detector-service.js';
 import { evaluateFieldDetectorBatch, type FieldDetectorBatchVerdict } from './field-detector-verdict.js';
 import { evaluateFieldFinalVerdict, type FieldFinalVerdict } from './field-final-verdict.js';
 import {
   DEFAULT_WAVEFORM_ANALYSIS_CONFIG,
   FieldWaveformAnalysis,
   normalizeDetectionQualityConfig,
+  type ChannelKey,
 } from './field-waveform-analysis.js';
 import { loadPLCConfigs, mergeWithDefaults } from '../plc-config-store.js';
+import { requireDesktopMutation } from '../request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from '../system-config-store.js';
+import {
+  DEFAULT_PRODUCT_DETECTION_CONFIG,
+  normalizeProductDetectionConfig,
+  productAwareWaveformConfig,
+  selectedProductProfile,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+} from '../product-profile.js';
 import {
   captureInspectionPosition,
   FileFieldTestResultLogger,
@@ -33,6 +44,14 @@ import {
   type InspectionPositionId,
   type InspectionPositionResult,
 } from './field-test-result-log.js';
+import { normalizeIndicatorVisionReport } from '../indicator-vision.js';
+
+// Product identity/relay commands can briefly pause detector waveform push. Run them
+// at the very beginning of the PLC signal-stabilization stage, then leave the rest
+// of that stage uninterrupted for waveform recovery before formal noise capture.
+const POSITION_ONE_PRECHECK_DELAY_MS = 0;
+const POSITION_ONE_PRECHECK_READY_WAIT_MS = 8_000;
+const POSITION_ONE_PRECHECK_READY_POLL_MS = 100;
 
 export interface PLCProcessStatusSource {
   start(): Promise<void>;
@@ -42,7 +61,32 @@ export interface PLCProcessStatusSource {
   on(event: 'status' | 'error', listener: (value: any) => void): this;
 }
 
+export interface FieldStatusSummary {
+  process: PLCProcessStatus | undefined;
+  plcConnected: boolean;
+  detectorConnected: boolean;
+  detectorTransportConnected: boolean;
+  detectorDataStreamConnected: boolean;
+  detectorVerdict: FieldDetectorBatchVerdict;
+  waveformAnalysis: ReturnType<FieldWaveformAnalysis['snapshot']>;
+  finalVerdict: FieldFinalVerdict;
+  productConfig: ProductDetectionConfig;
+  productSelectionLocked: boolean;
+  productPrecheck: ProductPrecheckReport | null;
+  productPrecheckBusy: boolean;
+  relayTest?: RelayFunctionalTestProgress;
+  detectorStartup?: DetectorReadyReport;
+}
+
+export interface FieldStatusSnapshot {
+  summary: FieldStatusSummary;
+  flame: FlameDetectorState;
+}
+
 export interface FieldStatusRuntime {
+  readonly app: Express;
+  readonly wsServer: WSServer;
+  snapshot(): FieldStatusSnapshot;
   listen(port?: number): Promise<number>;
   close(): Promise<void>;
 }
@@ -55,7 +99,12 @@ export interface FlameDetectorStatusSource {
   isTransportConnected?(): boolean;
   isDataStreamConnected?(): boolean;
   clearWaveformHistory?(): void;
-  on(event: 'flame_state' | 'error', listener: (value: any) => void): this;
+  prepareWaveformStartup?(batchId?: string): void;
+  getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
+  getRelayTestProgress?(): RelayFunctionalTestProgress;
+  stopWaveformStreaming?(): Promise<void>;
+  runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null): Promise<ProductPrecheckReport>;
+  on(event: 'flame_state' | 'error' | 'relay_test_phase', listener: (value: any) => void): this;
   getConfig?(): FlameConfig;
   updateConfig?(config: FlameConfig): void;
   runAutoTest?(onProgress?: (progress: AutoTestProgress) => void, options?: { enabledStepKeys?: string[] }): Promise<AutoTestReport>;
@@ -75,7 +124,13 @@ function boundedNumber(value: unknown, fallback: number, min: number, max: numbe
   return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
-/** 只接收设备配置字段，避免配置接口成为任意对象写入入口。 */
+function normalizeProbeList(value: unknown, fallback: ChannelKey[]): ChannelKey[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const allowed = new Set<ChannelKey>(['probe1', 'probe2', 'probe3', 'probe4']);
+  const result = [...new Set(value.filter((item): item is ChannelKey => typeof item === 'string' && allowed.has(item as ChannelKey)))];
+  return result.length > 0 ? result : [...fallback];
+}
+
 export function normalizeFlameConfig(input: unknown, current: FlameConfig): FlameConfig {
   const source = isRecord(input) ? input : {};
   const inputUnits = Array.isArray(source.units) ? source.units : [];
@@ -89,12 +144,14 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
   const currentMaxInterferenceRatio = boundedNumber(currentAnalysis.maxInterferenceRatio, 1.5, 0, 1_000_000);
   const currentMaxNoiseAbsolute = boundedNumber(currentAnalysis.maxNoiseAbsolute, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseAbsolute ?? 800, 0, 1_000_000);
   const currentMinConsistencyTrend = boundedNumber(currentAnalysis.minConsistencyTrend, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minConsistencyTrend ?? 0.75, 0, 1);
-  const validProbe = (value: unknown, fallback: 'probe1' | 'probe2' | 'probe3' | 'probe4') => ['probe1', 'probe2', 'probe3', 'probe4'].includes(String(value)) ? String(value) as typeof fallback : fallback;
+  const validProbe = (value: unknown, fallback: ChannelKey): ChannelKey => ['probe1', 'probe2', 'probe3', 'probe4'].includes(String(value)) ? String(value) as ChannelKey : fallback;
   const currentRatio: Record<string, unknown> = isRecord(currentAnalysis.interferenceRatio) ? currentAnalysis.interferenceRatio : {};
   const inputRatio: Record<string, unknown> = isRecord(inputAnalysis.interferenceRatio) ? inputAnalysis.interferenceRatio : {};
   const currentPollIntervalMs = boundedInteger(current.pollIntervalMs, DEFAULT_FLAME_POLL_INTERVAL_MS, 100, MAX_FLAME_POLL_INTERVAL_MS);
   const currentQuality = normalizeDetectionQualityConfig(currentAnalysis.quality);
   const quality = normalizeDetectionQualityConfig(inputAnalysis.quality, currentQuality);
+  const currentNoiseProbes = normalizeProbeList(currentAnalysis.noiseProbes, ['probe2', 'probe3']);
+  const currentConsistencyProbes = normalizeProbeList(currentAnalysis.consistencyProbes, ['probe2', 'probe3']);
   const units: FlameUnitConfig[] = [];
   for (let index = 1; index <= 6; index += 1) {
     const existing = currentByIndex.get(index) ?? { index, address: index, enabled: false };
@@ -145,8 +202,8 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
       maxNoiseAbsolute: boundedNumber(inputAnalysis.maxNoiseAbsolute, currentMaxNoiseAbsolute, 0, 1_000_000),
       maxInterferenceRatio: boundedNumber(inputAnalysis.maxInterferenceRatio, currentMaxInterferenceRatio, 0, 1_000_000),
       minConsistencyTrend: boundedNumber(inputAnalysis.minConsistencyTrend, currentMinConsistencyTrend, 0, 1),
-      noiseProbes: Array.isArray(inputAnalysis.noiseProbes) ? inputAnalysis.noiseProbes : (Array.isArray(currentAnalysis.noiseProbes) ? currentAnalysis.noiseProbes : ['probe1', 'probe2', 'probe3']),
-      consistencyProbes: Array.isArray(inputAnalysis.consistencyProbes) ? inputAnalysis.consistencyProbes : (Array.isArray(currentAnalysis.consistencyProbes) ? currentAnalysis.consistencyProbes : ['probe1', 'probe2', 'probe3']),
+      noiseProbes: normalizeProbeList(inputAnalysis.noiseProbes, currentNoiseProbes),
+      consistencyProbes: normalizeProbeList(inputAnalysis.consistencyProbes, currentConsistencyProbes),
       interferenceRatio: {
         numerator: validProbe(inputRatio.numerator, validProbe(currentRatio.numerator, 'probe2')),
         denominator: validProbe(inputRatio.denominator, validProbe(currentRatio.denominator, 'probe3')),
@@ -156,25 +213,29 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
   };
 }
 
-/**
- * The stored configuration is also used by the legacy Modbus control screen.
- * Field monitoring must always observe the S7 process registers over port 102,
- * without rewriting that operator-maintained configuration on disk.
- */
 export function selectFieldPLCProcessObserver(plcs: PLCDeviceConfigLocal[]): PLCDeviceConfigLocal {
   const configured = plcs.find((plc) => plc.enabled && plc.mode === 'S7') ?? plcs.find((plc) => plc.enabled) ?? plcs[0];
   if (!configured) throw new Error('PLC_PROCESS_STATUS_CONFIG_MISSING');
-  return {
-    ...configured,
-    mode: 'S7',
-    port: 102,
-  };
+  return { ...configured, mode: 'S7', port: 102 };
+}
+
+function processLocksProductSelection(status: PLCProcessStatus | undefined): boolean {
+  const stage = status?.processStage;
+  return Boolean(stage && stage !== 'IDLE' && stage !== 'COMPLETE' && stage !== 'UNKNOWN');
+}
+
+function isPositionOneSignalStabilization(status: PLCProcessStatus | undefined): boolean {
+  if (!status || status.stage === 'FAULT' || status.processStage !== 'HEAT') return false;
+  if (status.io?.steps?.stepM10_4 === true) return false;
+  return status.io?.internal?.signalStabilizing === true
+    && status.io?.internal?.noiseCaptureWindow !== true;
 }
 
 export function createFieldStatusRuntime(
   source: PLCProcessStatusSource = new PLCProcessMonitor(config.plcs[0]!),
-  detectors: FlameDetectorStatusSource = new FlameDetectorService(config.flame),
+  detectors: FlameDetectorStatusSource = new FlameDetectorService(config.flame, { deferWaveformUntilInspection: true }),
   resultLogger: FieldTestResultLogger = new FileFieldTestResultLogger(),
+  initialProductConfig: ProductDetectionConfig = DEFAULT_PRODUCT_DETECTION_CONFIG,
 ): FieldStatusRuntime {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
@@ -186,19 +247,35 @@ export function createFieldStatusRuntime(
       'http://localhost:3000',
       'http://127.0.0.1:3002',
       'http://localhost:3002',
+      'http://127.0.0.1:3005',
+      'http://localhost:3005',
     ],
   }));
   const server = createServer(app);
   const wsServer = new WSServer();
   wsServer.init(server);
   let currentStatus = source.getCurrent();
-  const waveformAnalysis = new FieldWaveformAnalysis(config.flame.waveformAnalysis);
+  let productConfig = normalizeProductDetectionConfig(initialProductConfig);
+  const initialProfile = selectedProductProfile(productConfig);
+  const waveformAnalysis = new FieldWaveformAnalysis(
+    productAwareWaveformConfig(config.flame.waveformAnalysis, initialProfile.expectedProbeCount),
+    (message) => console.log(message),
+  );
   if (currentStatus) waveformAnalysis.observeProcess(currentStatus);
   let waveformAnalysisState = waveformAnalysis.snapshot();
-  let detectorVerdict: FieldDetectorBatchVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState);
+  let productPrecheck: ProductPrecheckReport | null = null;
+  let productPrecheckBusy = false;
+  let productPrecheckBatchId: string | null = null;
+  let productPrecheckDelayTimer: NodeJS.Timeout | null = null;
+  let productPrecheckDelayBatchId: string | null = null;
+  let productPrecheckScheduleGeneration = 0;
+  let streamingStoppedBatchId: string | null = null;
+  let detectorVerdict: FieldDetectorBatchVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState, productPrecheck, productConfig);
   let finalVerdict: FieldFinalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
   let loggedBatchId: string | null = null;
   let positionBatchId: string | null = null;
+  let detectorMutationBusy = false;
+  let detectorStartupReport: DetectorReadyReport | undefined = detectors.getReadyReport?.();
   let inspectionPositions = new Map<InspectionPositionId, InspectionPositionResult>();
   const positionStartedAt = new Map<InspectionPositionId, number>();
 
@@ -211,9 +288,18 @@ export function createFieldStatusRuntime(
     ]);
   };
 
+  const applyProductWaveformProfile = () => {
+    const profile = selectedProductProfile(productConfig);
+    waveformAnalysis.updateConfig(productAwareWaveformConfig(config.flame.waveformAnalysis, profile.expectedProbeCount));
+    waveformAnalysisState = waveformAnalysis.snapshot();
+  };
   const detectorDataStreamConnected = () => detectors.isDataStreamConnected?.() ?? detectors.isConnected();
   const detectorTransportConnected = () => detectors.isTransportConnected?.() ?? detectors.isConnected();
-  const summary = () => ({
+  const recomputeVerdicts = (state = detectors.getCurrentState()) => {
+    detectorVerdict = evaluateFieldDetectorBatch(state, waveformAnalysisState, productPrecheck, productConfig);
+    finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
+  };
+  const summary = (): FieldStatusSummary => ({
     process: source.isConnected() ? currentStatus : undefined,
     plcConnected: source.isConnected(),
     detectorConnected: detectorDataStreamConnected(),
@@ -222,33 +308,143 @@ export function createFieldStatusRuntime(
     detectorVerdict,
     waveformAnalysis: waveformAnalysisState,
     finalVerdict,
+    productConfig,
+    productSelectionLocked: processLocksProductSelection(currentStatus),
+    productPrecheck,
+    productPrecheckBusy,
+    ...(detectors.getRelayTestProgress ? { relayTest: detectors.getRelayTestProgress() } : {}),
+    ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
   const broadcastSummary = () => wsServer.broadcastFieldSummary(summary());
 
+  const runProductPrecheck = async (batchId: string | null): Promise<void> => {
+    if (productPrecheckBusy || !detectors.runProductPrecheck) return;
+    const effectiveBatchId = batchId ?? `plc-${currentStatus?.timestamp ?? Date.now()}`;
+    if (productPrecheckBatchId === effectiveBatchId && productPrecheck) return;
+    productPrecheckBusy = true;
+    productPrecheckBatchId = effectiveBatchId;
+    const profile = selectedProductProfile(productConfig);
+    productPrecheck = {
+      batchId: effectiveBatchId,
+      productType: productConfig.selectedType,
+      productLabel: profile.label,
+      expectedSoftwareVersion: profile.expectedSoftwareVersion,
+      expectedProbeCount: profile.expectedProbeCount,
+      startedAt: Date.now(),
+      completedAt: 0,
+      verdict: 'PENDING',
+      units: [],
+    };
+    recomputeVerdicts();
+    broadcastSummary();
+    try {
+      productPrecheck = await detectors.runProductPrecheck(productConfig, effectiveBatchId);
+    } catch (error) {
+      productPrecheck = {
+        ...productPrecheck,
+        completedAt: Date.now(),
+        verdict: 'FAIL',
+      };
+      wsServer.broadcastError(error instanceof Error ? `PRODUCT_PRECHECK_FAILED: ${error.message}` : 'PRODUCT_PRECHECK_FAILED');
+    } finally {
+      productPrecheckBusy = false;
+      recomputeVerdicts();
+      broadcastSummary();
+    }
+  };
+
+  const cancelDelayedProductPrecheck = (reason: string) => {
+    productPrecheckScheduleGeneration += 1;
+    if (productPrecheckDelayTimer) {
+      clearTimeout(productPrecheckDelayTimer);
+      productPrecheckDelayTimer = null;
+      console.log(`[产品预检] 已取消前半段触发 batch=${productPrecheckDelayBatchId ?? '-'} reason=${reason}`);
+    }
+    productPrecheckDelayBatchId = null;
+  };
+
+  const scheduleDelayedProductPrecheck = (batchId: string | null) => {
+    if (productPrecheckDelayTimer || productPrecheckBusy || productPrecheck || !detectors.runProductPrecheck) return;
+    const scheduledBatchId = batchId;
+    const scheduledDisplayBatchId = batchId ?? `plc-${currentStatus?.timestamp ?? Date.now()}`;
+    const scheduleGeneration = ++productPrecheckScheduleGeneration;
+    productPrecheckDelayBatchId = scheduledDisplayBatchId;
+    console.log(`[产品预检] 信号稳定阶段开始，立即进入前半段预检准备 batch=${scheduledDisplayBatchId}`);
+    productPrecheckDelayTimer = setTimeout(() => {
+      productPrecheckDelayTimer = null;
+      productPrecheckDelayBatchId = null;
+      void (async () => {
+        const deadline = Date.now() + POSITION_ONE_PRECHECK_READY_WAIT_MS;
+        let readyReport = detectors.getReadyReport?.();
+        while (
+          readyReport
+          && !readyReport.ready
+          && Date.now() < deadline
+        ) {
+          if (scheduleGeneration !== productPrecheckScheduleGeneration) return;
+          if (!isPositionOneSignalStabilization(currentStatus)) {
+            console.warn(`[产品预检] 等待探测器就绪期间已离开信号稳定阶段，跳过本批预检 batch=${scheduledDisplayBatchId}`);
+            return;
+          }
+          if (scheduledBatchId && waveformAnalysisState.batchId !== scheduledBatchId) {
+            console.warn(`[产品预检] 等待探测器就绪期间批次已切换，跳过旧批次预检 scheduled=${scheduledBatchId} current=${waveformAnalysisState.batchId ?? '-'}`);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, POSITION_ONE_PRECHECK_READY_POLL_MS));
+          readyReport = detectors.getReadyReport?.();
+        }
+        if (scheduleGeneration !== productPrecheckScheduleGeneration) return;
+        if (!isPositionOneSignalStabilization(currentStatus)) {
+          console.warn(`[产品预检] 前半段准备完成时已不在信号稳定阶段，禁止在正式噪声窗口插入预检 batch=${scheduledDisplayBatchId}`);
+          return;
+        }
+        if (scheduledBatchId && waveformAnalysisState.batchId !== scheduledBatchId) {
+          console.warn(`[产品预检] 前半段准备完成时批次已切换，跳过旧批次预检 scheduled=${scheduledBatchId} current=${waveformAnalysisState.batchId ?? '-'}`);
+          return;
+        }
+        if (readyReport && !readyReport.ready) {
+          const pending = readyReport.units.filter((unit) => !unit.ready).map((unit) => `D${unit.index}`).join(',') || '-';
+          console.warn(`[产品预检] 前半段等待 ${POSITION_ONE_PRECHECK_READY_WAIT_MS}ms 后仍有探测器未 TEST_READY (${pending})，继续正式预检并保留实际失败证据 batch=${scheduledDisplayBatchId}`);
+        }
+        console.log(`[产品预检] 信号稳定前半段开始读取版本/探头/灵敏度/状态并执行继电器功能检测 batch=${scheduledDisplayBatchId}`);
+        await runProductPrecheck(waveformAnalysisState.batchId);
+      })().catch((error) => {
+        wsServer.broadcastError(error instanceof Error ? `PRODUCT_PRECHECK_SCHEDULE_FAILED: ${error.message}` : 'PRODUCT_PRECHECK_SCHEDULE_FAILED');
+      });
+    }, POSITION_ONE_PRECHECK_DELAY_MS);
+  };
+
   source.on('status', (status: PLCProcessStatus) => {
-    const previousStage = currentStatus?.processStage;
+    const previousStatus = currentStatus;
+    const previousStage = previousStatus?.processStage;
     const previousBatchId = waveformAnalysisState.batchId;
-    const heatInterferenceStarted = status.io?.steps?.stepM10_4 === true
-      && currentStatus?.io?.steps?.stepM10_4 !== true;
-    const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true
-      && currentStatus?.io?.steps?.stepM10_4 === true;
-    const flashStarted = status.io?.steps?.stepM11_0 === true
-      && currentStatus?.io?.steps?.stepM11_0 !== true;
-    const flashCompleted = status.io?.steps?.stepM11_0 !== true
-      && currentStatus?.io?.steps?.stepM11_0 === true;
+    const signalStabilizationStarted = isPositionOneSignalStabilization(status) && !isPositionOneSignalStabilization(previousStatus);
+    const signalStabilizationEnded = !isPositionOneSignalStabilization(status) && isPositionOneSignalStabilization(previousStatus);
+    const heatInterferenceStarted = status.io?.steps?.stepM10_4 === true && previousStatus?.io?.steps?.stepM10_4 !== true;
+    const heatInterferenceCompleted = status.io?.steps?.stepM10_4 !== true && previousStatus?.io?.steps?.stepM10_4 === true;
+    const flashStarted = status.io?.steps?.stepM11_0 === true && previousStatus?.io?.steps?.stepM11_0 !== true;
+    const flashCompleted = status.io?.steps?.stepM11_0 !== true && previousStatus?.io?.steps?.stepM11_0 === true;
     currentStatus = status;
     const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
-      && previousStage !== 'FLASH'
-      && previousStage !== 'EMC';
+      && previousStage !== 'FLASH' && previousStage !== 'EMC';
     waveformAnalysis.observeProcess(status);
     waveformAnalysisState = waveformAnalysis.snapshot();
     const batchStarted = waveformAnalysisState.batchId !== previousBatchId;
-    if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) {
-      detectors.clearWaveformHistory?.();
+    if (batchStarted) {
+      cancelDelayedProductPrecheck('BATCH_CHANGED');
+      productPrecheck = null;
+      productPrecheckBatchId = null;
+      streamingStoppedBatchId = null;
+      applyProductWaveformProfile();
+      if (waveformAnalysisState.batchId) {
+        detectors.prepareWaveformStartup?.(waveformAnalysisState.batchId ?? undefined);
+        detectorStartupReport = detectors.getReadyReport?.() ?? detectorStartupReport;
+      }
     }
-    if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) {
-      resetInspectionPositions(waveformAnalysisState.batchId);
-    }
+    if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
+    if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
+    if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
+    if (signalStabilizationEnded) cancelDelayedProductPrecheck('LEFT_SIGNAL_STABILIZATION');
     if (heatInterferenceStarted) positionStartedAt.set('DETECTION_POSITION_1_HEAT', status.timestamp);
     if (flashStarted) positionStartedAt.set('DETECTION_POSITION_2_FLASH', status.timestamp);
     if (heatInterferenceCompleted) {
@@ -263,8 +459,13 @@ export function createFieldStatusRuntime(
         positionStartedAt.get('DETECTION_POSITION_2_FLASH') ?? null, status.timestamp, detectors.getCurrentState(),
       ));
     }
-    detectorVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState);
-    finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
+    recomputeVerdicts();
+    if (waveformAnalysisState.phase === 'COMPLETE' && waveformAnalysisState.batchId && streamingStoppedBatchId !== waveformAnalysisState.batchId) {
+      streamingStoppedBatchId = waveformAnalysisState.batchId;
+      void detectors.stopWaveformStreaming?.().catch((error) => {
+        wsServer.broadcastError(error instanceof Error ? `FLAME_STREAM_STOP_FAILED: ${error.message}` : 'FLAME_STREAM_STOP_FAILED');
+      });
+    }
     if (waveformAnalysisState.phase === 'COMPLETE' && waveformAnalysisState.batchId && loggedBatchId !== waveformAnalysisState.batchId) {
       try {
         resultLogger.record({
@@ -286,19 +487,21 @@ export function createFieldStatusRuntime(
     broadcastSummary();
   });
   source.on('error', (error: unknown) => {
+    cancelDelayedProductPrecheck('PLC_STATUS_ERROR');
     currentStatus = undefined;
     finalVerdict = evaluateFieldFinalVerdict(undefined, detectorVerdict, waveformAnalysisState);
     wsServer.broadcastError(error instanceof Error ? error.message : 'PLC_PROCESS_STATUS_READ_FAILED');
     broadcastSummary();
   });
   detectors.on('flame_state', (state: FlameDetectorState) => {
+    detectorStartupReport = detectors.getReadyReport?.() ?? detectorStartupReport;
     waveformAnalysis.observeDetectors(state);
     waveformAnalysisState = waveformAnalysis.snapshot();
-    detectorVerdict = evaluateFieldDetectorBatch(state, waveformAnalysisState);
-    finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
+    recomputeVerdicts(state);
     wsServer.broadcastFlameState(state);
     broadcastSummary();
   });
+  detectors.on('relay_test_phase', () => broadcastSummary());
   detectors.on('error', (error: unknown) => wsServer.broadcastError(error instanceof Error ? error.message : 'FLAME_DETECTOR_READ_FAILED'));
   wsServer.on('client_connected', () => {
     if (currentStatus) wsServer.broadcastPLCProcessStatus(currentStatus);
@@ -308,54 +511,136 @@ export function createFieldStatusRuntime(
 
   app.get('/api/health', (_req, res) => res.json({
     status: 'ok',
-    mode: 'field-status-readonly',
+    mode: 'field-plc-readonly',
+    capabilities: {
+      plcWrite: false,
+      detectorConfig: true,
+      detectorReadonlyAutoTest: true,
+      productPrecheck: true,
+      testObserver: true,
+      mqttUpload: true,
+    },
     plcConnected: source.isConnected(),
     detectorConnected: detectorDataStreamConnected(),
     detectorTransportConnected: detectorTransportConnected(),
     detectorDataStreamConnected: detectorDataStreamConnected(),
+    detectorMutationBusy,
+    productPrecheckBusy,
     timestamp: Date.now(),
   }));
   app.get('/api/plc/process-status', (_req, res) => {
     const current = source.isConnected() ? source.getCurrent() : undefined;
     if (!current) return res.status(503).json({ code: 'PLC_PROCESS_STATUS_UNAVAILABLE' });
-    res.json(current);
+    return res.json(current);
+  });
+  app.get('/api/product-config', (_req, res) => {
+    res.json({ config: productConfig, locked: processLocksProductSelection(currentStatus), precheck: productPrecheck });
+  });
+  app.post('/api/indicator-vision/evidence', requireDesktopMutation, (req, res) => {
+    const expectedBatchId = productPrecheck?.batchId ?? waveformAnalysisState.batchId ?? null;
+    const report = normalizeIndicatorVisionReport(req.body, expectedBatchId);
+    if (!report) return res.status(400).json({ code: 'INDICATOR_VISION_EVIDENCE_INVALID' });
+    if (!productPrecheck || !expectedBatchId || report.batchId !== expectedBatchId) {
+      return res.status(409).json({ code: 'INDICATOR_VISION_BATCH_NOT_READY' });
+    }
+    productPrecheck = { ...productPrecheck, indicatorVision: report };
+    recomputeVerdicts();
+    broadcastSummary();
+    return res.json({ success: true, report });
+  });
+  app.put('/api/product-config', requireDesktopMutation, async (req, res) => {
+    if (processLocksProductSelection(currentStatus)) return res.status(409).json({ code: 'PRODUCT_CONFIG_LOCKED_DURING_PROCESS' });
+    const previous = productConfig;
+    try {
+      const next = normalizeProductDetectionConfig(req.body, previous);
+      productConfig = next;
+      productPrecheck = null;
+      productPrecheckBatchId = null;
+      applyProductWaveformProfile();
+      recomputeVerdicts();
+      const store = await loadSystemConfig() ?? createDefaultSystemConfig();
+      await saveSystemConfig({ ...store, productDetectionConfig: next, lastUpdated: Date.now() });
+      broadcastSummary();
+      return res.json({ success: true, config: next, locked: false });
+    } catch (error) {
+      productConfig = previous;
+      applyProductWaveformProfile();
+      recomputeVerdicts();
+      return res.status(500).json({ code: 'PRODUCT_CONFIG_UPDATE_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
   });
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
+  app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
+    ready: false,
+    timeoutMs: 15_000,
+    startedAt: null,
+    completedAt: Date.now(),
+    requiredSlots: [],
+    units: [],
+  }));
   app.get('/api/flame/config', (_req, res) => {
     const current = detectors.getConfig?.() ?? config.flame;
     res.json({ success: true, config: current });
   });
-  app.put('/api/flame/config', async (req, res) => {
-    if (!detectors.updateConfig || !detectors.getConfig) {
-      return res.status(501).json({ code: 'FLAME_CONFIG_UNSUPPORTED' });
-    }
-    const next = normalizeFlameConfig(req.body, detectors.getConfig());
+  app.put('/api/flame/config', requireDesktopMutation, async (req, res) => {
+    if (detectorMutationBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
+    if (processLocksProductSelection(currentStatus)) return res.status(409).json({ code: 'FLAME_CONFIG_LOCKED_DURING_PROCESS' });
+    if (!detectors.updateConfig || !detectors.getConfig) return res.status(501).json({ code: 'FLAME_CONFIG_UNSUPPORTED' });
+    detectorMutationBusy = true;
+    const previous = detectors.getConfig();
+    const next = normalizeFlameConfig(req.body, previous);
     try {
       await detectors.disconnect();
       detectors.updateConfig(next);
       config.flame = next;
-      waveformAnalysis.updateConfig(next.waveformAnalysis);
+      waveformAnalysis.updateConfig(productAwareWaveformConfig(next.waveformAnalysis, selectedProductProfile(productConfig).expectedProbeCount));
       waveformAnalysisState = waveformAnalysis.snapshot();
-      detectorVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState);
-      finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
       await detectors.connect();
+      const requiresTransport = next.units.some((unit) => unit.enabled);
+      if (requiresTransport && !detectorTransportConnected()) throw new Error('FLAME_CONFIG_NEW_CONNECTION_UNAVAILABLE');
+      recomputeVerdicts();
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({ ...store, flameConfig: next, lastUpdated: Date.now() });
       broadcastSummary();
-      res.json({ success: true, config: next });
+      return res.json({ success: true, config: next });
     } catch (error: any) {
-      res.status(500).json({ code: 'FLAME_CONFIG_UPDATE_FAILED', error: error?.message || String(error) });
+      let rollbackError: string | null = null;
+      try {
+        await detectors.disconnect();
+        detectors.updateConfig(previous);
+        config.flame = previous;
+        waveformAnalysis.updateConfig(productAwareWaveformConfig(previous.waveformAnalysis, selectedProductProfile(productConfig).expectedProbeCount));
+        waveformAnalysisState = waveformAnalysis.snapshot();
+        await detectors.connect();
+        recomputeVerdicts();
+        broadcastSummary();
+      } catch (rollback) {
+        rollbackError = rollback instanceof Error ? rollback.message : String(rollback);
+      }
+      return res.status(500).json({
+        code: 'FLAME_CONFIG_UPDATE_FAILED',
+        error: error?.message || String(error),
+        rolledBack: rollbackError === null,
+        rollbackError,
+      });
+    } finally {
+      detectorMutationBusy = false;
     }
   });
-  app.post('/api/flame/auto-test', async (req, res) => {
+  app.post('/api/flame/auto-test', requireDesktopMutation, async (req, res) => {
+    if (detectorMutationBusy || productPrecheckBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
+    if (processLocksProductSelection(currentStatus)) return res.status(409).json({ code: 'FLAME_AUTO_TEST_LOCKED_DURING_PROCESS' });
     if (!detectors.runAutoTest) return res.status(501).json({ code: 'FLAME_AUTO_TEST_UNSUPPORTED' });
+    detectorMutationBusy = true;
     try {
       const report = await detectors.runAutoTest((progress) => {
         wsServer.broadcast({ type: WSMessageType.FLAME_TEST_PROGRESS, payload: progress, timestamp: Date.now() });
       }, { enabledStepKeys: Array.isArray(req.body?.enabledStepKeys) ? req.body.enabledStepKeys : undefined });
-      res.json({ success: true, report });
+      return res.json({ success: true, report });
     } catch (error: any) {
-      res.status(409).json({ code: 'FLAME_AUTO_TEST_FAILED', error: error?.message || String(error) });
+      return res.status(409).json({ code: 'FLAME_AUTO_TEST_FAILED', error: error?.message || String(error) });
+    } finally {
+      detectorMutationBusy = false;
     }
   });
   app.get('/api/field/summary', (_req, res) => res.json(summary()));
@@ -364,6 +649,9 @@ export function createFieldStatusRuntime(
   });
 
   return {
+    app,
+    wsServer,
+    snapshot: () => ({ summary: summary(), flame: detectors.getCurrentState() }),
     async listen(port = config.serverPort): Promise<number> {
       await source.start();
       const actualPort = await new Promise<number>((resolve, reject) => {
@@ -379,6 +667,7 @@ export function createFieldStatusRuntime(
       return actualPort;
     },
     async close(): Promise<void> {
+      cancelDelayedProductPrecheck('RUNTIME_CLOSING');
       await source.stop();
       await detectors.disconnect();
       wsServer.close();
@@ -396,8 +685,14 @@ export async function startFieldStatusServer(): Promise<FieldStatusRuntime> {
     ? { ...config.flame, ...systemConfig.flameConfig }
     : config.flame;
   config.flame = normalizeFlameConfig(savedFlameConfig, config.flame);
-  const runtime = createFieldStatusRuntime();
+  const productConfig = normalizeProductDetectionConfig(systemConfig?.productDetectionConfig, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const runtime = createFieldStatusRuntime(
+    new PLCProcessMonitor(config.plcs[0]!),
+    new FlameDetectorService(config.flame, { deferWaveformUntilInspection: true }),
+    new FileFieldTestResultLogger(),
+    productConfig,
+  );
   const port = await runtime.listen();
-  console.log(`[现场状态] 已启动只读 PLC 工序状态服务：http://127.0.0.1:${port}`);
+  console.log(`[现场状态] 已启动 PLC 只读工序监测、产品预检与探测器服务：http://127.0.0.1:${port}`);
   return runtime;
 }

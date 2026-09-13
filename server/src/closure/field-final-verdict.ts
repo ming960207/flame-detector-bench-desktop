@@ -5,7 +5,7 @@ import type { FieldWaveformAnalysisSnapshot } from './field-waveform-analysis.js
 export interface FieldFinalVerdict {
   verdict: FieldDetectorVerdict;
   grade?: FieldQualityGrade;
-  reason?: 'WAITING_FOR_PLC_COMPLETE' | 'PLC_PROCESS_STATUS_INVALID' | 'WAITING_FOR_WAVEFORM_ANALYSIS';
+  reason?: 'WAITING_FOR_PLC_COMPLETE' | 'PLC_PROCESS_STATUS_INVALID' | 'WAITING_FOR_WAVEFORM_ANALYSIS' | 'TEST_INVALID_RETEST_REQUIRED';
 }
 
 /**
@@ -28,6 +28,9 @@ export function evaluateFieldFinalVerdict(
   }
   if (qualityEnabled && detectorVerdict.grade === 'PENDING') {
     return { verdict: 'PENDING', reason: 'WAITING_FOR_WAVEFORM_ANALYSIS' };
+  }
+  if ((detectorVerdict.testInvalidCount ?? 0) > 0 && (detectorVerdict.productFailCount ?? 0) === 0) {
+    return { verdict: 'FAIL', grade: 'FAIL', reason: 'TEST_INVALID_RETEST_REQUIRED' };
   }
   if (qualityEnabled) return { verdict: detectorVerdict.verdict, grade: detectorVerdict.grade };
   return { verdict: detectorVerdict.verdict };

@@ -8,54 +8,51 @@
   <link rel="icon" type="image/png" href="./favicon.png" />
   <!-- Tailwind CSS 通过 PostCSS 处理，不再使用 CDN -->
   <style>
-    /* 使用系统字体回退，确保离线可用 */
     body {
       font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background-color: #f8fafc;
       color: #334155;
       overflow: hidden;
     }
+    .dark body { background-color: #020617; color: #e2e8f0; }
+    .font-tech { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; letter-spacing: 0.05em; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .neon-border { box-shadow: 0 0 5px rgba(6, 182, 212, 0.5), inset 0 0 5px rgba(6, 182, 212, 0.2); }
+    .neon-text { text-shadow: 0 0 5px rgba(6, 182, 212, 0.8); }
+    .active-step-glow { box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); border-color: #22c55e; }
 
-    .dark body {
-      background-color: #020617;
-      color: #e2e8f0;
+    /* 1280×1080 现场屏：取消5:3信箱式缩放，充分利用纵向空间，提高中央卡片可读性。 */
+    @media (min-width: 1180px) and (max-width: 1320px) and (min-height: 900px) {
+      .wutos-dashboard {
+        padding: 8px !important;
+      }
+      .wutos-frame {
+        width: calc(100vw - 16px) !important;
+        height: calc(100vh - 16px) !important;
+        max-height: none !important;
+        aspect-ratio: auto !important;
+      }
     }
 
-    .font-tech {
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      letter-spacing: 0.05em;
+    /* A类绿色；B类黄色，现场快速区分。 */
+    .wutos-detector-card.pass.is-b-grade {
+      border-color: #facc15 !important;
+      box-shadow: 0 0 13px rgba(250, 204, 21, .68), inset 0 0 13px rgba(250, 204, 21, .13) !important;
     }
+    .wutos-detector-card.pass.is-b-grade > header span { color: #ffe36a !important; text-shadow: 0 0 6px rgba(250, 204, 21, .62); }
 
-    /* Custom Scrollbar for the dark theme */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: #0f172a;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #334155;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #475569;
-    }
-
-    .neon-border {
-      box-shadow: 0 0 5px rgba(6, 182, 212, 0.5), inset 0 0 5px rgba(6, 182, 212, 0.2);
-    }
-
-    .neon-text {
-      text-shadow: 0 0 5px rgba(6, 182, 212, 0.8);
-    }
-
-    .active-step-glow {
-      box-shadow: 0 0 15px rgba(34, 197, 94, 0.6);
-      border-color: #22c55e;
+    /* B类阈值不再独立配置：仅保留A类输入，B由后端固定按A放宽10%。 */
+    .quality-threshold-groups > .quality-threshold-group:nth-child(2),
+    .quality-detector-grades > .quality-snr-grade:nth-child(2) { display: none !important; }
+    .quality-threshold-groups, .quality-detector-grades { grid-template-columns: minmax(0, 1fr) !important; }
+    .quality-threshold-groups::after {
+      content: "B类无需单独设置：系统固定按A类数值规则放宽10%（上限×1.10，下限×0.90；区间向两侧扩展10%）。";
+      display: flex; align-items: center; min-height: 38px; padding: 8px 10px;
+      border: 1px solid rgba(250, 204, 21, .46); border-radius: 5px; background: rgba(250, 204, 21, .08);
+      color: #ffe36a; font-size: 11px; font-weight: 700; line-height: 1.45;
     }
   </style>
   <link rel="stylesheet" href="./index.css">
@@ -63,6 +60,43 @@
 
 <body>
   <div id="root"></div>
+  <script>
+    (() => {
+      const RESULT_SELECTOR = '.wutos-detector-card';
+
+      function updateResultGradeCard(card) {
+        const gradeText = card.querySelector('header span')?.textContent?.trim() || '';
+        card.classList.toggle('is-b-grade', gradeText === 'B类合格');
+      }
+
+      function updateQualityPolicyText() {
+        const qualityText = 'A类使用当前设置；B类无需单独设置，系统固定按A类规则自动放宽10%；超过B类容差才判不合格。';
+        const snrText = '仅设置A类范围；B类范围由系统自动扩展10%（下限×0.90，上限×1.10）。';
+        const qualityHeading = document.querySelector('.quality-config-heading span');
+        if (qualityHeading && qualityHeading.textContent !== qualityText) qualityHeading.textContent = qualityText;
+        const snrHeading = document.querySelector('.quality-snr-heading span');
+        if (snrHeading && snrHeading.textContent !== snrText) snrHeading.textContent = snrText;
+      }
+
+      let scheduled = false;
+      function refreshAll() {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          document.querySelectorAll(RESULT_SELECTOR).forEach(updateResultGradeCard);
+          updateQualityPolicyText();
+        });
+      }
+
+      const observer = new MutationObserver(refreshAll);
+      const start = () => {
+        observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+        refreshAll();
+      };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true }); else start();
+    })();
+  </script>
   <script type="module" src="./index.tsx"></script>
 </body>
 

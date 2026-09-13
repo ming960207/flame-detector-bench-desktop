@@ -1,9 +1,17 @@
 import type { FlameDetectorState, FlameDetectorUnitState } from '../types.js';
+import {
+  expectedProbeChannels,
+  selectedProductProfile,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+  type ProductPrecheckUnitResult,
+  type ProductType,
+} from '../product-profile.js';
 import { DEFAULT_DETECTION_QUALITY_CONFIG } from './field-waveform-analysis.js';
+import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
 import type {
   ChannelKey,
   DetectionRatioThresholds,
-  DetectionQualityConfig,
   DetectionQualityThresholds,
   FieldWaveformAnalysisSnapshot,
   InterferenceStage,
@@ -12,6 +20,7 @@ import type {
 
 export type FieldDetectorVerdict = 'PASS' | 'FAIL' | 'PENDING';
 export type FieldQualityGrade = 'A_PASS' | 'B_PASS' | 'FAIL' | 'PENDING';
+export type FieldResultClassification = 'PRODUCT_RESULT' | 'TEST_INVALID';
 
 export interface FieldDetectorMetrics {
   noiseRms: number | null;
@@ -31,8 +40,11 @@ export interface FieldDetectorResult {
   verdict: FieldDetectorVerdict;
   grade: FieldQualityGrade;
   reason?: string;
+  classification?: FieldResultClassification;
   sampledAt: number;
   metrics: FieldDetectorMetrics;
+  precheck?: ProductPrecheckUnitResult;
+  noDataProbes?: ChannelKey[];
 }
 
 export interface FieldDetectorBatchVerdict {
@@ -40,11 +52,33 @@ export interface FieldDetectorBatchVerdict {
   grade: FieldQualityGrade;
   units: FieldDetectorResult[];
   timestamp: number;
+  productType?: ProductType;
+  expectedSoftwareVersion?: string;
+  expectedProbeCount?: number;
+  productPrecheckVerdict?: ProductPrecheckReport['verdict'] | null;
+  testInvalidCount?: number;
+  productFailCount?: number;
 }
+
+const REQUIRED_PRODUCTION_SLOTS = [1, 2, 3, 4, 5, 6] as const;
 
 function finiteOrNull(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function emptyMetrics(): FieldDetectorMetrics {
+  return {
+    noiseRms: null,
+    noisePeakToPeak: null,
+    noiseAbsolute: null,
+    interferenceRatio: null,
+    consistencyTrend: null,
+    snr21: null,
+    snr23: null,
+    snr31: null,
+    sensitivity: null,
+  };
 }
 
 function detectorMetrics(unit: FlameDetectorUnitState, analysis?: WaveformAnalysisUnitResult): FieldDetectorMetrics {
@@ -66,17 +100,15 @@ function thresholdMatches(
   metrics: FieldDetectorMetrics,
   limits: DetectionQualityThresholds,
   ratios: DetectionRatioThresholds,
+  expectedChannels: ChannelKey[],
 ): string | undefined {
-  const upperBounds: Array<[keyof Pick<FieldDetectorMetrics, 'noiseRms' | 'noiseAbsolute' | 'interferenceRatio'>, number | undefined, string]> = [
-    ['noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT'],
-    ['noiseAbsolute', limits.maxNoiseAbsolute, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT'],
-    ['interferenceRatio', limits.maxInterferenceRatio, 'INTERFERENCE_RATIO_EXCEEDS_LIMIT'],
-  ];
-  for (const [key, limit, reason] of upperBounds) {
-    if (limit == null || limit <= 0) continue;
-    const value = metrics[key];
-    if (value === null) return `${key.toUpperCase()}_MISSING`;
-    if (value > limit) return reason;
+  // Formal noise grading is handled only by noiseThresholdFailure() using the full
+  // window RAW fluctuation=(max-min)/2 and RAW absolute values. noiseRms and the
+  // normalized aggregate noiseAbsolute remain diagnostics and must never silently
+  // downgrade A/B during interference-stage evaluation.
+  if (limits.maxInterferenceRatio > 0) {
+    if (metrics.interferenceRatio === null) return 'INTERFERENCE_RATIO_MISSING';
+    if (metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
   }
 
   if ((limits.minConsistencyTrend ?? 0) > 0) {
@@ -84,12 +116,23 @@ function thresholdMatches(
     if (metrics.consistencyTrend < limits.minConsistencyTrend!) return 'CONSISTENCY_TREND_BELOW_LIMIT';
   }
 
-  const snrRanges: Array<[keyof Pick<FieldDetectorMetrics, 'snr21' | 'snr23' | 'snr31'>, DetectionRatioThresholds[keyof DetectionRatioThresholds], string]> = [
-    ['snr21', ratios.snr21, 'SNR21'],
-    ['snr23', ratios.snr23, 'SNR23'],
-    ['snr31', ratios.snr31, 'SNR31'],
+  // Ratio applicability follows the actual optical channel pair, not the numeric
+  // probe count. The installed dual-wavelength product has two real channels P2/P3
+  // in a three-channel protocol frame, so SNR23 must be checked while P1-based
+  // SNR21/SNR31 must be ignored for that product.
+  const snrRanges: Array<[
+    keyof Pick<FieldDetectorMetrics, 'snr21' | 'snr23' | 'snr31'>,
+    DetectionRatioThresholds[keyof DetectionRatioThresholds],
+    string,
+    readonly ChannelKey[],
+  ]> = [
+    ['snr21', ratios.snr21, 'SNR21', ['probe2', 'probe1']],
+    ['snr23', ratios.snr23, 'SNR23', ['probe2', 'probe3']],
+    ['snr31', ratios.snr31, 'SNR31', ['probe3', 'probe1']],
   ];
-  for (const [key, range, label] of snrRanges) {
+  const expectedChannelSet = new Set(expectedChannels);
+  for (const [key, range, label, requiredChannels] of snrRanges) {
+    if (!requiredChannels.every((channel) => expectedChannelSet.has(channel))) continue;
     const value = metrics[key];
     if (range.min > 0 || range.max > 0) {
       if (value === null) return `${key.toUpperCase()}_MISSING`;
@@ -101,31 +144,73 @@ function thresholdMatches(
   if (limits.minSensitivity > 0) {
     const value = metrics.sensitivity;
     if (value === null) return 'SENSITIVITY_MISSING';
-    if (value < limits.minSensitivity) return 'SENSITIVITY_BELOW_LIMIT';
+    if (value < limits.minSensitivity!) return 'SENSITIVITY_BELOW_LIMIT';
   }
   return undefined;
+}
+
+function noDataProbes(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  analysisSnapshot: FieldWaveformAnalysisSnapshot | undefined,
+  expectedChannels: ChannelKey[],
+): ChannelKey[] {
+  const noiseTest = analysis?.noiseTest;
+  const thresholds = analysisSnapshot?.thresholds;
+  if (!noiseTest || !thresholds || noiseTest.sampleCount < thresholds.minNoiseSamples) return [];
+  const absoluteLimit = Number(thresholds.maxNoiseAbsolute);
+  const fluctuationLimit = Number(thresholds.minNoiseRms);
+  if (!Number.isFinite(absoluteLimit) || absoluteLimit <= 0 || !Number.isFinite(fluctuationLimit) || fluctuationLimit < 0) return [];
+  const nearUpperLimit = absoluteLimit * 0.95;
+  return expectedChannels.filter((key) => {
+    const metrics = noiseTest.metrics[key];
+    return Boolean(
+      metrics
+      && Number.isFinite(metrics.absolute)
+      && Number.isFinite(metrics.fluctuation)
+      && metrics.absolute >= nearUpperLimit
+      && metrics.fluctuation <= fluctuationLimit,
+    );
+  });
 }
 
 function noiseThresholdFailure(
   analysis: WaveformAnalysisUnitResult,
   minNoiseRms: number,
   limits: DetectionQualityThresholds,
-  noiseProbes: ChannelKey[] | undefined,
+  expectedChannels: ChannelKey[],
 ): string | undefined {
   const noiseMetrics = analysis.noiseTest?.metrics;
   if (!noiseMetrics) return undefined;
-  const keys = noiseProbes?.length ? noiseProbes : (['probe1', 'probe2', 'probe3'] as ChannelKey[]);
-  for (const key of keys) {
+  for (const key of expectedChannels) {
     const metrics = noiseMetrics[key];
-    if (!metrics || !Number.isFinite(metrics.fluctuation)) return 'NOISE_RMS_MISSING';
-    if (minNoiseRms > 0 && metrics.fluctuation < minNoiseRms) return 'NOISE_RMS_BELOW_LIMIT';
-    if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return 'NOISE_RMS_EXCEEDS_LIMIT';
+    if (!metrics || !Number.isFinite(metrics.fluctuation)) return `${key.toUpperCase()}_NOISE_RMS_MISSING`;
+    // minNoiseRms is the existing signal-validity/no-data floor shared by both
+    // grades; it is intentionally not a separately configurable B quality limit.
+    if (minNoiseRms > 0 && metrics.fluctuation < minNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_BELOW_LIMIT`;
+    if (limits.maxNoiseRms > 0 && metrics.fluctuation > limits.maxNoiseRms) return `${key.toUpperCase()}_NOISE_RMS_EXCEEDS_LIMIT`;
     if (limits.maxNoiseAbsolute != null && limits.maxNoiseAbsolute > 0) {
-      if (!Number.isFinite(metrics.absolute)) return 'NOISE_ABSOLUTE_MISSING';
-      if (metrics.absolute > limits.maxNoiseAbsolute) return 'NOISE_ABSOLUTE_EXCEEDS_LIMIT';
+      if (!Number.isFinite(metrics.absolute)) return `${key.toUpperCase()}_NOISE_ABSOLUTE_MISSING`;
+      if (metrics.absolute > limits.maxNoiseAbsolute) return `${key.toUpperCase()}_NOISE_ABSOLUTE_EXCEEDS_LIMIT`;
     }
   }
   return undefined;
+}
+
+function precheckHasProductFailure(precheck: ProductPrecheckUnitResult): boolean {
+  return precheck.reasons.some((reason) => reason === 'SOFTWARE_VERSION_MISMATCH'
+    || reason === 'PROBE_COUNT_MISMATCH'
+    || reason === 'DETECTOR_FAULT_AT_PRECHECK'
+    || reason === 'RELAY_FUNCTIONAL_TEST_FAILED');
+}
+
+function precheckIsTestInvalid(precheck: ProductPrecheckUnitResult | undefined): boolean {
+  if (!precheck || precheck.verdict !== 'FAIL') return false;
+  if (precheckHasProductFailure(precheck)) return false;
+  return precheck.reasons.includes('TEST_INFRASTRUCTURE_INVALID')
+    || precheck.reasons.includes('SOFTWARE_VERSION_NOT_CONFIGURED')
+    || precheck.reasons.includes('SOFTWARE_VERSION_READ_FAILED')
+    || precheck.reasons.includes('PROBE_COUNT_READ_FAILED')
+    || precheck.reasons.includes('SENSITIVITY_READ_FAILED');
 }
 
 function result(
@@ -134,33 +219,90 @@ function result(
   verdict: FieldDetectorVerdict,
   grade: FieldQualityGrade,
   reason?: string,
+  precheck?: ProductPrecheckUnitResult,
+  missingProbes: ChannelKey[] = [],
+  classification: FieldResultClassification = 'PRODUCT_RESULT',
 ): FieldDetectorResult {
-  return { ...base, metrics, verdict, grade, ...(reason ? { reason } : {}) };
+  return {
+    ...base,
+    metrics,
+    verdict,
+    grade,
+    classification,
+    ...(reason ? { reason } : {}),
+    ...(precheck ? { precheck } : {}),
+    ...(missingProbes.length > 0 ? { noDataProbes: missingProbes } : {}),
+  };
 }
 
 function evaluateUnit(
   unit: FlameDetectorUnitState,
   analysis: WaveformAnalysisUnitResult | undefined,
   analysisSnapshot: FieldWaveformAnalysisSnapshot | undefined,
+  precheck: ProductPrecheckUnitResult | undefined,
+  productConfig: ProductDetectionConfig | undefined,
 ): FieldDetectorResult {
   const base = { index: unit.index, address: unit.address, sampledAt: unit.lastUpdate };
   const metrics = detectorMetrics(unit, analysis);
   const complete = analysisSnapshot?.phase === 'COMPLETE';
-  const quality = analysisSnapshot?.thresholds.quality ?? DEFAULT_DETECTION_QUALITY_CONFIG;
+  // Re-derive B here as a defensive boundary: historical snapshots/configs may
+  // still contain old independent B values, but production grading never trusts them.
+  const quality = applyAutomaticBGradePolicy(
+    analysisSnapshot?.thresholds.quality ?? DEFAULT_DETECTION_QUALITY_CONFIG,
+  );
+  const expectedProbeCount = productConfig ? selectedProductProfile(productConfig).expectedProbeCount : Math.max(1, unit.probeCount || 3);
+  const expectedChannels = expectedProbeChannels(expectedProbeCount);
+  const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
-  if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT');
+  // Startup failures remain authoritative. However, after a quantitative batch is
+  // COMPLETE, stopWaveformStreaming() intentionally resets startup to DISCONNECTED
+  // and broadcasts one last transport state. A completed waveform PASS is evidence
+  // gathered while the unit was online/source-ready/synchronized, so that terminal
+  // cleanup state must not rewrite the finished inspection to NG.
+  if (unit.startup?.state === 'FAILED') {
+    return result(base, metrics, 'FAIL', 'FAIL', unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED', precheck, missingProbes);
+  }
+  const completedWaveformPass = complete && analysis?.verdict === 'PASS';
+  if (unit.startup && unit.startup.state !== 'TEST_READY' && !completedWaveformPass) {
+    const reason = `DETECTOR_STARTUP_${unit.startup.state}`;
+    if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
+    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
+  }
+  // Product precheck is evidence collected during the signal-stabilization wait.
+  // Transport/configuration failures remain blocking, but are explicitly classified
+  // as TEST_INVALID so production reporting can ask for a retest instead of counting
+  // them as a product-quality NG. Genuine mismatch/fault/relay-function evidence is
+  // still classified as PRODUCT_RESULT and remains an authoritative product failure.
+  if (precheck?.verdict === 'FAIL') {
+    if (!complete) {
+      return result(base, metrics, 'PENDING', 'PENDING', 'PRODUCT_PRECHECK_RECORDED', precheck, missingProbes);
+    }
+    if (precheckIsTestInvalid(precheck)) {
+      return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
+    }
+    return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
+  }
+  if (productConfig && complete && precheck?.verdict === 'PENDING') {
+    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
+  }
+  if (productConfig && complete && !precheck) {
+    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', undefined, missingProbes, 'TEST_INVALID');
+  }
+  if (missingProbes.length > 0) {
+    return result(base, metrics, 'FAIL', 'FAIL', `${missingProbes[0].toUpperCase()}_SIGNAL_NO_DATA`, precheck, missingProbes);
+  }
+  if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT', precheck);
   if (!complete || !analysis) {
-    if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE');
-    if (!unit.sourceReady) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SOURCE_NOT_READY');
-    if (!unit.syncOk) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SYNC_NOT_OK');
+    if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE', precheck);
+    if (!unit.sourceReady) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SOURCE_NOT_READY', precheck);
+    if (!unit.syncOk) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SYNC_NOT_OK', precheck);
   }
   if (!analysisSnapshot) {
-    // Preserve the original telemetry verdict while the process has not exposed its quality snapshot yet.
-    return result(base, metrics, 'PASS', 'PENDING');
+    return result(base, metrics, 'PASS', 'PENDING', undefined, precheck);
   }
-  if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL');
+  if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
   if (analysisSnapshot.phase !== 'COMPLETE' || analysis?.verdict !== 'PASS') {
-    return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA');
+    return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA', precheck);
   }
 
   const stageMetrics = (stage: InterferenceStage): FieldDetectorMetrics => {
@@ -180,37 +322,64 @@ function evaluateUnit(
       analysis,
       analysisSnapshot.thresholds.minNoiseRms,
       limits,
-      analysisSnapshot.thresholds.noiseProbes,
+      expectedChannels,
     );
     if (noiseReason) return noiseReason;
     for (const stage of stages) {
       const stageResult = analysis.stages?.[stage];
       if (stageResult?.verdict === 'FAIL') return `${stage.toUpperCase()}_${stageResult.reason || 'STAGE_FAIL'}`;
-      const reason = thresholdMatches(stageMetrics(stage), limits, ratios);
+      const reason = thresholdMatches(stageMetrics(stage), limits, ratios, expectedChannels);
       if (reason) return `${stage.toUpperCase()}_${reason}`;
     }
     return undefined;
   };
 
   const aReason = firstFailure(quality.a, quality.ratios.a);
-  if (!aReason) return result(base, metrics, 'PASS', 'A_PASS', 'ALL_STAGES_A_GRADE_WITHIN_LIMIT');
-  if (quality.acceptanceGrade === 'A') return result(base, metrics, 'FAIL', 'FAIL', aReason);
+  if (!aReason) return result(base, metrics, 'PASS', 'A_PASS', 'ALL_STAGES_A_GRADE_WITHIN_LIMIT', precheck);
+  // B has no operator-configurable threshold and can no longer be disabled by the
+  // historical acceptanceGrade field. It is always A plus the fixed 10% tolerance.
   const bReason = firstFailure(quality.b, quality.ratios.b);
-  if (!bReason) return result(base, metrics, 'PASS', 'B_PASS', `A_GRADE_${aReason}`);
-  return result(base, metrics, 'FAIL', 'FAIL', bReason);
+  if (!bReason) return result(base, metrics, 'PASS', 'B_PASS', `A_GRADE_${aReason}`, precheck);
+  return result(base, metrics, 'FAIL', 'FAIL', bReason, precheck);
 }
 
 /**
- * Field verdicts are derived from read-only detector telemetry and the completed
- * waveform snapshot. Completed quantitative data is graded A, B, or NG using
- * the configured limits for the corresponding detector.
+ * Field verdicts are derived from read-only detector telemetry, product identity
+ * precheck, and the completed waveform snapshot. Formal production always owns six
+ * required slots; a missing/disabled slot must remain visible rather than disappear
+ * from the result set.
  */
 export function evaluateFieldDetectorBatch(
   state: FlameDetectorState,
   analysisSnapshot?: FieldWaveformAnalysisSnapshot,
+  productPrecheck?: ProductPrecheckReport | null,
+  productConfig?: ProductDetectionConfig,
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
-  const units = state.units.map((unit) => evaluateUnit(unit, analysisByIndex.get(unit.index), analysisSnapshot));
+  const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
+  const stateByIndex = new Map(state.units.map((unit) => [unit.index, unit]));
+  const complete = analysisSnapshot?.phase === 'COMPLETE';
+  const productProfile = productConfig ? selectedProductProfile(productConfig) : null;
+  const units = REQUIRED_PRODUCTION_SLOTS.map((index) => {
+    const unit = stateByIndex.get(index);
+    if (!unit) {
+      return result(
+        { index, address: index, sampledAt: state.timestamp },
+        emptyMetrics(),
+        complete ? 'FAIL' : 'PENDING',
+        complete ? 'FAIL' : 'PENDING',
+        'DETECTOR_SLOT_MISSING',
+        precheckByIndex.get(index),
+      );
+    }
+    return evaluateUnit(
+      unit,
+      analysisByIndex.get(index),
+      analysisSnapshot,
+      precheckByIndex.get(index),
+      productConfig,
+    );
+  });
   const grade = units.some((unit) => unit.grade === 'FAIL')
     ? 'FAIL'
     : analysisSnapshot && units.some((unit) => unit.grade === 'PENDING')
@@ -220,6 +389,8 @@ export function evaluateFieldDetectorBatch(
         : analysisSnapshot
           ? 'A_PASS'
           : 'PENDING';
+  const testInvalidCount = units.filter((unit) => unit.classification === 'TEST_INVALID').length;
+  const productFailCount = units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length;
   return {
     verdict: grade === 'FAIL'
       ? 'FAIL'
@@ -229,6 +400,14 @@ export function evaluateFieldDetectorBatch(
     grade,
     units,
     timestamp: state.timestamp,
+    testInvalidCount,
+    productFailCount,
+    ...(productConfig && productProfile ? {
+      productType: productConfig.selectedType,
+      expectedSoftwareVersion: productProfile.expectedSoftwareVersion,
+      expectedProbeCount: productProfile.expectedProbeCount,
+      productPrecheckVerdict: productPrecheck?.verdict ?? null,
+    } : {}),
   };
 }
 

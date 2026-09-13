@@ -1,0 +1,528 @@
+.wutos-live-waveform.is-expanded {
+  top: 1%;
+  bottom: 1%;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(7px, 1.1cqw, 14px);
+  max-height: none;
+  overflow-y: auto;
+  scrollbar-color: rgba(61, 187, 221, .72) rgba(2, 18, 34, .7);
+}
+
+.wutos-live-waveform.is-expanded > .wutos-live-waveform__header,
+.wutos-live-waveform.is-expanded > .wutos-live-waveform__chart,
+.wutos-live-waveform.is-expanded > .wutos-live-waveform__data,
+.wutos-live-waveform.is-expanded > .wutos-live-waveform__footer,
+.wutos-live-waveform.is-expanded > .indicator-camera {
+  flex: 0 0 auto;
+}
+
+.indicator-camera.is-collapsed {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.indicator-camera__canvas,
+.indicator-camera__source {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.indicator-camera.is-expanded {
+  display: grid;
+  gap: clamp(5px, .6cqw, 9px);
+  min-width: 0;
+  padding-top: clamp(5px, .55cqw, 8px);
+  border-top: 1px solid rgba(74, 179, 213, .34);
+}
+
+.indicator-camera__heading,
+.indicator-camera__toolbar,
+.indicator-camera__evidence,
+.indicator-camera__footer,
+.indicator-camera__health,
+.indicator-camera__health span,
+.indicator-camera__health b,
+.indicator-camera__eyebrow,
+.indicator-camera__capture-list header,
+.indicator-camera__evidence-preview header {
+  display: flex;
+  align-items: center;
+}
+
+.indicator-camera__heading,
+.indicator-camera__evidence-preview header,
+.indicator-camera__capture-list header {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.indicator-camera__heading > div:first-child {
+  min-width: 0;
+}
+
+.indicator-camera__eyebrow {
+  gap: 4px;
+  color: #4de8f5;
+  font: 800 clamp(6px, .46cqw, 8px) / 1 "Consolas", monospace;
+  letter-spacing: .08em;
+}
+
+.indicator-camera__eyebrow svg {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+.indicator-camera__heading strong {
+  display: block;
+  margin-top: 2px;
+  color: #f1fcff;
+  font-size: clamp(9px, 1.02cqw, 15px);
+  font-weight: 900;
+}
+
+.indicator-camera__heading small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #82adbd;
+  font-size: clamp(5px, .42cqw, 7px);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.indicator-camera__health {
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  color: #8cafbd;
+  font: 700 clamp(5px, .4cqw, 7px) / 1.1 "Consolas", monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.indicator-camera__health span {
+  gap: 4px;
+}
+
+.indicator-camera__health i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #597687;
+}
+
+.indicator-camera__health.is-ready i {
+  background: #55efae;
+  box-shadow: 0 0 6px #55efae;
+}
+
+.indicator-camera__health.is-requesting i {
+  background: #ffd15c;
+  animation: indicator-camera-pulse 1s ease-in-out infinite;
+}
+
+.indicator-camera__health.is-error i {
+  background: #ff716d;
+  box-shadow: 0 0 6px #ff716d;
+}
+
+.indicator-camera__health.is-ready b { color: #55efae; }
+.indicator-camera__health.is-error b { color: #ff817b; }
+.indicator-camera__health.is-requesting b { color: #ffd15c; }
+
+.indicator-camera__toolbar {
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.indicator-camera__device-select {
+  display: flex;
+  min-width: 96px;
+  flex: 1 1 120px;
+  align-items: center;
+  gap: 5px;
+  color: #80aabd;
+  font-size: clamp(5px, .4cqw, 7px);
+}
+
+.indicator-camera__device-select span {
+  flex: 0 0 auto;
+}
+
+.indicator-camera__device-select select {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 3px 4px;
+  overflow: hidden;
+  color: #dff7ff;
+  border: 1px solid rgba(74, 179, 213, .4);
+  outline: 0;
+  background: rgba(1, 17, 32, .92);
+  font: 700 clamp(5px, .4cqw, 7px) "Microsoft YaHei UI", sans-serif;
+  text-overflow: ellipsis;
+}
+
+.indicator-camera__button,
+.indicator-camera__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 6px;
+  color: #a6cad6;
+  border: 1px solid rgba(74, 179, 213, .45);
+  background: rgba(2, 23, 42, .9);
+  font: 700 clamp(5px, .4cqw, 7px) "Microsoft YaHei UI", sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.indicator-camera__button svg,
+.indicator-camera__icon-button svg,
+.indicator-camera__error svg,
+.indicator-camera__calibration-note svg,
+.indicator-camera__footer svg {
+  width: 1.25em;
+  height: 1.25em;
+  flex: 0 0 auto;
+}
+
+.indicator-camera__button:hover,
+.indicator-camera__icon-button:hover,
+.indicator-camera__button.is-calibrating {
+  color: #f0fcff;
+  border-color: #4de8f5;
+  box-shadow: 0 0 7px rgba(64, 223, 244, .28);
+}
+
+.indicator-camera__button.is-primary {
+  color: #071722;
+  border-color: #54e8ee;
+  background: linear-gradient(135deg, #55e6e9, #2ca9d9);
+}
+
+.indicator-camera__button.is-muted {
+  color: #90b4c0;
+}
+
+.indicator-camera__button:disabled,
+.indicator-camera__icon-button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.indicator-camera__error,
+.indicator-camera__calibration-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px 7px;
+  color: #ff9d93;
+  border: 1px solid rgba(255, 101, 92, .42);
+  background: rgba(72, 21, 28, .62);
+  font-size: clamp(5px, .42cqw, 7px);
+  line-height: 1.35;
+}
+
+.indicator-camera__calibration-note {
+  color: #ffe28c;
+  border-color: rgba(255, 198, 82, .4);
+  background: rgba(78, 54, 16, .55);
+}
+
+.indicator-camera__workbench,
+.indicator-camera__evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1.28fr) minmax(150px, .72fr);
+  gap: clamp(5px, .55cqw, 8px);
+  min-width: 0;
+}
+
+/* The live camera is the primary inspection surface. Keep the six-slot
+ * verdicts below it so the ROI remains wide enough to calibrate and review. */
+.indicator-camera__workbench {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.indicator-camera__viewport,
+.indicator-camera__photo-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 150px;
+  overflow: hidden;
+  aspect-ratio: 16 / 8.5;
+  border: 1px solid rgba(74, 179, 213, .48);
+  background: linear-gradient(145deg, rgba(2, 32, 50, .95), rgba(1, 11, 24, .95));
+  box-shadow: inset 0 0 18px rgba(0, 184, 255, .1);
+}
+
+.indicator-camera__viewport[role="button"] {
+  cursor: crosshair;
+}
+
+.indicator-camera__preview,
+.indicator-camera__viewport > .indicator-camera__source {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.indicator-camera__viewport > .indicator-camera__source {
+  position: absolute;
+}
+
+.indicator-camera__placeholder,
+.indicator-camera__photo-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 5px;
+  padding: 12px;
+  color: #7095a5;
+  text-align: center;
+}
+
+.indicator-camera__placeholder svg,
+.indicator-camera__photo-empty svg {
+  width: 20px;
+  height: 20px;
+  color: #3fa6c6;
+}
+
+.indicator-camera__placeholder b,
+.indicator-camera__photo-empty span {
+  color: #b5d7df;
+  font-size: clamp(6px, .5cqw, 9px);
+}
+
+.indicator-camera__placeholder small {
+  color: #6e94a5;
+  font-size: clamp(5px, .4cqw, 7px);
+}
+
+.indicator-camera__roi-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.indicator-camera__roi {
+  position: absolute;
+  border: 1px dashed rgba(117, 185, 210, .76);
+  background: rgba(45, 126, 154, .07);
+  transition: border-color .14s ease, background .14s ease;
+}
+
+.indicator-camera__roi > b,
+.indicator-camera__roi > span {
+  position: absolute;
+  top: 2px;
+  padding: 1px 3px;
+  color: #dff8ff;
+  background: rgba(2, 20, 36, .82);
+  font: 800 clamp(5px, .4cqw, 7px) "Consolas", monospace;
+}
+
+.indicator-camera__roi > b { left: 2px; }
+.indicator-camera__roi > span { right: 2px; }
+.indicator-camera__roi.is-pass { border-color: #55efae; background: rgba(35, 220, 160, .08); }
+.indicator-camera__roi.is-fail { border-color: #ff716d; background: rgba(255, 91, 82, .11); }
+.indicator-camera__roi.is-target { border: 2px solid #ffd15c; box-shadow: 0 0 0 2px rgba(255, 209, 92, .2), inset 0 0 12px rgba(255, 209, 92, .2); }
+
+.indicator-camera__roi > i,
+.indicator-camera__photo-roi > i {
+  position: absolute;
+  display: block;
+  min-width: 3px;
+  min-height: 3px;
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.indicator-camera__roi > i.is-green,
+.indicator-camera__photo-roi > i.is-green { color: #55efae; }
+.indicator-camera__roi > i.is-red,
+.indicator-camera__photo-roi > i.is-red { color: #ff716d; }
+.indicator-camera__roi > i.is-yellow,
+.indicator-camera__photo-roi > i.is-yellow { color: #ffd15c; }
+
+.indicator-camera__side-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid rgba(74, 179, 213, .28);
+  background: rgba(1, 19, 35, .72);
+}
+
+.indicator-camera__workbench > .indicator-camera__side-panel {
+  min-height: 0;
+}
+
+.indicator-camera__phase {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.25fr);
+  align-items: center;
+  gap: 3px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(74, 179, 213, .24);
+}
+
+.indicator-camera__phase span,
+.indicator-camera__phase small {
+  color: #779dad;
+  font-size: clamp(5px, .39cqw, 7px);
+}
+
+.indicator-camera__phase strong {
+  overflow: hidden;
+  color: #f0fbff;
+  font-size: clamp(7px, .6cqw, 10px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.indicator-camera__phase small {
+  line-height: 1.3;
+  text-align: right;
+}
+
+.indicator-camera__slot-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.indicator-camera__slot {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid rgba(74, 179, 213, .24);
+  background: rgba(2, 24, 42, .78);
+}
+
+.indicator-camera__slot.is-pass { border-color: rgba(85, 239, 174, .68); }
+.indicator-camera__slot.is-fail { border-color: rgba(255, 113, 109, .75); }
+.indicator-camera__slot > b { color: #dff7ff; font: 900 clamp(6px, .48cqw, 8px) "Consolas", monospace; }
+.indicator-camera__slot > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; }
+.indicator-camera__slot > div > span { display: grid; justify-items: center; gap: 2px; color: #6e94a4; font-size: clamp(4px, .34cqw, 6px); }
+.indicator-camera__slot > div > span > i { width: 6px; height: 6px; border-radius: 50%; background: #3b5765; }
+.indicator-camera__slot > div > span.is-on { color: #d9f6ff; }
+.indicator-camera__slot > div > span.is-on.is-green > i { background: #55efae; box-shadow: 0 0 6px #55efae; }
+.indicator-camera__slot > div > span.is-on.is-red > i { background: #ff716d; box-shadow: 0 0 6px #ff716d; }
+.indicator-camera__slot > div > span.is-on.is-yellow > i { background: #ffd15c; box-shadow: 0 0 6px #ffd15c; }
+.indicator-camera__slot > small { overflow: hidden; color: #7fa7b5; font-size: clamp(4px, .35cqw, 6px); text-overflow: ellipsis; white-space: nowrap; }
+
+.indicator-camera__counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(74, 179, 213, .24);
+  color: #729baa;
+  font-size: clamp(5px, .4cqw, 7px);
+  text-align: center;
+}
+
+.indicator-camera__counts span { display: grid; gap: 2px; }
+.indicator-camera__counts span:first-child b { color: #55efae; }
+.indicator-camera__counts span:nth-child(2) b { color: #ff716d; }
+.indicator-camera__counts span:last-child b { color: #ffd15c; }
+.indicator-camera__counts b { font: 900 clamp(9px, .72cqw, 12px) "Consolas", monospace; }
+
+.indicator-camera__evidence {
+  align-items: stretch;
+}
+
+.indicator-camera__evidence-preview,
+.indicator-camera__capture-list {
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid rgba(74, 179, 213, .26);
+  background: rgba(1, 18, 33, .66);
+}
+
+.indicator-camera__evidence-preview header,
+.indicator-camera__capture-list header {
+  margin-bottom: 4px;
+  color: #dff7ff;
+  font-size: clamp(5px, .42cqw, 7px);
+}
+
+.indicator-camera__evidence-preview header > div { display: grid; gap: 2px; min-width: 0; }
+.indicator-camera__evidence-preview header span { overflow: hidden; color: #7fa7b5; font-size: .9em; text-overflow: ellipsis; white-space: nowrap; }
+.indicator-camera__evidence-preview header a { color: #61ddec; }
+.indicator-camera__evidence-preview header a:hover { color: #fff; }
+.indicator-camera__evidence-preview header a svg { width: 1.35em; height: 1.35em; }
+
+.indicator-camera__photo-frame {
+  min-height: 56px;
+  aspect-ratio: 16 / 8.5;
+}
+
+.indicator-camera__photo-frame > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.indicator-camera__photo-roi { position: absolute; border: 1px solid rgba(117, 185, 210, .76); pointer-events: none; }
+.indicator-camera__photo-roi.is-pass { border-color: #55efae; }
+.indicator-camera__photo-roi.is-fail { border-color: #ff716d; }
+.indicator-camera__photo-roi > b { position: absolute; top: 1px; left: 1px; padding: 1px 2px; color: #eaffff; background: rgba(2, 20, 36, .82); font: 800 clamp(5px, .4cqw, 7px) "Consolas", monospace; }
+
+.indicator-camera__capture-list {
+  max-height: 100px;
+  overflow: auto;
+}
+
+.indicator-camera__capture-list header span { color: #65cfe0; font-family: "Consolas", monospace; }
+.indicator-camera__capture-empty { display: block; padding: 8px 2px; color: #668b9b; font-size: clamp(5px, .4cqw, 7px); line-height: 1.4; }
+.indicator-camera__capture-list > button { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 5px; width: 100%; align-items: center; padding: 3px; color: #a7c8d2; border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; }
+.indicator-camera__capture-list > button:hover,
+.indicator-camera__capture-list > button.is-selected { border-color: rgba(70, 217, 232, .62); background: rgba(11, 81, 106, .45); }
+.indicator-camera__capture-list > button > img { width: 34px; height: 23px; object-fit: cover; border: 1px solid rgba(74, 179, 213, .34); }
+.indicator-camera__capture-list > button > span { display: grid; min-width: 0; gap: 2px; }
+.indicator-camera__capture-list > button b,
+.indicator-camera__capture-list > button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.indicator-camera__capture-list > button b { color: #dff7ff; font-size: clamp(5px, .38cqw, 7px); }
+.indicator-camera__capture-list > button small { color: #789eac; font: clamp(4px, .33cqw, 6px) "Consolas", monospace; }
+.indicator-camera__capture-list > button em { color: #55efae; font: 800 clamp(6px, .45cqw, 8px) "Consolas", monospace; font-style: normal; }
+
+.indicator-camera__footer {
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: #668d9c;
+  font-size: clamp(4px, .34cqw, 6px);
+  line-height: 1.3;
+}
+
+.indicator-camera__footer span { display: inline-flex; min-width: 0; align-items: center; gap: 3px; }
+.indicator-camera__footer span:last-child { justify-content: flex-end; text-align: right; }
+.indicator-camera__footer svg { color: #55efae; }
+
+@keyframes indicator-camera-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 680px) {
+  .indicator-camera__workbench,
+  .indicator-camera__evidence { grid-template-columns: 1fr; }
+  .indicator-camera__side-panel { min-height: 125px; }
+}

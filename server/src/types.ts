@@ -2,6 +2,8 @@
  * 共享类型定义
  */
 
+import type { DetectorStartupDiagnostic } from './modbus/detector-startup.js';
+
 // DI/DO 状态
 export interface IOState {
   relayId: string;  // PLC设备标识
@@ -112,6 +114,8 @@ export interface FlameDetectorUnitState {
   rawHistorySamples?: FlameSample[];
   historySampleTotal?: number;
   lastError?: string;
+  /** 探测器从通信建立到首帧、通道同步和正式测试就绪的生命周期诊断。 */
+  startup?: DetectorStartupDiagnostic;
 }
 
 // 火焰探测器全量状态

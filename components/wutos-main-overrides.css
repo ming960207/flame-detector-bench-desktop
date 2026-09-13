@@ -1,0 +1,202 @@
+/* Main production screen refinements. Loaded after the legacy dashboard CSS. */
+
+/* The real alarm area gets priority over decorative/result space. */
+.wutos-panel--alarm {
+  top: 9.2%;
+  height: 18.4%;
+}
+
+.wutos-panel--result {
+  top: 28%;
+  height: 51.1%;
+}
+
+.wutos-result-model-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: .45em;
+  padding: .28em .45em;
+  color: #8eb9c4;
+  border: 1px solid rgba(43, 114, 130, .72);
+  background: rgba(6, 23, 34, .86);
+  font-size: clamp(5px, .62cqw, 10px);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+.wutos-result-model-control__label { flex: 0 0 auto; color: #6f9ab6; }
+
+.wutos-result-model-control select {
+  min-width: 0;
+  max-width: 17em;
+  padding: .18em 1.2em .18em .35em;
+  overflow: hidden;
+  color: #eff9ff;
+  border: 1px solid rgba(43, 114, 130, .72);
+  outline: 0;
+  background: #061722;
+  font: inherit;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.wutos-result-model-control select:disabled { color: #9ab3bf; cursor: not-allowed; opacity: .75; }
+.wutos-result-model-control__state { flex: 0 0 auto; color: #62e7b6; font-size: .88em; }
+.wutos-result-model-control__state.is-busy { color: #e2c363; }
+.wutos-result-model-control__state.is-locked,
+.wutos-result-model-control__state.is-error { color: #f27769; }
+
+.wutos-alarm-table {
+  inset: 13% 7% 6%;
+}
+
+.wutos-alarm-row {
+  grid-template-columns: 21% minmax(0, 1fr) 19%;
+  gap: 2.5%;
+  padding: 0 3%;
+}
+
+.wutos-alarm-row > span:nth-child(2) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wutos-alarm-row > span:nth-child(2) small {
+  display: inline;
+  width: auto;
+  margin: 0 0 0 .55em;
+  overflow: visible;
+  color: #6f9ab6;
+  font-size: .72em;
+  font-weight: 500;
+  line-height: inherit;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+/* Compress result cards slightly without removing any production evidence. */
+.wutos-detector-grid {
+  top: 13.5%;
+  bottom: 20.5%;
+  gap: 1.8%;
+}
+
+.wutos-detector-card { padding: 3.4% 5%; }
+.wutos-detector-card header { padding-bottom: 2.5%; }
+.wutos-detector-card__metrics { gap: 2%; padding: 2.5% 0 2%; }
+.wutos-detector-card__processes { padding-top: 2.5%; }
+.wutos-detector-card__failure { margin-top: 1.5%; }
+
+.wutos-final-result-cards {
+  bottom: 4.2%;
+  height: clamp(20px, 12%, 46px);
+}
+
+/* The existing Detail button becomes the single home for advanced pages. */
+.wutos-detail-overlay {
+  z-index: 200;
+}
+
+.wutos-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 18px 12px;
+  border-bottom: 1px solid rgba(43, 114, 130, .5);
+}
+
+.wutos-detail-tabs button {
+  position: relative;
+  z-index: 1;
+  padding: 7px 12px;
+  color: #7fa9b4;
+  border: 1px solid rgba(43, 114, 130, .62);
+  background: #061722;
+  font: 700 11px "Microsoft YaHei UI", sans-serif;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.wutos-detail-tabs button.is-active {
+  color: #04131f;
+  border-color: #43dced;
+  background: #43dced;
+}
+
+.wutos-detail-content { position: relative; z-index: 1; padding: 14px 18px 18px; }
+.wutos-detail-content .detector-workbench { margin: 0; max-width: none; }
+
+.wutos-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wutos-detail-header-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.wutos-detail-header-actions .wutos-detail-release-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #b9eff7;
+  border: 1px solid rgba(56, 215, 231, .55);
+  background: rgba(7, 38, 53, .86);
+  font: 700 11px "Microsoft YaHei UI", sans-serif;
+  cursor: pointer;
+}
+
+.wutos-detail-header-actions .wutos-detail-release-button:hover {
+  color: #fff;
+  border-color: #43dced;
+  box-shadow: 0 0 9px rgba(67, 220, 237, .24);
+}
+
+.wutos-detail-product,
+.wutos-detail-production {
+  min-height: 210px;
+  padding: 12px;
+  border: 1px solid rgba(43, 114, 130, .5);
+  background: rgba(4, 19, 31, .58);
+}
+
+.wutos-detail-product > section[aria-label="产品型号与检测配置"] {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  z-index: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  overflow: visible !important;
+}
+
+.wutos-detail-section-note {
+  margin: 0 0 10px;
+  color: #7fa9b4;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+@media (max-height: 760px) {
+  .wutos-result-model-control { font-size: clamp(5px, .56cqw, 9px); }
+}
+
+@media (max-width: 1100px) {
+  .wutos-result-model-control__label,
+  .wutos-result-model-control__state { display: none; }
+}

@@ -1,0 +1,115 @@
+/* Dedicated runtime status-light presentation.
+ * Loaded by detector-status-lights-runtime.ts after the main dashboard styles.
+ * The four LEDs intentionally contain no visible text; accessibility text lives
+ * only in aria-label attributes and is never rendered on screen.
+ */
+
+.wutos-detector-card__status-lights {
+  position: relative !important;
+  z-index: 1 !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: clamp(3px, .32cqw, 5px) !important;
+  align-self: center !important;
+  min-width: 0 !important;
+  margin: 4% 0 1% !important;
+  padding: 1px 4px !important;
+  transform: none !important;
+  border: 1px solid rgba(50, 126, 174, .28) !important;
+  border-radius: 999px !important;
+  background: rgba(2, 18, 34, .78) !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  white-space: nowrap !important;
+}
+
+.wutos-detector-state-led {
+  position: relative !important;
+  display: block !important;
+  width: clamp(10px, .82cqw, 14px) !important;
+  height: clamp(10px, .82cqw, 14px) !important;
+  min-width: clamp(10px, .82cqw, 14px) !important;
+  min-height: clamp(10px, .82cqw, 14px) !important;
+  flex: 0 0 auto !important;
+  overflow: hidden !important;
+  border: 2px solid rgba(130, 177, 205, .58) !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 35% 30%, #45657d 0 14%, #18354b 34%, #091a29 76%) !important;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, .9) !important;
+  opacity: .9 !important;
+  pointer-events: auto !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  text-indent: -9999px !important;
+  transition: background .12s ease, box-shadow .12s ease, opacity .12s ease, transform .12s ease !important;
+}
+
+/* Relay outputs are deliberately double-ringed so they remain distinguishable
+ * from detector fire/fault state even with every visible text label removed. */
+.wutos-detector-state-led.is-alarm-relay,
+.wutos-detector-state-led.is-fault-relay {
+  border-width: 3px !important;
+  outline: 2px solid rgba(90, 168, 207, .52) !important;
+  outline-offset: 2px !important;
+}
+
+.wutos-detector-state-led.is-fire.is-active,
+.wutos-detector-state-led.is-alarm-relay.is-active {
+  border-color: rgba(255, 176, 162, 1) !important;
+  background: radial-gradient(circle at 34% 28%, #fff5ee 0 9%, #ff8b77 22%, #ff413b 55%, #a71016 100%) !important;
+  box-shadow: inset 0 0 4px rgba(255, 242, 232, .82) !important;
+  opacity: 1 !important;
+  transform: scale(1.08) !important;
+}
+
+.wutos-detector-state-led.is-fault.is-active,
+.wutos-detector-state-led.is-fault-relay.is-active {
+  border-color: rgba(255, 230, 137, 1) !important;
+  background: radial-gradient(circle at 34% 28%, #fffbe8 0 9%, #ffe171 23%, #ffb329 56%, #9d6000 100%) !important;
+  box-shadow: inset 0 0 4px rgba(255, 249, 218, .84) !important;
+  opacity: 1 !important;
+  transform: scale(1.08) !important;
+}
+
+.wutos-detector-state-led.is-alarm-relay.is-active {
+  outline-color: rgba(255, 106, 92, .92) !important;
+}
+
+.wutos-detector-state-led.is-fault-relay.is-active {
+  outline-color: rgba(255, 194, 62, .92) !important;
+}
+
+.wutos-detector-state-led.is-unknown {
+  opacity: .38 !important;
+}
+
+.wutos-detector-state-led.is-latched {
+  filter: saturate(1.08);
+}
+
+.wutos-detector-card__status-lights.is-offline .wutos-detector-state-led:not(.is-active),
+.wutos-detector-card__status-lights.is-stale .wutos-detector-state-led {
+  opacity: .28 !important;
+}
+
+.wutos-detector-card__status-lights.is-stale .wutos-detector-state-led.is-latched {
+  opacity: 1 !important;
+}
+
+@media (max-height: 760px) {
+  .wutos-detector-state-led {
+    width: clamp(9px, .72cqw, 12px) !important;
+    height: clamp(9px, .72cqw, 12px) !important;
+    min-width: clamp(9px, .72cqw, 12px) !important;
+    min-height: clamp(9px, .72cqw, 12px) !important;
+  }
+}

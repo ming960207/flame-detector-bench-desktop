@@ -13,7 +13,10 @@ import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '..
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 
 const DESKTOP_RUNTIME = typeof window !== 'undefined' ? window.desktopRuntime : undefined;
-const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || import.meta.env.VITE_BACKEND_API_URL || `http://${window.location.hostname}:3001`;
+const FIELD_DEV_HTTP = `http://${window.location.hostname}:3001`;
+const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
+const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
+const AUTO_TEST_STEP_KEYS = ['connection', 'params', 'status', 'realtime', 'mirror', 'report'] as const;
 
 interface FlameTestReport {
   passed: boolean;
@@ -96,9 +99,11 @@ function cloneConfig(config: FlameDetectorConfig): FlameDetectorConfig {
 }
 
 function unitProbeKeys(unit: FlameDetectorUnitState | undefined): Array<keyof FlameSample> {
-  return unit && (unit.probe4 !== undefined || unit.probeCount >= 4 || unit.protocol === 'four-wavelength')
-    ? ['probe1', 'probe2', 'probe3', 'probe4']
-    : ['probe1', 'probe2', 'probe3'];
+  return waveformKeys([], unit);
+}
+
+function probeWavelengthLabel(probeCount: number): string {
+  return probeCount === 4 ? '四波长' : probeCount === 3 ? '三波长' : probeCount === 2 ? '双波长' : '单波长';
 }
 
 function formatProbe(value: number | undefined) {
@@ -125,6 +130,20 @@ function formatRatio(value: number | undefined) {
   return Number.isFinite(value) ? Number(value).toFixed(2) : '--';
 }
 
+function startupLabel(unit: FlameDetectorUnitState | undefined): string {
+  const labels: Record<string, string> = {
+    DISCONNECTED: '未连接',
+    POWER_ON: '已上电',
+    COMMUNICATION_READY: '通信就绪',
+    MODE_SWITCHING: '模式切换中',
+    MODE_SWITCH_OK: '模式切换成功',
+    FIRST_FRAME_RECEIVED: '等待通道同步',
+    TEST_READY: '测试就绪',
+    FAILED: '启动失败',
+  };
+  return labels[unit?.startup?.state ?? ''] ?? (unit?.online ? '采集中' : '等待探测器通讯');
+}
+
 function phaseLabel(phase: FieldWaveformAnalysisSnapshot['phase'] | undefined) {
   if (phase === 'NOISE') return '无干扰噪声检测';
   if (phase === 'INTERFERENCE') return '干扰比值检测';
@@ -139,6 +158,15 @@ function reasonLabel(reason: string | undefined) {
     WAITING_FOR_INTERFERENCE_SAMPLES: '采集干扰样本中',
     WAITING_FOR_PROCESS_COMPLETE: '等待工序完成',
     DETECTOR_OFFLINE: '通信未连接',
+    DETECTOR_STARTUP_FAILED: '探测器启动失败',
+    DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
+    DETECTOR_STARTUP_DISCONNECTED: '启动时未连接',
+    DETECTOR_STARTUP_POWER_ON: '已上电，等待通信',
+    DETECTOR_STARTUP_COMMUNICATION_READY: '等待模式切换',
+    DETECTOR_STARTUP_MODE_SWITCHING: '模式切换未确认',
+    DETECTOR_STARTUP_MODE_SWITCH_OK: '等待首帧同步',
+    DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '等待通道同步',
+    MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
     DETECTOR_FAULT: '设备故障',
     NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
     NOISE_EXCEEDS_LIMIT: '噪声超限',
@@ -205,7 +233,7 @@ const DetectorWaveformCard: FC<DetectorWaveformCardProps> = ({ index, unit, anal
     ...(probes.includes('probe4') ? [{ label: 'P4 / P3', value: unit?.features?.[0]?.snr43 }] : []),
   ];
   return <article className={`detector-card ${state}`}>
-    <header className="detector-card-header"><div><b>探测器 {index}</b><span>地址 {unit?.address ?? index} · {unit?.protocol === 'four-wavelength' ? '四波长' : '三波长'} · {probes.length} 路探头</span></div><div className="detector-card-status"><span className={`detector-card-live ${unit?.online ? 'is-live' : ''}`}>实时</span><strong>{analysis?.verdict === 'PASS' ? 'PASS' : analysis?.verdict === 'FAIL' ? 'FAIL' : unit?.online ? '采集中' : '离线'}</strong></div></header>
+    <header className="detector-card-header"><div><b>探测器 {index}</b><span>地址 {unit?.address ?? index} · {probeWavelengthLabel(probes.length)} · {probes.length} 路探头</span></div><div className="detector-card-status"><span className={`detector-card-live ${unit?.online ? 'is-live' : ''}`}>实时</span><strong>{analysis?.verdict === 'PASS' ? 'PASS' : analysis?.verdict === 'FAIL' ? 'FAIL' : startupLabel(unit)}</strong></div></header>
     <div className="detector-card-layout">
       <section className="detector-card-waveform"><div className="detector-card-section-heading"><b>实时波形预览</b><span>{selectedMode === 'raw' ? '原始值' : '归一化值'} · {(selectedMode === 'raw' ? rawSamples : samples).length} 点</span></div><WaveformChart samples={samples} raw={rawSamples} selectedMode={selectedMode} index={index} unit={unit} /></section>
       <div className="detector-card-data">
@@ -214,7 +242,7 @@ const DetectorWaveformCard: FC<DetectorWaveformCardProps> = ({ index, unit, anal
         <div className="detector-card-quality"><span>噪声 RMS <b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span><span>干扰比 <b>{analysis?.interferenceRatio == null ? '--' : `${analysis.interferenceRatio.toFixed(2)}×`}</b></span><span>样本 <b>{analysis ? `${analysis.noiseSampleCount}/${analysis.interferenceSampleCount}` : '--'}</b></span></div>
       </div>
     </div>
-    <footer><span><i className={unit?.online ? 'signal-on' : ''} />{unit?.online ? '实时波形流正常' : '等待探测器通讯'}</span><span>{analysis ? reasonLabel(analysis.reason) : unit?.online ? '持续记录完整波形' : '等待检测数据'}</span></footer>
+    <footer><span><i className={unit?.online ? 'signal-on' : ''} />启动：{startupLabel(unit)}</span><span>{analysis ? reasonLabel(analysis.reason) : unit?.online ? '持续记录完整波形' : '等待检测数据'}</span></footer>
   </article>;
 };
 
@@ -423,9 +451,13 @@ export function FlameDetectorWorkbench({ state, config, analysis, onRefresh }: P
   };
 
   const runAutoTest = async () => {
-    setTesting(true); setMessage('设备自检进行中：按设备顺序执行七项只读检查。');
+    setTesting(true); setMessage('设备自检进行中：按设备顺序执行六项只读检查（不含软件版本检验）。');
     try {
-      const response = await fetch(`${HTTP}/api/flame/auto-test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const response = await fetch(`${HTTP}/api/flame/auto-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledStepKeys: AUTO_TEST_STEP_KEYS }),
+      });
       const result = await response.json() as { success?: boolean; report?: FlameTestReport; error?: string; code?: string };
       if (!response.ok || !result.success || !result.report) throw new Error(result.error || result.code || '自动检测失败');
       setMessage(result.report.passed ? '设备自检完成：全部启用设备通过。' : '设备自检完成：存在失败项目。'); onRefresh();

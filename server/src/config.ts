@@ -9,14 +9,11 @@ const __dirname = dirname(__filename);
 
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
-// PLC一体机配置（现场 PLC.awl 对应 S7-200 SMART，使用 S7/ISO-on-TCP 102）
 export interface PLCConfig {
   mode: 'TCP' | 'RTU' | 'S7';
-  // TCP
   ip: string;
   port: number;
   slaveId: number;
-  // RTU
   serialPath?: string;
   baudRate?: number;
   dataBits?: number;
@@ -24,7 +21,6 @@ export interface PLCConfig {
   parity?: string;
 }
 
-// PLC设备配置（扩展）
 export interface PLCDeviceConfigLocal {
   id: string;
   name: string;
@@ -38,17 +34,15 @@ export interface PLCDeviceConfigLocal {
   dataBits?: number;
   stopBits?: number;
   parity?: string;
-  diCount: number;   // DI点数，默认18 (I0.0~I2.1)
-  doCount: number;   // DO点数，默认12 (Q0.0~Q1.3)
+  diCount: number;
+  doCount: number;
   pollIntervalMs?: number;
 }
 
-// 火焰探测器单台配置
 export interface FlameUnitConfig {
   index: number;
   address: number;
   enabled: boolean;
-  // 每台独立连接配置（不填则使用全局 FlameConfig）
   connMode?: 'RTU' | 'TCP';
   serialPath?: string;
   baudRate?: number;
@@ -57,7 +51,6 @@ export interface FlameUnitConfig {
   parity?: string;
   tcpHost?: string;
   tcpPort?: number;
-  /** 旧上位机协议画像：standard=三波长，four-wavelength=四波长。 */
   protocol?: FlameProtocolId;
   imageAlarmEnabled?: boolean;
   imageAlarmZone?: number;
@@ -66,7 +59,6 @@ export interface FlameUnitConfig {
 export type WaveformSendMode = 'active' | 'filtered';
 export const DEFAULT_WAVEFORM_SEND_MODE: WaveformSendMode = 'active';
 
-// 火焰探测器通信配置
 export interface FlameConfig {
   mode: 'TCP' | 'RTU';
   ip: string;
@@ -79,11 +71,22 @@ export interface FlameConfig {
   units: FlameUnitConfig[];
   pollIntervalMs?: number;
   protocol?: FlameProtocolId;
-  /** 默认波形发送模式：主动发送(1)或滤波发送(2)。 */
   waveformSendMode?: WaveformSendMode;
   waveformDisplayMode?: 'raw' | 'normalized';
   waveformMaxSamples?: number;
   waveformAnalysis?: Partial<WaveformAnalysisConfig>;
+}
+
+export interface MQTTConfigLocal {
+  mqttEnabled: boolean;
+  brokerUrl: string;
+  topic?: string;
+  clientId?: string;
+  username?: string;
+  password?: string;
+  factoryId: string;
+  lineId: string;
+  deviceId: string;
 }
 
 export interface DORelationRule {
@@ -108,19 +111,18 @@ export interface AppConfig {
   flame: FlameConfig;
   pollIntervalDI: number;
   doRelations?: DORelationRule;
-  mqttConfig?: any;
+  mqttConfig: MQTTConfigLocal;
 }
 
 export const DEFAULT_FLAME_TCP_HOST = '192.168.16.253';
 export const DEFAULT_FLAME_TCP_PORTS = [31001, 32001, 33001, 34001, 35001, 36001] as const;
 export const DEFAULT_FLAME_POLL_INTERVAL_MS = 250;
 export const MAX_FLAME_POLL_INTERVAL_MS = 900;
+export const DEFAULT_MQTT_BROKER = 'mqtt://115.190.63.111:1883';
 
 export function createDefaultFlameUnits(host = DEFAULT_FLAME_TCP_HOST): FlameUnitConfig[] {
   return DEFAULT_FLAME_TCP_PORTS.map((tcpPort, index) => ({
     index: index + 1,
-    // 每个探测器使用独立串口服务器 TCP 端口，端口才是设备归属边界；
-    // 现场探测器的 Modbus 从站地址均为 1。
     address: 1,
     enabled: true,
     connMode: 'TCP' as const,
@@ -238,7 +240,19 @@ export const config: AppConfig = {
   },
 
   pollIntervalDI: parseInt(process.env.POLL_INTERVAL_DI || '200', 10),
-  doRelations: { interlocks: [], associations: [], linkages: [] }
+  doRelations: { interlocks: [], associations: [], linkages: [] },
+  mqttConfig: {
+    // External publishing is opt-in. A persisted config can enable it later.
+    mqttEnabled: process.env.MQTT_ENABLED === 'true',
+    brokerUrl: process.env.MQTT_BROKER_URL || DEFAULT_MQTT_BROKER,
+    topic: process.env.MQTT_TOPIC || undefined,
+    clientId: process.env.MQTT_CLIENT_ID || undefined,
+    username: process.env.MQTT_USERNAME || undefined,
+    password: process.env.MQTT_PASSWORD || undefined,
+    factoryId: process.env.MQTT_FACTORY_ID || 'SH_F1',
+    lineId: process.env.MQTT_LINE_ID || 'LINE_A1',
+    deviceId: process.env.MQTT_DEVICE_ID || 'flame_detector_bench',
+  },
 };
 
 export default config;
