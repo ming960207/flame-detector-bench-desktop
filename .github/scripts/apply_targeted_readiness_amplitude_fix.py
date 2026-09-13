@@ -138,7 +138,7 @@ test('waitForReady respects timeoutMs when a required detector never becomes rea
 });
 """
 if 'waitForReady respects timeoutMs' not in detector_text:
-    detector_test.write_text(detector_text.rstrip() + timeout_test + '\n', encoding='utf-8')
+    detector_test.write_text(detector_text.rstrip() + timeout_test.rstrip() + '\n', encoding='utf-8')
 
 production_test = Path('server/test/production-inspection-record.test.ts')
 production_text = production_test.read_text(encoding='utf-8')
@@ -183,5 +183,5 @@ test('production amplitude channels follow the actual probe count', () => {
 });
 """
 if 'production amplitude channels follow the actual probe count' not in production_text:
-    production_text = production_text.rstrip() + mapping_test + '\n'
+    production_text = production_text.rstrip() + mapping_test.rstrip() + '\n'
 production_test.write_text(production_text, encoding='utf-8')
