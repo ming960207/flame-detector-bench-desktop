@@ -129,7 +129,7 @@ function precheck(relayEnabled = false) {
   } as any;
 }
 
-test('record keeps code status separate and reports P2/P3 noise fluctuations as amplitude', () => {
+test('record keeps code status separate and reports all actual probe noise fluctuations as amplitude', () => {
   const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
   const record = buildProductionInspectionRecord({
     batchId: 'batch-1',
@@ -148,11 +148,11 @@ test('record keeps code status separate and reports P2/P3 noise fluctuations as 
   assert.equal(record.products[0]?.workCurrent.status, '合格');
   assert.equal(record.products[0]?.fireAction.source, 'NOT_APPLICABLE');
   assert.equal(record.products[0]?.fireAction.status, '不适用');
-  assert.deepEqual(record.products[0]?.amplitude.values, [110, 105]);
+  assert.deepEqual(record.products[0]?.amplitude.values, [100, 110, 105]);
   assert.equal(record.conclusion, '合格');
   const document = productionInspectionRecordDocument(record);
   assert.match(document, /未生成/);
-  assert.match(document, /110，105/);
+  assert.match(document, /100，110，105/);
   assert.match(document, /不适用/);
 });
 
@@ -302,4 +302,24 @@ test('required relay test cannot pass when real relay evidence is missing', () =
   assert.equal(record.products[0]?.faultAction.status, '不合格');
   assert.equal(record.products[0]?.verdict, '不合格');
   assert.equal(record.conclusion, '不合格');
+});
+
+test('production amplitude channels follow the actual probe count', () => {
+  const dualConfig = normalizeProductDetectionConfig({ selectedType: 'DUAL_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const dualPrecheck = precheck(false) as any;
+  for (const unit of dualPrecheck.units) unit.actualProbeCount = 2;
+  const dualRecord = buildProductionInspectionRecord({
+    batchId: 'batch-dual', productConfig: dualConfig, precheck: dualPrecheck, detectorVerdict: detectorVerdict(), waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG, productionDate: Date.now(),
+  });
+  assert.deepEqual(dualRecord.products[0]?.amplitude.values, [110, 105]);
+
+  const fourConfig = normalizeProductDetectionConfig({ selectedType: 'FOUR_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const fourPrecheck = precheck(false) as any;
+  for (const unit of fourPrecheck.units) unit.actualProbeCount = 4;
+  const fourRecord = buildProductionInspectionRecord({
+    batchId: 'batch-four', productConfig: fourConfig, precheck: fourPrecheck, detectorVerdict: detectorVerdict(), waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG, productionDate: Date.now(),
+  });
+  assert.deepEqual(fourRecord.products[0]?.amplitude.values, [100, 110, 105, 0]);
 });

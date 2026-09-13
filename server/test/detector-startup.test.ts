@@ -255,3 +255,23 @@ test('six detector mode commands are issued concurrently instead of waiting for 
     await Promise.all(listeners.map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))));
   }
 });
+
+test('waitForReady respects timeoutMs when a required detector never becomes ready', { timeout: 1_000 }, async () => {
+  const service = new FlameDetectorService({
+    mode: 'TCP',
+    ip: '127.0.0.1',
+    port: 31_111,
+    units: [{ index: 1, address: 1, enabled: true, connMode: 'TCP', tcpHost: '127.0.0.1', tcpPort: 31_111 }],
+  });
+  const startedAt = Date.now();
+  const report = await service.waitForReady({ requiredSlots: [1], timeoutMs: 80 });
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(report.ready, false);
+  assert.equal(report.timeoutMs, 80);
+  assert.deepEqual(report.requiredSlots, [1]);
+  assert.equal(report.units[0]?.ready, false);
+  assert.equal(report.units[0]?.startup.state, 'DISCONNECTED');
+  assert.ok(elapsedMs >= 60, `waitForReady returned too early: ${elapsedMs}ms`);
+  assert.ok(elapsedMs < 500, `waitForReady ignored timeoutMs: ${elapsedMs}ms`);
+});

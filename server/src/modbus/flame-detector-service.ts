@@ -1377,10 +1377,18 @@ export class FlameDetectorService extends EventEmitter {
       ? Math.floor(Number(options.timeoutMs))
       : READY_BARRIER_TIMEOUT_MS;
     const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
     while (!this.disposed) {
       const report = this.getReadyReport(requiredSlots, timeoutMs);
       if (report.ready) return { ...report, startedAt };
-      await new Promise((resolve) => setTimeout(resolve, READY_BARRIER_POLL_INTERVAL_MS));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        return { ...report, ready: false, startedAt, completedAt: Date.now() };
+      }
+      await new Promise((resolve) => setTimeout(
+        resolve,
+        Math.min(READY_BARRIER_POLL_INTERVAL_MS, remainingMs),
+      ));
     }
     return { ...this.getReadyReport(requiredSlots, timeoutMs), ready: false, startedAt, completedAt: Date.now() };
   }
