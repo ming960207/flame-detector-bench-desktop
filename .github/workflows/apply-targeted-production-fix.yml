@@ -26,7 +26,12 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
 
       - name: Install server dependencies
         run: npm ci --prefix server
