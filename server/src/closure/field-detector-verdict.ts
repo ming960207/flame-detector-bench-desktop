@@ -273,12 +273,10 @@ function evaluateUnit(
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
-  // Startup state is transport evidence, not product-quality evidence. Before the
-  // quantitative run completes it can block progress/recommend a retest, but after
-  // COMPLETE the captured analysis/precheck is authoritative. This prevents a late
-  // cleanup/retry transient or a stale earlier failure from rewriting a finished
-  // product result to NG.
-  if (!complete && unit.startup?.state === 'FAILED') {
+  // Startup state is transport evidence, not product-quality evidence. A failure
+  // that remains FAILED still blocks release, but is always TEST_INVALID/retest.
+  // Once an actual retry succeeds, DetectorStartupTracker clears that stale failure.
+  if (unit.startup?.state === 'FAILED') {
     return result(
       base,
       metrics,
