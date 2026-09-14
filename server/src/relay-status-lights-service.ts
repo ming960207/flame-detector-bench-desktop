@@ -1,5 +1,9 @@
 import type { ProductAwareFieldStatusRuntime } from './product-aware-field-runtime.js';
-import { DioModbusTcpInputSource, RelayFeedbackDioError } from './relay-feedback-dio.js';
+import {
+  DioModbusTcpInputSource,
+  RelayFeedbackDioError,
+  getPrimaryRelayFeedbackInputSource,
+} from './relay-feedback-dio.js';
 import {
   DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG,
   normalizeRelayFunctionalTestConfig,
@@ -90,7 +94,9 @@ export function startRelayStatusLightsService(
   runtime: ProductAwareFieldStatusRuntime,
 ): RelayStatusLightsRuntime {
   let relayConfig = DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG;
-  const inputSource = new DioModbusTcpInputSource(relayConfig.dio);
+  const sharedInputSource = getPrimaryRelayFeedbackInputSource();
+  const inputSource = sharedInputSource ?? new DioModbusTcpInputSource(relayConfig.dio);
+  const ownsInputSource = sharedInputSource === null;
   let lastConfigLoadedAt = 0;
   let lastErrorLoggedAt = 0;
   let closed = false;
@@ -150,7 +156,7 @@ export function startRelayStatusLightsService(
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
-      await inputSource.disconnect();
+      if (ownsInputSource) await inputSource.disconnect();
     },
   };
 }
