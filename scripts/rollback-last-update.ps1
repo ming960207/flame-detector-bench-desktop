@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Fail([string]$Message) {
     Write-Host "ROLLBACK ERROR: $Message" -ForegroundColor Red

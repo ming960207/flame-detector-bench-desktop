@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-where powershell >nul 2>nul
+where powershell.exe >nul 2>nul
 if errorlevel 1 (
     echo ERROR: PowerShell is not available.
     pause
@@ -11,7 +11,7 @@ if errorlevel 1 (
 
 echo Updating the current Git branch from GitHub...
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\update-current-branch.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\update-current-branch.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

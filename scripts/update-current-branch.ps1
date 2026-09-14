@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 function Fail([string]$Message) {
     Write-Host "ERROR: $Message" -ForegroundColor Red

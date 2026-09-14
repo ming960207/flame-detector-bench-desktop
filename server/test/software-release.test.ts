@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,4 +90,17 @@ test('independent cmd launcher keeps a PowerShell operation alive after its call
     await new Promise((resolve) => setTimeout(resolve, 500));
     await rm(temporaryRoot, { recursive: true, force: true });
   }
+});
+
+test('cmd update entrypoint explicitly loads the PowerShell utility module', async () => {
+  const [entrypoint, updateScript, rollbackScript] = await Promise.all([
+    readFile(join(projectRoot, 'update-current-version.cmd'), 'utf8'),
+    readFile(join(projectRoot, 'scripts', 'update-current-branch.ps1'), 'utf8'),
+    readFile(join(projectRoot, 'scripts', 'rollback-last-update.ps1'), 'utf8'),
+  ]);
+
+  assert.match(entrypoint, /where powershell\.exe/);
+  assert.match(entrypoint, /powershell\.exe -NoProfile/);
+  assert.match(updateScript, /Import-Module Microsoft\.PowerShell\.Utility/);
+  assert.match(rollbackScript, /Import-Module Microsoft\.PowerShell\.Utility/);
 });
