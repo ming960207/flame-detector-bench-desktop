@@ -340,6 +340,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [liveResults, setLiveResults] = useState<IndicatorSlotResult[]>([]);
   const [calibratingSlot, setCalibratingSlot] = useState<number | null>(null);
+  const [recognitionPending, setRecognitionPending] = useState(false);
 
   const activePhase: IndicatorPhase = relayTest
     ? relayTest.phase
@@ -519,16 +520,22 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     sampleCount,
   }), [batchId]);
 
-  const captureFrame = useCallback((savePhoto: boolean) => {
+  const captureFrameNow = useCallback((savePhoto: boolean) => {
     const video = captureVideoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth <= 0) return;
+    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth <= 0) {
+      setRecognitionPending(false);
+      return;
+    }
     const width = Math.min(CAMERA_WIDTH, video.videoWidth);
     const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth));
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return;
+    if (!context) {
+      setRecognitionPending(false);
+      return;
+    }
     context.drawImage(video, 0, 0, width, height);
     const phase = activePhase;
     const phaseChanged = phase !== lastPhaseRef.current;
@@ -536,6 +543,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       phaseSamplesRef.current = [];
       lastPhaseRef.current = phase;
     }
+    if (savePhoto && phase === 'MANUAL') phaseSamplesRef.current = [];
     const frame: FrameSample = {
       capturedAt: Date.now(),
       phase,
@@ -543,7 +551,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     };
     phaseSamplesRef.current = [...phaseSamplesRef.current, frame].slice(-MAX_PHASE_SAMPLES);
     if (phase !== 'MANUAL') runSamplesRef.current = [...runSamplesRef.current, frame].slice(-MAX_RUN_SAMPLES);
-    const phaseAggregated = aggregateSamples(phaseSamplesRef.current, phase, slotRoisRef.current);
+    const phaseAggregated = phase === 'MANUAL'
+      ? frame.slots
+      : aggregateSamples(phaseSamplesRef.current, phase, slotRoisRef.current);
     const aggregated = phase !== 'MANUAL' && runSamplesRef.current.length >= REQUIRED_STABLE_FRAMES
       ? phaseAggregated.map((slot) => ({
         ...slot,
@@ -552,6 +562,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       : phaseAggregated;
     phaseResultsRef.current.set(phase, aggregated);
     setLiveResults(aggregated);
+    setRecognitionPending(false);
 
     const shouldSave = savePhoto || phase !== 'MANUAL' && (
       frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS
@@ -564,6 +575,14 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     setCaptures((current) => [capture, ...current].slice(0, MAX_CAPTURE_HISTORY));
     setSelectedCaptureId(capture.id);
   }, [activePhase, makeCapture]);
+
+  const captureFrame = useCallback((savePhoto: boolean) => {
+    // Paint one clean frame before recognition so boxes from the previous
+    // capture cannot remain on screen while the new image is being analyzed.
+    setLiveResults([]);
+    setRecognitionPending(true);
+    window.requestAnimationFrame(() => captureFrameNow(savePhoto));
+  }, [captureFrameNow]);
 
   useEffect(() => {
     captureFrameRef.current = captureFrame;
@@ -641,7 +660,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
             <video className="indicator-camera__preview" ref={previewVideoRef} muted playsInline />
             {cameraStatus !== 'ready' && <div className="indicator-camera__placeholder"><Video /><b>{cameraStatus === 'error' ? '摄像头不可用' : '启用 UVC 后显示实时画面'}</b><small>首次使用请先选择设备并完成 6 槽位校准</small></div>}
             <div className="indicator-camera__roi-layer" aria-hidden="true">
-              {slotRois.map((roi) => {
+              {!recognitionPending && slotRois.map((roi) => {
                 const result = liveResults.find((item) => item.slot === roi.slot);
                 return <div key={roi.slot} className={`indicator-camera__roi ${calibratingSlot === roi.slot ? 'is-target' : ''} ${result?.verdict === 'PASS' ? 'is-pass' : result?.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.width * 100}%`, height: `${roi.height * 100}%` }}><b>D{roi.slot}</b>{result && <span>{result.verdict === 'PASS' ? 'OK' : result.verdict === 'FAIL' ? 'NG' : '—'}</span>}{result && COLORS.map(({ key, className }) => { const bounds = result.lights[key].bounds; return bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(bounds.x - roi.x) / roi.width * 100}%`, top: `${(bounds.y - roi.y) / roi.height * 100}%`, width: `${bounds.width / roi.width * 100}%`, height: `${bounds.height / roi.height * 100}%` }} />; })}</div>;
               })}
@@ -664,7 +683,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
           <div className="indicator-camera__evidence-preview">
             <header><div><b>对应环节照片</b><span>{currentCapture ? `${currentCapture.label} · ${formatCaptureTime(currentCapture.capturedAt)}` : '尚未生成照片'}</span></div>{currentCapture && <a href={currentCapture.image} download={`indicator-${currentCapture.phase}-${currentCapture.capturedAt}.jpg`} title="下载当前照片" aria-label="下载当前照片"><Download /></a>}</header>
             <div className="indicator-camera__photo-frame">
-              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${slot.roi.x * 100}%`, top: `${slot.roi.y * 100}%`, width: `${slot.roi.width * 100}%`, height: `${slot.roi.height * 100}%` }}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
+              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{!recognitionPending && currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${slot.roi.x * 100}%`, top: `${slot.roi.y * 100}%`, width: `${slot.roi.width * 100}%`, height: `${slot.roi.height * 100}%` }}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
             </div>
           </div>
           <div className="indicator-camera__capture-list"><header><b>采样记录</b><span>{captures.length} 张</span></header>{captures.length === 0 && <small className="indicator-camera__capture-empty">继电器测试时自动按阶段抓拍；绿灯至少跨 2 帧确认。</small>}{captures.map((capture) => <button type="button" key={capture.id} className={capture.id === currentCapture?.id ? 'is-selected' : ''} onClick={() => selectCapture(capture)}><img src={capture.image} alt="" /><span><b>{capture.label}</b><small>{formatCaptureTime(capture.capturedAt)} · {capture.sampleCount} 帧</small></span><em>{capture.slots.filter((slot) => slot.verdict === 'PASS').length}/6</em></button>)}</div>

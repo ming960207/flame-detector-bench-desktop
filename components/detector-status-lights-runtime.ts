@@ -1,4 +1,12 @@
 import './detector-status-lights.css';
+import type { IndicatorVisionLightVerdict } from '../server/src/indicator-vision';
+import {
+  DETECTOR_STATUS_LIGHTS,
+  indicatorVisionState,
+  type DetectorStatusLightKind,
+  type IndicatorVisionField,
+  type RelayLightField,
+} from './detector-status-lights-model';
 
 type StatusLightUnit = {
   index: number;
@@ -8,6 +16,7 @@ type StatusLightUnit = {
   alarmRelay: boolean;
   faultRelay: boolean;
   relayObserved: boolean;
+  indicatorVision?: Partial<Record<IndicatorVisionField, IndicatorVisionLightVerdict>>;
 };
 
 type StatusLightPayload = {
@@ -36,6 +45,13 @@ type RelayUnitEvidence = {
   fault?: RelayActionEvidence;
 };
 
+type IndicatorVisionUnitEvidence = {
+  slot: number;
+  runningGreen?: IndicatorVisionLightVerdict;
+  fireRed?: IndicatorVisionLightVerdict;
+  faultYellow?: IndicatorVisionLightVerdict;
+};
+
 type ProductConfigPayload = {
   precheck?: {
     batchId?: string | null;
@@ -44,17 +60,14 @@ type ProductConfigPayload = {
       phase?: string;
       units?: RelayUnitEvidence[];
     } | null;
+    indicatorVision?: {
+      batchId?: string | null;
+      units?: IndicatorVisionUnitEvidence[];
+    } | null;
   } | null;
 };
 
-type LightKind = 'fire' | 'fault' | 'alarm-relay' | 'fault-relay';
-
-const LIGHTS: ReadonlyArray<{ kind: LightKind; title: string; field: keyof Pick<StatusLightUnit, 'fire' | 'fault' | 'alarmRelay' | 'faultRelay'> }> = [
-  { kind: 'fire', title: '火警', field: 'fire' },
-  { kind: 'fault', title: '故障', field: 'fault' },
-  { kind: 'alarm-relay', title: '火警继电器', field: 'alarmRelay' },
-  { kind: 'fault-relay', title: '故障继电器', field: 'faultRelay' },
-];
+type LightKind = DetectorStatusLightKind;
 
 function backendHttpUrl(): string {
   const runtime = (window as Window & { desktopRuntime?: { backendHttpUrl?: string } }).desktopRuntime;
@@ -78,34 +91,40 @@ function ensureLightGroup(index: number): HTMLElement | null {
   const card = detectorCard(index);
   if (!card) return null;
   let group = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__status-lights');
-  if (group) {
-    group.querySelectorAll<HTMLElement>('.wutos-detector-state-led').forEach(sanitizeLightElement);
-    const metrics = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__metrics');
-    if (metrics && group.nextElementSibling !== metrics) card.insertBefore(group, metrics);
-    return group;
+  if (!group) {
+    group = document.createElement('div');
+    group.className = 'wutos-detector-card__status-lights';
+    group.setAttribute('role', 'group');
   }
+  group.setAttribute('aria-label', `探测器${index}五状态指示灯`);
 
-  group = document.createElement('div');
-  group.className = 'wutos-detector-card__status-lights';
-  group.setAttribute('role', 'group');
-  group.setAttribute('aria-label', `探测器${index}四状态指示灯`);
-
-  for (const definition of LIGHTS) {
-    const light = document.createElement('span');
-    light.className = `wutos-detector-state-led is-${definition.kind}`;
-    light.dataset.kind = definition.kind;
-    light.setAttribute('role', 'img');
-    light.setAttribute('aria-label', `${definition.title}：未激活`);
+  const expectedKinds = DETECTOR_STATUS_LIGHTS.map((definition) => definition.kind);
+  const currentKinds = [...group.children]
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains('wutos-detector-state-led'))
+    .map((child) => child.dataset.kind);
+  if (currentKinds.length !== expectedKinds.length || currentKinds.some((kind, lightIndex) => kind !== expectedKinds[lightIndex])) {
+    group.replaceChildren();
+  }
+  for (const definition of DETECTOR_STATUS_LIGHTS) {
+    let light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
+    if (!light) {
+      light = document.createElement('span');
+      light.className = `wutos-detector-state-led is-${definition.kind}`;
+      light.dataset.kind = definition.kind;
+      light.setAttribute('role', 'img');
+      light.setAttribute('aria-label', `${definition.title}：未采集`);
+      group.appendChild(light);
+    }
     sanitizeLightElement(light);
     group.appendChild(light);
   }
   const metrics = card.querySelector<HTMLElement>(':scope > .wutos-detector-card__metrics');
   if (metrics) card.insertBefore(group, metrics);
-  else card.appendChild(group);
+  else if (!group.parentElement) card.appendChild(group);
   return group;
 }
 
-function setLight(group: HTMLElement, definition: typeof LIGHTS[number], active: boolean, known = true, latched = false): void {
+function setLight(group: HTMLElement, definition: typeof DETECTOR_STATUS_LIGHTS[number], active: boolean, known = true, latched = false): void {
   const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
   if (!light) return;
   sanitizeLightElement(light);
@@ -123,11 +142,15 @@ function applyUnit(unit: StatusLightUnit): void {
   if (!group) return;
   group.classList.toggle('is-offline', !unit.online);
   group.classList.remove('is-stale');
-  for (const definition of LIGHTS) {
-    const relayLight = definition.kind === 'alarm-relay' || definition.kind === 'fault-relay';
-    const known = relayLight ? unit.relayObserved : true;
-    const latched = latchState(unit.index, definition.kind, Boolean(unit[definition.field]), known);
-    setLight(group, definition, latched, known, latched);
+  for (const definition of DETECTOR_STATUS_LIGHTS) {
+    if (definition.source === 'vision') {
+      const state = indicatorVisionState(unit.indicatorVision?.[definition.field as IndicatorVisionField]);
+      setLight(group, definition, state.active, state.known);
+      continue;
+    }
+    const relayField = definition.field as RelayLightField;
+    const latched = latchState(unit.index, definition.kind, Boolean(unit[relayField]), unit.relayObserved);
+    setLight(group, definition, latched, unit.relayObserved, latched);
   }
 }
 
@@ -136,10 +159,10 @@ function markStale(): void {
     const group = ensureLightGroup(index);
     if (!group) continue;
     group.classList.add('is-stale');
-    for (const definition of LIGHTS) {
+    for (const definition of DETECTOR_STATUS_LIGHTS) {
       const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
       if (light) {
-        const latched = isLatched(index, definition.kind);
+        const latched = definition.source === 'relay' && isLatched(index, definition.kind);
         setLight(group, definition, latched, false, latched);
         if (!latched) light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
       }
@@ -160,9 +183,9 @@ function resetLatchedLights(): void {
 }
 
 function updateRelaySession(active: boolean, batchId: string | null): void {
-  // Keep the completed batch's evidence visible while idle. As soon as the next
+  // Keep completed relay evidence visible while idle. As soon as the next
   // production process becomes active, or its formal batch id changes, clear all
-  // four LED latches before applying any evidence from the new run.
+  // relay LED latches before applying evidence from the new run.
   const startsNewTest = active && (!relaySessionActive || batchId !== relaySessionBatchId);
   if (startsNewTest) {
     resetLatchedLights();
@@ -236,6 +259,35 @@ function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductC
   };
 }
 
+function mergeIndicatorVisionEvidence(payload: StatusLightPayload, configPayload: ProductConfigPayload | null): StatusLightPayload {
+  const precheck = configPayload?.precheck;
+  const vision = precheck?.indicatorVision;
+  const evidenceUnits = vision?.units;
+  if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
+
+  const evidenceBatchId = precheck?.batchId ?? vision?.batchId ?? null;
+  if (payload.active && evidenceBatchId !== payload.batchId) return payload;
+  if (payload.batchId && evidenceBatchId && payload.batchId !== evidenceBatchId) return payload;
+
+  const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.slot, unit]));
+  return {
+    ...payload,
+    batchId: payload.batchId ?? evidenceBatchId,
+    units: payload.units.map((unit) => {
+      const evidence = evidenceByIndex.get(unit.index);
+      if (!evidence) return unit;
+      return {
+        ...unit,
+        indicatorVision: {
+          runningGreen: evidence.runningGreen,
+          fireRed: evidence.fireRed,
+          faultYellow: evidence.faultYellow,
+        },
+      };
+    }),
+  };
+}
+
 async function productConfigEvidence(): Promise<ProductConfigPayload | null> {
   const now = Date.now();
   if (cachedProductConfig && now - lastProductConfigFetchAt < 500) return cachedProductConfig;
@@ -257,7 +309,8 @@ async function refreshStatusLights(): Promise<void> {
     const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`STATUS_LIGHTS_HTTP_${response.status}`);
     const rawPayload = await response.json() as StatusLightPayload;
-    const payload = mergeRelayEvidence(rawPayload, await productConfigEvidence());
+    const configPayload = await productConfigEvidence();
+    const payload = mergeIndicatorVisionEvidence(mergeRelayEvidence(rawPayload, configPayload), configPayload);
     updateRelaySession(Boolean(payload.active), payload.batchId ?? null);
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
     for (let index = 1; index <= 6; index += 1) {
