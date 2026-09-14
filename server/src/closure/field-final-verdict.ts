@@ -21,6 +21,14 @@ export function evaluateFieldFinalVerdict(
   if (!process || !process.valid) return { verdict: 'PENDING', reason: 'PLC_PROCESS_STATUS_INVALID' };
   if (!isPLCProcessComplete(process)) return { verdict: 'PENDING', reason: 'WAITING_FOR_PLC_COMPLETE' };
   const qualityEnabled = Boolean((waveformAnalysis as (Pick<FieldWaveformAnalysisSnapshot, 'thresholds'> | undefined))?.thresholds?.quality);
+  const onlyTestInvalid = (detectorVerdict.testInvalidCount ?? 0) > 0
+    && (detectorVerdict.productFailCount ?? 0) === 0;
+  // A waveform FAIL caused only by incomplete/invalid test evidence is a retest,
+  // not a product-quality NG. Preserve the blocking FAIL verdict while exposing
+  // an explicit retest reason to downstream reporting/UI.
+  if (onlyTestInvalid) {
+    return { verdict: 'FAIL', grade: 'FAIL', reason: 'TEST_INVALID_RETEST_REQUIRED' };
+  }
   if (waveformAnalysis && waveformAnalysis.verdict !== 'PASS') {
     return waveformAnalysis.verdict === 'FAIL'
       ? qualityEnabled ? { verdict: 'FAIL', grade: 'FAIL' } : { verdict: 'FAIL' }
@@ -28,9 +36,6 @@ export function evaluateFieldFinalVerdict(
   }
   if (qualityEnabled && detectorVerdict.grade === 'PENDING') {
     return { verdict: 'PENDING', reason: 'WAITING_FOR_WAVEFORM_ANALYSIS' };
-  }
-  if ((detectorVerdict.testInvalidCount ?? 0) > 0 && (detectorVerdict.productFailCount ?? 0) === 0) {
-    return { verdict: 'FAIL', grade: 'FAIL', reason: 'TEST_INVALID_RETEST_REQUIRED' };
   }
   if (qualityEnabled) return { verdict: detectorVerdict.verdict, grade: detectorVerdict.grade };
   return { verdict: detectorVerdict.verdict };
