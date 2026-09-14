@@ -70,6 +70,7 @@ interface CameraDeviceOption {
 
 const CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
 const CAMERA_WIDTH = 960;
+const SLOT_ROI_SIZE = 0.1;
 const SAMPLE_INTERVAL_MS = 240;
 const PHOTO_INTERVAL_MS = 720;
 const REQUIRED_STABLE_FRAMES = 2;
@@ -101,8 +102,8 @@ const DEFAULT_SLOT_ROIS: IndicatorSlotRoi[] = Array.from({ length: 6 }, (_, inde
   slot: index + 1,
   x: 0.02 + index * 0.163,
   y: 0.28,
-  width: 0.13,
-  height: 0.44,
+  width: SLOT_ROI_SIZE,
+  height: SLOT_ROI_SIZE,
 }));
 
 function clamp(value: number, min: number, max: number): number {
@@ -116,12 +117,16 @@ function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi): IndicatorSlot
   const rawHeight = Number(source.height);
   const rawX = Number(source.x);
   const rawY = Number(source.y);
-  const width = clamp(Number.isFinite(rawWidth) ? rawWidth : fallback.width, 0.05, 0.4);
-  const height = clamp(Number.isFinite(rawHeight) ? rawHeight : fallback.height, 0.1, 0.8);
+  const previousWidth = clamp(Number.isFinite(rawWidth) ? rawWidth : fallback.width, 0.05, 0.4);
+  const previousHeight = clamp(Number.isFinite(rawHeight) ? rawHeight : fallback.height, 0.05, 0.8);
+  const centerX = (Number.isFinite(rawX) ? rawX : fallback.x) + previousWidth / 2;
+  const centerY = (Number.isFinite(rawY) ? rawY : fallback.y) + previousHeight / 2;
+  const width = SLOT_ROI_SIZE;
+  const height = SLOT_ROI_SIZE;
   return {
     slot: fallback.slot,
-    x: clamp(Number.isFinite(rawX) ? rawX : fallback.x, 0, 1 - width),
-    y: clamp(Number.isFinite(rawY) ? rawY : fallback.y, 0, 1 - height),
+    x: clamp(centerX - width / 2, 0, 1 - width),
+    y: clamp(centerY - height / 2, 0, 1 - height),
     width,
     height,
   };
@@ -694,7 +699,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
             <div className="indicator-camera__roi-layer" aria-hidden="true">
               {annotationsVisible && !recognitionPending && slotRois.map((roi) => {
                 const result = liveResults.find((item) => item.slot === roi.slot);
-                return <div key={roi.slot} className={`indicator-camera__roi ${calibratingSlot === roi.slot ? 'is-target' : ''} ${result?.verdict === 'PASS' ? 'is-pass' : result?.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.width * 100}%`, height: `${roi.height * 100}%` }}><b>D{roi.slot}</b>{result && <span>{result.verdict === 'PASS' ? 'OK' : result.verdict === 'FAIL' ? 'NG' : '—'}</span>}{result && COLORS.map(({ key, className }) => { const bounds = result.lights[key].bounds; return bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(bounds.x - roi.x) / roi.width * 100}%`, top: `${(bounds.y - roi.y) / roi.height * 100}%`, width: `${bounds.width / roi.width * 100}%`, height: `${bounds.height / roi.height * 100}%` }} />; })}</div>;
+                return <div key={roi.slot} className={`indicator-camera__roi ${calibratingSlot === roi.slot ? 'is-target' : ''} ${result?.verdict === 'PASS' ? 'is-pass' : result?.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.width * 100}%` }}><b>D{roi.slot}</b>{result && <span>{result.verdict === 'PASS' ? 'OK' : result.verdict === 'FAIL' ? 'NG' : '—'}</span>}{result && COLORS.map(({ key, className }) => { const bounds = result.lights[key].bounds; return bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(bounds.x - roi.x) / roi.width * 100}%`, top: `${(bounds.y - roi.y) / roi.height * 100}%`, width: `${bounds.width / roi.width * 100}%`, height: `${bounds.height / roi.height * 100}%` }} />; })}</div>;
               })}
             </div>
           </div>
@@ -715,7 +720,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
           <div className="indicator-camera__evidence-preview">
             <header><div><b>对应环节照片</b><span>{currentCapture ? `${currentCapture.label} · ${formatCaptureTime(currentCapture.capturedAt)}` : '尚未生成照片'}</span></div>{currentCapture && <a href={currentCapture.image} download={`indicator-${currentCapture.phase}-${currentCapture.capturedAt}.jpg`} title="下载当前照片" aria-label="下载当前照片"><Download /></a>}</header>
             <div className="indicator-camera__photo-frame">
-              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{annotationsVisible && !recognitionPending && currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${slot.roi.x * 100}%`, top: `${slot.roi.y * 100}%`, width: `${slot.roi.width * 100}%`, height: `${slot.roi.height * 100}%` }}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
+              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{annotationsVisible && !recognitionPending && currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${slot.roi.x * 100}%`, top: `${slot.roi.y * 100}%`, width: `${slot.roi.width * 100}%` }}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
             </div>
           </div>
           <div className="indicator-camera__capture-list"><header><b>采样记录</b><span>{captures.length} 张</span></header>{captures.length === 0 && <small className="indicator-camera__capture-empty">继电器测试时自动按阶段抓拍；绿灯至少跨 2 帧确认。</small>}{captures.map((capture) => <button type="button" key={capture.id} className={capture.id === currentCapture?.id ? 'is-selected' : ''} onClick={() => selectCapture(capture)}><img src={capture.image} alt="" /><span><b>{capture.label}</b><small>{formatCaptureTime(capture.capturedAt)} · {capture.sampleCount} 帧</small></span><em>{capture.slots.filter((slot) => slot.verdict === 'PASS').length}/6</em></button>)}</div>
