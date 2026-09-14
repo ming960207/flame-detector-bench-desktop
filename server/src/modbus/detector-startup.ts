@@ -111,21 +111,29 @@ export class DetectorStartupTracker {
     if (this.diagnostic.communicationReadyAt === null) this.markCommunicationReady();
     if (this.diagnostic.modeSwitchStartedAt === null) this.diagnostic.modeSwitchStartedAt = timestamp(this.now);
     this.diagnostic.modeSwitchAttempts = Math.max(this.diagnostic.modeSwitchAttempts, Math.max(0, Math.floor(attempt)));
-    if (this.diagnostic.state !== 'FAILED' && this.diagnostic.state !== 'TEST_READY') this.diagnostic.state = 'MODE_SWITCHING';
+    // FAILED describes the current startup attempt, not a permanent product state.
+    // A real retry must be allowed to recover; the historical failure remains in
+    // lifecycle logs, while the live diagnostic is reset to the new attempt.
+    if (this.diagnostic.state === 'FAILED') {
+      delete this.diagnostic.failureReason;
+      this.diagnostic.channelValidStreak = 0;
+    }
+    if (this.diagnostic.state !== 'TEST_READY') this.diagnostic.state = 'MODE_SWITCHING';
     return this.snapshot();
   }
 
   markModeSwitchOk(): DetectorStartupDiagnostic {
     if (this.diagnostic.modeSwitchStartedAt === null) this.markModeSwitching(this.diagnostic.modeSwitchAttempts || 1);
     this.diagnostic.modeSwitchOkAt ??= timestamp(this.now);
-    if (this.diagnostic.state !== 'FAILED') {
-      if (this.diagnostic.channelValidStreak >= DETECTOR_STARTUP_FRAME_STREAK_REQUIRED) {
-        this.diagnostic.channelSyncAt ??= timestamp(this.now);
-        this.diagnostic.testReadyAt ??= timestamp(this.now);
-        this.diagnostic.state = 'TEST_READY';
-      } else {
-        this.diagnostic.state = 'MODE_SWITCH_OK';
-      }
+    // A successful acknowledgement is authoritative for the current attempt and
+    // clears a stale failure recorded by an earlier attempt.
+    delete this.diagnostic.failureReason;
+    if (this.diagnostic.channelValidStreak >= DETECTOR_STARTUP_FRAME_STREAK_REQUIRED) {
+      this.diagnostic.channelSyncAt ??= timestamp(this.now);
+      this.diagnostic.testReadyAt ??= timestamp(this.now);
+      this.diagnostic.state = 'TEST_READY';
+    } else {
+      this.diagnostic.state = 'MODE_SWITCH_OK';
     }
     return this.snapshot();
   }
