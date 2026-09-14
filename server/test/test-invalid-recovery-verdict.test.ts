@@ -228,14 +228,17 @@ test('successful startup retry clears stale failure and reaches TEST_READY', () 
   assert.equal(recovered.modeSwitchAttempts, 2);
 });
 
-test('completed valid waveform is not overwritten by stale startup failure', () => {
+test('unrecovered startup failure is RETEST evidence, not product NG', () => {
   const current = state();
   current.units[4]!.startup = failedStartup(5);
   const verdict = evaluateFieldDetectorBatch(current, snapshot(), precheck(), dualProduct());
   const unit5 = verdict.units.find((unit) => unit.index === 5)!;
-  assert.equal(unit5.verdict, 'PASS');
-  assert.equal(unit5.grade, 'A_PASS');
-  assert.equal(unit5.classification, 'PRODUCT_RESULT');
+  assert.equal(unit5.verdict, 'FAIL');
+  assert.equal(unit5.grade, 'FAIL');
+  assert.equal(unit5.classification, 'TEST_INVALID');
+  assert.equal(unit5.reason, 'MODE_SWITCH_TIMEOUT');
+  assert.equal(verdict.testInvalidCount, 1);
+  assert.equal(verdict.productFailCount, 0);
 });
 
 test('completed flash sample shortage is RETEST evidence, not product NG', () => {
