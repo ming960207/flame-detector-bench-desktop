@@ -22,6 +22,7 @@ import {
   type ContainMediaGeometry,
   type NormalizedCameraRoi,
 } from './indicator-camera-geometry';
+import { displayResultsForCapture } from './indicator-camera-display-model';
 import './indicator-camera.css';
 
 export type IndicatorColor = 'green' | 'red' | 'yellow';
@@ -790,10 +791,10 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
 
   useEffect(() => {
     if (relayFunctionalTest && relayTest?.phase === 'COMPLETE' && !precheckBusy) {
-      setLiveResults(completedResults());
+      setLiveResults(displayResultsForCapture(selectedCaptureId, captures, completedResults()));
       setAnnotationsVisible(true);
     }
-  }, [completedResults, precheckBusy, relayFunctionalTest, relayTest?.phase]);
+  }, [captures, completedResults, precheckBusy, relayFunctionalTest, relayTest?.phase, selectedCaptureId]);
 
   useEffect(() => { void submitCompletedEvidence(); }, [submitCompletedEvidence]);
 

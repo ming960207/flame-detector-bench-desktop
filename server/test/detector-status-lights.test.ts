@@ -10,6 +10,7 @@ import {
   sourceRoiToViewportRoi,
   viewportRoiToSourceRoi,
 } from '../../components/indicator-camera-geometry.ts';
+import { displayResultsForCapture } from '../../components/indicator-camera-display-model.ts';
 import { DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG } from '../src/relay-functional-test.ts';
 import { buildLiveRelayStatusUnits } from '../src/relay-status-lights-service.ts';
 
@@ -40,6 +41,15 @@ test('indicator ROIs calibrated inside contain letterboxing map back to source p
     height: 2 / 9,
   });
   assert.deepEqual(sourceRoiToViewportRoi(sourceRoi, geometry), viewportRoi);
+});
+
+test('selected indicator capture drives the visible slot results after the test completes', () => {
+  const fallback = [{ slot: 1, state: 'FAIL' }];
+  const captures = [{ id: 'baseline-1', slots: [{ slot: 1, state: 'ON' }] }];
+
+  assert.deepEqual(displayResultsForCapture('baseline-1', captures, fallback), [{ slot: 1, state: 'ON' }]);
+  assert.deepEqual(displayResultsForCapture(null, captures, fallback), fallback);
+  assert.deepEqual(displayResultsForCapture('missing', captures, fallback), fallback);
 });
 
 test('a new relay batch resets latches before the active flag rises', () => {
