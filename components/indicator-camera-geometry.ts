@@ -19,17 +19,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function containMediaGeometry(
+function mediaGeometry(
   containerWidth: number,
   containerHeight: number,
   mediaWidth: number,
   mediaHeight: number,
+  fit: 'contain' | 'cover',
 ): ContainMediaGeometry {
   const safeContainerWidth = Math.max(1, containerWidth);
   const safeContainerHeight = Math.max(1, containerHeight);
   const safeMediaWidth = Math.max(1, mediaWidth);
   const safeMediaHeight = Math.max(1, mediaHeight);
-  const scale = Math.min(safeContainerWidth / safeMediaWidth, safeContainerHeight / safeMediaHeight);
+  const widthScale = safeContainerWidth / safeMediaWidth;
+  const heightScale = safeContainerHeight / safeMediaHeight;
+  const scale = fit === 'cover' ? Math.max(widthScale, heightScale) : Math.min(widthScale, heightScale);
   const renderedWidth = safeMediaWidth * scale;
   const renderedHeight = safeMediaHeight * scale;
   return {
@@ -40,6 +43,24 @@ export function containMediaGeometry(
     offsetX: (safeContainerWidth - renderedWidth) / 2,
     offsetY: (safeContainerHeight - renderedHeight) / 2,
   };
+}
+
+export function containMediaGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  mediaWidth: number,
+  mediaHeight: number,
+): ContainMediaGeometry {
+  return mediaGeometry(containerWidth, containerHeight, mediaWidth, mediaHeight, 'contain');
+}
+
+export function coverMediaGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  mediaWidth: number,
+  mediaHeight: number,
+): ContainMediaGeometry {
+  return mediaGeometry(containerWidth, containerHeight, mediaWidth, mediaHeight, 'cover');
 }
 
 export function viewportRoiToSourceRoi(
