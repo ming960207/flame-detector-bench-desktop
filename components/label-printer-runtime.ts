@@ -91,6 +91,15 @@ interface PendingRequest {
   timer: number;
 }
 
+export const LABEL_TEMPLATE = {
+  name: 'FLAME_DETECTOR_30X20_2UP',
+  labelWidth: 30,
+  labelHeight: 20,
+  columns: 2,
+  canvasWidth: 60,
+  canvasHeight: 20,
+} as const;
+
 const STORAGE_KEY = 'flame-detector-label-printer-config-v1';
 const DEFAULT_CONFIG: LocalLabelPrinterConfig = {
   autoPrint: false,
@@ -468,7 +477,12 @@ class JingchenTransport {
 
   async initBoard(): Promise<void> {
     await this.request('InitDrawingBoard', {
-      width: 60, height: 40, rotate: 0, path: 'ZT001.ttf', verticalShift: 0, HorizontalShift: 0,
+      width: LABEL_TEMPLATE.canvasWidth,
+      height: LABEL_TEMPLATE.canvasHeight,
+      rotate: 0,
+      path: 'ZT001.ttf',
+      verticalShift: 0,
+      HorizontalShift: 0,
     });
   }
 
@@ -483,8 +497,8 @@ class JingchenTransport {
     await this.request('DrawLableLine', { x, y, width, height: 0.3, rotate: 0, lineWidth: 0.3, lineType: 0 });
   }
 
-  async qr(value: string): Promise<void> {
-    await this.request('DrawLableQrCode', { x: 2.4, y: 10.2, width: 20, height: 20, rotate: 0, value, codeType: 31, correctLevel: 2 });
+  async qr(value: string, box: { x: number; y: number; width: number; height: number }): Promise<void> {
+    await this.request('DrawLableQrCode', { ...box, rotate: 0, value, codeType: 31, correctLevel: 2 });
   }
 
   async commit(): Promise<void> {
@@ -704,8 +718,9 @@ class LabelPrinterRuntime {
     await this.refreshQueue();
   }
 
-  private async drawAndPrint(job: ProductLabelPrintJob): Promise<void> {
-    if (!job.productCode || !job.qrContent) throw new Error('产品编号未生成，无法打印二维码标签');
+  private async drawAndPrint(jobs: ProductLabelPrintJob[]): Promise<void> {
+    if (jobs.length === 0 || jobs.length > LABEL_TEMPLATE.columns) throw new Error('双列标签打印行没有有效任务');
+    if (jobs.some((job) => !job.productCode || !job.qrContent)) throw new Error('产品编号未生成，无法打印二维码标签');
     let submitted = false;
     return new Promise<void>((resolve, reject) => {
       let finished = false;
@@ -724,21 +739,31 @@ class LabelPrinterRuntime {
           void (async () => {
             try {
               await this.transport.initBoard();
-              await this.transport.text(job.isolation ? '不合格品 / 点型红外火焰探测器' : job.productName,
-                { x: 2, y: 1.3, width: 42, height: 4.2, fontSize: job.isolation ? 2.25 : 2.65 }, { bold: true });
-              await this.transport.text(`D${job.slot}`, { x: 46, y: 1.0, width: 12, height: 5.2, fontSize: 3.4 }, { bold: true, align: 1 });
-              await this.transport.text(`型号：${job.productModel}`, { x: 2, y: 5.5, width: 42, height: 3, fontSize: 1.65 }, { bold: true });
-              await this.transport.line(2, 9, 56);
-              await this.transport.qr(job.qrContent!);
-              await this.transport.text('产品编号', { x: 24.5, y: 10.0, width: 33, height: 3.1, fontSize: 1.75 }, { bold: true });
-              await this.transport.text(job.productCode!, { x: 24.5, y: 13.1, width: 33, height: 3.8, fontSize: 2.05 }, { bold: true });
-              await this.transport.text(`结果：${job.verdict}`, { x: 24.5, y: 17.5, width: 33, height: 4.5, fontSize: 2.75 }, { bold: true });
-              await this.transport.text(`日期：${localDate(job.productionDate)}`, { x: 24.5, y: 22.3, width: 33, height: 3.4, fontSize: 1.85 });
-              await this.transport.text(`噪声波动：${labelNoiseText(job)}`,
-                { x: 24.5, y: 26.1, width: 33, height: 3.3, fontSize: 1.65 }, { bold: true });
-              await this.transport.line(2, 32, 56);
-              await this.transport.text(job.isolation ? 'NG · 请隔离处理' : '二维码内容：产品编号',
-                { x: 2, y: 33.0, width: 56, height: 3.4, fontSize: job.isolation ? 2.25 : 1.35 }, { align: 1, bold: job.isolation });
+              for (const [index, job] of jobs.entries()) {
+                const offset = index * LABEL_TEMPLATE.labelWidth;
+                const margin = offset + 1.2;
+                const detailX = offset + 14.2;
+                await this.transport.text('火焰探测器',
+                  { x: margin, y: 1.1, width: 20, height: 2.7, fontSize: 1.9 }, { bold: true });
+                await this.transport.text(`D${job.slot}`,
+                  { x: offset + 24, y: 0.9, width: 4.5, height: 3.3, fontSize: 2.1 }, { bold: true, align: 1 });
+                await this.transport.text(`型号 ${job.productModel}`,
+                  { x: margin, y: 3.8, width: 27.4, height: 1.6, fontSize: 1.1 }, { bold: true });
+                await this.transport.qr(job.qrContent!, { x: margin, y: 5.4, width: 10.4, height: 10.4 });
+                await this.transport.text('检测结果',
+                  { x: detailX, y: 5.4, width: 13.8, height: 1.5, fontSize: 1.0 }, { bold: true });
+                await this.transport.text(job.isolation ? 'NG 隔离' : job.verdict,
+                  { x: detailX, y: 7.0, width: 13.8, height: 3.0, fontSize: 1.8 }, { bold: true });
+                await this.transport.text(`日期 ${localDate(job.productionDate)}`,
+                  { x: detailX, y: 10.6, width: 13.8, height: 1.6, fontSize: 1.0 });
+                await this.transport.text(job.isolation ? '请隔离处理' : '扫码追溯',
+                  { x: detailX, y: 12.6, width: 13.8, height: 1.6, fontSize: 1.05 }, { bold: true });
+                await this.transport.line(offset + 1.2, 16.0, 27.6);
+                await this.transport.text(`编号 ${job.productCode!}`,
+                  { x: margin, y: 16.25, width: 27.4, height: 1.45, fontSize: 0.95 }, { bold: true });
+                await this.transport.text(labelNoiseText(job),
+                  { x: margin, y: 18.0, width: 27.4, height: 1.15, fontSize: 0.85 });
+              }
               await this.transport.commit();
             } catch (error) { await fail(error); }
           })();
@@ -761,23 +786,30 @@ class LabelPrinterRuntime {
   private async claimAndPrint(): Promise<void> {
     if (this.busy || !this.state.config.autoPrint || this.state.health !== 'ready') return;
     this.busy = true;
-    let claimed: ProductLabelPrintJob | null = null;
+    let claimed: ProductLabelPrintJob[] = [];
     try {
-      const payload = await this.post('/api/label-print/claim', {
+      const payload = await this.post('/api/label-print/claim-row', {
         workerId: this.workerId,
+        count: LABEL_TEMPLATE.columns,
         createdAfter: this.state.config.autoPrintSince ?? Date.now(),
-      }) as { job: ProductLabelPrintJob | null };
-      claimed = payload.job;
-      if (!claimed) return;
-      this.emit({ health: 'printing', detail: `正在打印 D${claimed.slot} · ${claimed.verdict}`, currentJobId: claimed.id });
+      }) as { jobs?: ProductLabelPrintJob[] };
+      claimed = Array.isArray(payload.jobs) ? payload.jobs : [];
+      if (claimed.length === 0) return;
+      this.emit({
+        health: 'printing',
+        detail: `正在打印 ${claimed.map((job) => `D${job.slot}`).join(' + ')} · 双列标签行`,
+        currentJobId: claimed[0].id,
+      });
       await this.drawAndPrint(claimed);
-      await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/printed`, { workerId: this.workerId });
-      this.emit({ health: 'ready', detail: this.readyDetail(), currentJobId: null, lastPrintedJobId: claimed.id });
+      for (const job of claimed) {
+        await this.post(`/api/label-print/jobs/${encodeURIComponent(job.id)}/printed`, { workerId: this.workerId });
+      }
+      this.emit({ health: 'ready', detail: this.readyDetail(), currentJobId: null, lastPrintedJobId: claimed[claimed.length - 1].id });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[标签打印] 打印任务失败:', error);
-      if (claimed) {
-        try { await this.post(`/api/label-print/jobs/${encodeURIComponent(claimed.id)}/failed`, { workerId: this.workerId, error: message }); } catch { /* preserve original */ }
+      for (const job of claimed) {
+        try { await this.post(`/api/label-print/jobs/${encodeURIComponent(job.id)}/failed`, { workerId: this.workerId, error: message }); } catch { /* preserve original */ }
       }
       this.emit({ health: 'error', detail: message, currentJobId: null });
     } finally {

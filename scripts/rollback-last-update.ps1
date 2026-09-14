@@ -96,7 +96,7 @@ function Ensure-RollbackCommitAvailable([string]$TargetCommit) {
 
 function Assert-CommitBelongsToBranch([string]$TargetCommit) {
     & git merge-base --is-ancestor $TargetCommit $remoteRef 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Refusing rollback because target commit is not an ancestor of origin/$targetBranch: $TargetCommit" }
+    if ($LASTEXITCODE -ne 0) { throw "Refusing rollback because target commit is not an ancestor of origin/${targetBranch}: $TargetCommit" }
 }
 
 function Stop-ProjectRuntimeProcesses {

@@ -234,10 +234,16 @@ export class LabelPrintQueueStore {
   }
 
   async claimNext(workerId: string, leaseMs = DEFAULT_LEASE_MS, createdAfter = 0): Promise<ProductLabelPrintJob | null> {
+    const jobs = await this.claimRow(workerId, 1, leaseMs, createdAfter);
+    return jobs[0] ?? null;
+  }
+
+  async claimRow(workerId: string, columns = 2, leaseMs = DEFAULT_LEASE_MS, createdAfter = 0): Promise<ProductLabelPrintJob[]> {
     return this.mutate(async () => {
       const now = Date.now();
       const recovered = this.recoverExpiredLeases(now);
       const eligible = (item: ProductLabelPrintJob) => item.createdAt >= Math.max(0, Number(createdAfter) || 0);
+      const rowSize = Math.max(1, Math.min(2, Math.floor(Number(columns) || 2)));
 
       // A failed physical-print attempt is ambiguous: the paper may have come out
       // even if the ACK was lost. Stop automatic progression here so D2 cannot be
@@ -245,24 +251,27 @@ export class LabelPrintQueueStore {
       // the shifted paper sequence. Explicit retry/reprint clears the barrier.
       if (this.state.jobs.some((item) => item.status === 'FAILED' && eligible(item))) {
         if (recovered) await this.save();
-        return null;
+        return [];
       }
 
-      const job = this.state.jobs
+      const jobs = this.state.jobs
         .filter((item) => item.status === 'WAITING' && eligible(item))
-        .sort((a, b) => a.createdAt - b.createdAt || a.slot - b.slot)[0];
-      if (!job) {
+        .sort((a, b) => a.createdAt - b.createdAt || a.slot - b.slot)
+        .slice(0, rowSize);
+      if (jobs.length === 0) {
         if (recovered) await this.save();
-        return null;
+        return [];
       }
-      job.status = 'PRINTING';
-      job.workerId = workerId;
-      job.leaseUntil = now + Math.max(15_000, leaseMs);
-      job.attempts += 1;
-      job.lastError = null;
-      job.updatedAt = now;
+      for (const job of jobs) {
+        job.status = 'PRINTING';
+        job.workerId = workerId;
+        job.leaseUntil = now + Math.max(15_000, leaseMs);
+        job.attempts += 1;
+        job.lastError = null;
+        job.updatedAt = now;
+      }
       await this.save();
-      return safeClone(job);
+      return safeClone(jobs);
     });
   }
 

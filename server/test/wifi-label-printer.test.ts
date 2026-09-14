@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeWifiPrinterDevices } from '../../components/label-printer-runtime.ts';
+import { LABEL_TEMPLATE, normalizeWifiPrinterDevices } from '../../components/label-printer-runtime.ts';
+
+test('default label template matches the 30x20mm two-up media', () => {
+  assert.deepEqual(LABEL_TEMPLATE, {
+    name: 'FLAME_DETECTOR_30X20_2UP',
+    labelWidth: 30,
+    labelHeight: 20,
+    columns: 2,
+    canvasWidth: 60,
+    canvasHeight: 20,
+  });
+});
 
 test('WiFi 扫描响应按 SDK 契约解析 deviceName、IP 和 tcpPort', () => {
   const devices = normalizeWifiPrinterDevices({

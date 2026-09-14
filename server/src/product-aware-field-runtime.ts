@@ -123,7 +123,10 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       recordConfig: inspectionRecordConfig,
       mes: mesPublisher.getPublicStatus(),
       labelPrinting: {
-        template: 'FLAME_DETECTOR_60X40_HORIZONTAL',
+        template: 'FLAME_DETECTOR_30X20_2UP',
+        labelSizeMm: { width: 30, height: 20 },
+        columnsPerRow: 2,
+        canvasSizeMm: { width: 60, height: 20 },
         productName: '点型红外火焰探测器',
         qrMode: 'PRODUCT_CODE',
         copiesPerProduct: 1,
@@ -293,6 +296,19 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
       return res.json({ job });
     } catch (error) {
       return res.status(500).json({ code: 'LABEL_PRINT_CLAIM_FAILED', error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  runtime.app.post('/api/label-print/claim-row', requireDesktopMutation, async (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown> | undefined;
+      const workerId = requestText(body?.workerId, 96);
+      if (!workerId) return res.status(400).json({ code: 'LABEL_PRINT_WORKER_REQUIRED' });
+      const createdAfter = Number(body?.createdAfter);
+      const count = Number(body?.count);
+      const jobs = await labelPrintQueue.claimRow(workerId, Number.isFinite(count) ? count : 2, undefined, Number.isFinite(createdAfter) ? createdAfter : 0);
+      return res.json({ jobs });
+    } catch (error) {
+      return res.status(500).json({ code: 'LABEL_PRINT_ROW_CLAIM_FAILED', error: error instanceof Error ? error.message : String(error) });
     }
   });
   runtime.app.post('/api/label-print/jobs/:id/printed', requireDesktopMutation, async (req, res) => {

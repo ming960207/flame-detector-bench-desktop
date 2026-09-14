@@ -138,6 +138,20 @@ test('automatic claim can start from the time auto print was enabled', async () 
   assert.equal(claimed?.productCode, 'NEW-1', '开启自动打印前生成的标签不得被自动打印');
 });
 
+test('2-up claim leases two consecutive printable labels as one physical row', async () => {
+  const { store } = await fixture();
+  const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, `CODE-${offset + 1}`, '合格'));
+  await store.enqueueProductionRecord(record(products), detectorVerdict());
+
+  const firstRow = await store.claimRow('worker-a', 2);
+  assert.deepEqual(firstRow.map((job) => job.slot), [1, 2]);
+  assert.ok(firstRow.every((job) => job.status === 'PRINTING'));
+
+  for (const job of firstRow) await store.markPrinted(job.id, 'worker-a');
+  const secondRow = await store.claimRow('worker-a', 2);
+  assert.deepEqual(secondRow.map((job) => job.slot), [3, 4]);
+});
+
 test('physical print failure pauses queue until explicit retry and printed label can be reprinted', async () => {
   const { file, store } = await fixture();
   const products = Array.from({ length: 6 }, (_, offset) => product(offset + 1, `CODE-${offset + 1}`, '合格'));
