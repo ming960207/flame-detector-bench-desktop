@@ -87,6 +87,26 @@ export function resolveSoftwareRepositoryRoot(workingDirectory = process.cwd()):
   )) ?? currentDirectory;
 }
 
+export function buildSoftwareReleaseLaunch(scriptPath: string, scriptArgs: string[]): { command: string; args: string[] } {
+  return {
+    command: 'cmd.exe',
+    args: [
+      '/d',
+      '/c',
+      'start',
+      '',
+      '/b',
+      'powershell.exe',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptPath,
+      ...scriptArgs,
+    ],
+  };
+}
+
 function validCommit(value: string): boolean {
   return /^[0-9a-f]{7,64}$/i.test(value);
 }
@@ -195,19 +215,27 @@ export class SoftwareReleaseService {
   private async startPowerShellScript(scriptName: string, scriptArgs: string[]): Promise<void> {
     const scriptPath = this.path(`scripts/${scriptName}`);
     await fs.access(scriptPath);
-    const child = spawn('powershell.exe', [
-      '-NoProfile',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath,
-      ...scriptArgs,
-    ], {
+    const launch = buildSoftwareReleaseLaunch(scriptPath, scriptArgs);
+    const child = spawn(launch.command, launch.args, {
       cwd: this.repoRoot,
       detached: true,
       stdio: 'ignore',
-      windowsHide: false,
+      windowsHide: true,
       env: { ...process.env },
     });
-    child.unref();
+    await new Promise<void>((resolve, reject) => {
+      const handleSpawnError = (error: Error) => {
+        child.removeListener('spawn', handleSpawn);
+        reject(error);
+      };
+      const handleSpawn = () => {
+        child.removeListener('error', handleSpawnError);
+        child.unref();
+        resolve();
+      };
+      child.once('error', handleSpawnError);
+      child.once('spawn', handleSpawn);
+    });
   }
 
   async startUpdate(): Promise<SoftwareActionResult> {
