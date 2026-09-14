@@ -15,6 +15,13 @@ import {
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
+import {
+  containMediaGeometry,
+  sourceRoiToViewportRoi,
+  viewportRoiToSourceRoi,
+  type ContainMediaGeometry,
+  type NormalizedCameraRoi,
+} from './indicator-camera-geometry';
 import './indicator-camera.css';
 
 export type IndicatorColor = 'green' | 'red' | 'yellow';
@@ -22,13 +29,7 @@ export type IndicatorPhase = RelayFunctionalTestProgress['phase'] | 'MANUAL';
 export type IndicatorState = 'ON' | 'OFF' | 'UNKNOWN';
 export type IndicatorVerdict = 'PASS' | 'FAIL' | 'WAITING';
 
-export interface IndicatorSlotRoi {
-  slot: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+export type IndicatorSlotRoi = NormalizedCameraRoi;
 
 export interface IndicatorLightResult {
   color: IndicatorColor;
@@ -55,6 +56,8 @@ export interface IndicatorCapture {
   image: string;
   slots: IndicatorSlotResult[];
   sampleCount: number;
+  frameWidth: number;
+  frameHeight: number;
 }
 
 interface FrameSample {
@@ -68,9 +71,11 @@ interface CameraDeviceOption {
   label: string;
 }
 
-const CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
+const CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v2';
+const LEGACY_CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
 const CAMERA_WIDTH = 960;
 const SLOT_ROI_SIZE = 0.1;
+const SOURCE_ROI_HEIGHT = 0.18;
 const SAMPLE_INTERVAL_MS = 240;
 const PHOTO_INTERVAL_MS = 720;
 const REQUIRED_STABLE_FRAMES = 2;
@@ -98,19 +103,20 @@ const PHASE_LABELS: Record<IndicatorPhase, string> = {
   MANUAL: '手动取证',
 };
 
-const DEFAULT_SLOT_ROIS: IndicatorSlotRoi[] = Array.from({ length: 6 }, (_, index) => ({
-  slot: index + 1,
-  x: 0.02 + index * 0.163,
-  y: 0.28,
-  width: SLOT_ROI_SIZE,
-  height: SLOT_ROI_SIZE,
-}));
+const DEFAULT_SLOT_ROIS: IndicatorSlotRoi[] = [
+  { slot: 1, x: 0.65, y: 0.08, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+  { slot: 2, x: 0.45, y: 0.08, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+  { slot: 3, x: 0.25, y: 0.08, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+  { slot: 4, x: 0.65, y: 0.46, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+  { slot: 5, x: 0.45, y: 0.46, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+  { slot: 6, x: 0.25, y: 0.46, width: SLOT_ROI_SIZE, height: SOURCE_ROI_HEIGHT },
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi): IndicatorSlotRoi {
+function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi, preserveSize = false): IndicatorSlotRoi {
   if (!value || typeof value !== 'object') return fallback;
   const source = value as Partial<IndicatorSlotRoi>;
   const rawWidth = Number(source.width);
@@ -121,8 +127,8 @@ function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi): IndicatorSlot
   const previousHeight = clamp(Number.isFinite(rawHeight) ? rawHeight : fallback.height, 0.05, 0.8);
   const centerX = (Number.isFinite(rawX) ? rawX : fallback.x) + previousWidth / 2;
   const centerY = (Number.isFinite(rawY) ? rawY : fallback.y) + previousHeight / 2;
-  const width = SLOT_ROI_SIZE;
-  const height = SLOT_ROI_SIZE;
+  const width = preserveSize ? clamp(previousWidth, 0.04, 0.4) : SLOT_ROI_SIZE;
+  const height = preserveSize ? clamp(previousHeight, 0.04, 0.5) : SLOT_ROI_SIZE;
   return {
     slot: fallback.slot,
     x: clamp(centerX - width / 2, 0, 1 - width),
@@ -132,15 +138,44 @@ function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi): IndicatorSlot
   };
 }
 
-function loadSlotRois(): IndicatorSlotRoi[] {
-  if (typeof window === 'undefined') return DEFAULT_SLOT_ROIS;
+interface SlotRoiStorage {
+  rois: IndicatorSlotRoi[];
+  legacyViewportCoordinates: boolean;
+}
+
+function parseStoredRois(rawValue: string | null, preserveSize: boolean): IndicatorSlotRoi[] | null {
+  if (!rawValue) return null;
   try {
-    const raw = JSON.parse(window.localStorage.getItem(CAMERA_CONFIG_KEY) || 'null') as unknown;
-    if (!Array.isArray(raw) || raw.length !== DEFAULT_SLOT_ROIS.length) return DEFAULT_SLOT_ROIS;
-    return DEFAULT_SLOT_ROIS.map((fallback, index) => normalizeRoi(raw[index], fallback));
+    const raw = JSON.parse(rawValue) as unknown;
+    if (!Array.isArray(raw) || raw.length !== DEFAULT_SLOT_ROIS.length) return null;
+    return DEFAULT_SLOT_ROIS.map((fallback, index) => normalizeRoi(raw[index], fallback, preserveSize));
   } catch {
-    return DEFAULT_SLOT_ROIS;
+    return null;
   }
+}
+
+function loadSlotRoiStorage(): SlotRoiStorage {
+  if (typeof window === 'undefined') return { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+  try {
+    const current = parseStoredRois(window.localStorage.getItem(CAMERA_CONFIG_KEY), true);
+    if (current) return { rois: current, legacyViewportCoordinates: false };
+    const legacy = parseStoredRois(window.localStorage.getItem(LEGACY_CAMERA_CONFIG_KEY), false);
+    return legacy
+      ? { rois: legacy, legacyViewportCoordinates: true }
+      : { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+  } catch {
+    return { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+  }
+}
+
+function roiDisplayStyle(roi: IndicatorSlotRoi, geometry: ContainMediaGeometry | null): { left: string; top: string; width: string; height: string } {
+  const displayRoi = geometry ? sourceRoiToViewportRoi(roi, geometry) : roi;
+  return {
+    left: `${displayRoi.x * 100}%`,
+    top: `${displayRoi.y * 100}%`,
+    width: `${displayRoi.width * 100}%`,
+    height: `${displayRoi.height * 100}%`,
+  };
 }
 
 function colorMatches(red: number, green: number, blue: number, color: IndicatorColor): boolean {
@@ -339,7 +374,11 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const cameraStartRef = useRef<Promise<void> | null>(null);
   const cameraGenerationRef = useRef(0);
   const captureFrameRequestRef = useRef<number | null>(null);
-  const slotRoisRef = useRef<IndicatorSlotRoi[]>(loadSlotRois());
+  const initialSlotRoiStorageRef = useRef<SlotRoiStorage | null>(null);
+  if (initialSlotRoiStorageRef.current === null) initialSlotRoiStorageRef.current = loadSlotRoiStorage();
+  const initialSlotRoiStorage = initialSlotRoiStorageRef.current;
+  const slotRoisRef = useRef<IndicatorSlotRoi[]>(initialSlotRoiStorage.rois);
+  const legacySlotRoisRef = useRef<IndicatorSlotRoi[] | null>(initialSlotRoiStorage.legacyViewportCoordinates ? initialSlotRoiStorage.rois : null);
   const phaseSamplesRef = useRef<FrameSample[]>([]);
   const runSamplesRef = useRef<FrameSample[]>([]);
   const phaseResultsRef = useRef<Map<IndicatorPhase, IndicatorSlotResult[]>>(new Map());
@@ -351,8 +390,10 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const lastBatchKeyRef = useRef<string | null>(batchId);
   const submittedBatchRef = useRef<string | null>(null);
   const autoStartAttemptRef = useRef<string | null>(null);
+  const previewViewportRef = useRef<HTMLDivElement | null>(null);
+  const photoFrameRef = useRef<HTMLDivElement | null>(null);
 
-  const [slotRois, setSlotRois] = useState<IndicatorSlotRoi[]>(loadSlotRois);
+  const [slotRois, setSlotRois] = useState<IndicatorSlotRoi[]>(initialSlotRoiStorage.rois);
   const [devices, setDevices] = useState<CameraDeviceOption[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [cameraStatus, setCameraStatus] = useState<'idle' | 'requesting' | 'ready' | 'error'>('idle');
@@ -363,6 +404,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const [calibratingSlot, setCalibratingSlot] = useState<number | null>(null);
   const [recognitionPending, setRecognitionPending] = useState(false);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
+  const [mediaSize, setMediaSize] = useState({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [photoFrameSize, setPhotoFrameSize] = useState({ width: 0, height: 0 });
 
   const relayTestBelongsToBatch = Boolean(relayTest?.batchId && batchId && relayTest.batchId === batchId);
   const activePhase: IndicatorPhase = relayTest?.active === true && relayTestBelongsToBatch
@@ -378,6 +422,16 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     && activePhase !== 'COMPLETE';
   const autoStartKey = batchId ?? relayTest?.batchId ?? 'active';
   const currentCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
+  const liveGeometry = useMemo(() => (
+    mediaSize.width > 0 && mediaSize.height > 0 && viewportSize.width > 0 && viewportSize.height > 0
+      ? containMediaGeometry(viewportSize.width, viewportSize.height, mediaSize.width, mediaSize.height)
+      : null
+  ), [mediaSize, viewportSize]);
+  const photoGeometry = useMemo(() => (
+    currentCapture && currentCapture.frameWidth > 0 && currentCapture.frameHeight > 0 && photoFrameSize.width > 0 && photoFrameSize.height > 0
+      ? containMediaGeometry(photoFrameSize.width, photoFrameSize.height, currentCapture.frameWidth, currentCapture.frameHeight)
+      : null
+  ), [currentCapture, photoFrameSize]);
   const expectedColor = expectedLightForPhase(activePhase);
   const summary = useMemo(() => visualSummary(liveResults, relayFunctionalTest), [liveResults, relayFunctionalTest]);
 
@@ -439,8 +493,42 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     }
   }, [batchId, captures, completedResults, onSubmitEvidence, precheckBusy, relayFunctionalTest, relayTest?.phase]);
 
+  const updateLayoutGeometry = useCallback(() => {
+    const viewport = previewViewportRef.current;
+    if (viewport) setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    const video = previewVideoRef.current;
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      setMediaSize({ width: video.videoWidth, height: video.videoHeight });
+    }
+    const photoFrame = photoFrameRef.current;
+    if (photoFrame) setPhotoFrameSize({ width: photoFrame.clientWidth, height: photoFrame.clientHeight });
+  }, []);
+
+  useEffect(() => {
+    updateLayoutGeometry();
+    window.addEventListener('resize', updateLayoutGeometry);
+    const observed = [previewViewportRef.current, photoFrameRef.current].filter((element): element is HTMLElement => Boolean(element));
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateLayoutGeometry);
+    observed.forEach((element) => observer?.observe(element));
+    return () => {
+      window.removeEventListener('resize', updateLayoutGeometry);
+      observer?.disconnect();
+    };
+  }, [cameraStatus, currentCapture, expanded, updateLayoutGeometry]);
+
+  useEffect(() => {
+    const legacy = legacySlotRoisRef.current;
+    if (!legacy || !liveGeometry) return;
+    const migrated = legacy.map((roi) => viewportRoiToSourceRoi(roi, liveGeometry));
+    legacySlotRoisRef.current = null;
+    slotRoisRef.current = migrated;
+    setSlotRois(migrated);
+    try { window.localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(migrated)); } catch { /* best effort */ }
+  }, [liveGeometry]);
+
   useEffect(() => {
     slotRoisRef.current = slotRois;
+    if (legacySlotRoisRef.current) return;
     try { window.localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(slotRois)); } catch { /* best effort */ }
   }, [slotRois]);
 
@@ -550,6 +638,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
           else video.getTracks().forEach((track) => track.stop());
           return;
         }
+        if (video.videoWidth > 0 && video.videoHeight > 0) {
+          setMediaSize({ width: video.videoWidth, height: video.videoHeight });
+        }
         setCameraStatus('ready');
         await enumerateCameras();
       } catch (error) {
@@ -594,7 +685,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     });
   }, [cameraStatus, expanded]);
 
-  const makeCapture = useCallback((phase: IndicatorPhase, image: string, slots: IndicatorSlotResult[], sampleCount: number): IndicatorCapture => ({
+  const makeCapture = useCallback((phase: IndicatorPhase, image: string, slots: IndicatorSlotResult[], sampleCount: number, frameWidth: number, frameHeight: number): IndicatorCapture => ({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     batchId,
     phase,
@@ -603,6 +694,8 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     image,
     slots,
     sampleCount,
+    frameWidth,
+    frameHeight,
   }), [batchId]);
 
   const captureFrameNow = useCallback((savePhoto: boolean) => {
@@ -661,7 +754,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     lastPhotoAtRef.current = frame.capturedAt;
     if (!savePhoto) lastAutomaticPhotoPhaseRef.current = phase;
     const image = canvas.toDataURL('image/jpeg', 0.78);
-    const capture = makeCapture(phase, image, aggregated, phaseSamplesRef.current.length);
+    const capture = makeCapture(phase, image, aggregated, phaseSamplesRef.current.length, width, height);
     setCaptures((current) => [capture, ...current].slice(0, MAX_CAPTURE_HISTORY));
     setSelectedCaptureId(capture.id);
   }, [activePhase, makeCapture, relayTest?.detectorIndexes]);
@@ -709,8 +802,11 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     const rect = event.currentTarget.getBoundingClientRect();
     const x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const y = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    const sourcePoint = liveGeometry
+      ? viewportRoiToSourceRoi({ slot: calibratingSlot, x, y, width: 0, height: 0 }, liveGeometry)
+      : { x, y };
     setSlotRois((current) => current.map((roi) => roi.slot === calibratingSlot
-      ? { ...roi, x: clamp(x - roi.width / 2, 0, 1 - roi.width), y: clamp(y - roi.height / 2, 0, 1 - roi.height) }
+      ? { ...roi, x: clamp(sourcePoint.x - roi.width / 2, 0, 1 - roi.width), y: clamp(sourcePoint.y - roi.height / 2, 0, 1 - roi.height) }
       : roi));
     setCalibratingSlot((current) => current && current < 6 ? current + 1 : null);
   };
@@ -760,13 +856,13 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
         {calibratingSlot && <div className="indicator-camera__calibration-note"><Settings2 />请在实时画面内点击 D{calibratingSlot} 指示灯组中心；每次点击自动进入下一个槽位。</div>}
 
         <div className="indicator-camera__workbench">
-          <div className="indicator-camera__viewport" onClick={handleViewportClick} role={calibratingSlot ? 'button' : undefined} tabIndex={calibratingSlot ? 0 : undefined}>
+          <div ref={previewViewportRef} className="indicator-camera__viewport" onClick={handleViewportClick} role={calibratingSlot ? 'button' : undefined} tabIndex={calibratingSlot ? 0 : undefined}>
             <video className="indicator-camera__preview" ref={previewVideoRef} muted playsInline />
             {cameraStatus !== 'ready' && <div className="indicator-camera__placeholder"><Video /><b>{cameraStatus === 'error' ? '摄像头不可用' : '启用 UVC 后显示实时画面'}</b><small>首次使用请先选择设备并完成 6 槽位校准</small></div>}
             <div className="indicator-camera__roi-layer" aria-hidden="true">
-              {annotationsVisible && !recognitionPending && slotRois.map((roi) => {
+              {annotationsVisible && !recognitionPending && liveGeometry && slotRois.map((roi) => {
                 const result = liveResults.find((item) => item.slot === roi.slot);
-                return <div key={roi.slot} className={`indicator-camera__roi ${calibratingSlot === roi.slot ? 'is-target' : ''} ${result?.verdict === 'PASS' ? 'is-pass' : result?.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${roi.x * 100}%`, top: `${roi.y * 100}%`, width: `${roi.width * 100}%` }}><b>D{roi.slot}</b>{result && <span>{result.verdict === 'PASS' ? 'OK' : result.verdict === 'FAIL' ? 'NG' : '—'}</span>}{result && COLORS.map(({ key, className }) => { const bounds = result.lights[key].bounds; return bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(bounds.x - roi.x) / roi.width * 100}%`, top: `${(bounds.y - roi.y) / roi.height * 100}%`, width: `${bounds.width / roi.width * 100}%`, height: `${bounds.height / roi.height * 100}%` }} />; })}</div>;
+                return <div key={roi.slot} className={`indicator-camera__roi ${calibratingSlot === roi.slot ? 'is-target' : ''} ${result?.verdict === 'PASS' ? 'is-pass' : result?.verdict === 'FAIL' ? 'is-fail' : ''}`} style={roiDisplayStyle(roi, liveGeometry)}><b>D{roi.slot}</b>{result && <span>{result.verdict === 'PASS' ? 'OK' : result.verdict === 'FAIL' ? 'NG' : '—'}</span>}{result && COLORS.map(({ key, className }) => { const bounds = result.lights[key].bounds; return bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(bounds.x - roi.x) / roi.width * 100}%`, top: `${(bounds.y - roi.y) / roi.height * 100}%`, width: `${bounds.width / roi.width * 100}%`, height: `${bounds.height / roi.height * 100}%` }} />; })}</div>;
               })}
             </div>
           </div>
@@ -786,8 +882,8 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
         <div className="indicator-camera__evidence">
           <div className="indicator-camera__evidence-preview">
             <header><div><b>对应环节照片</b><span>{currentCapture ? `${currentCapture.label} · ${formatCaptureTime(currentCapture.capturedAt)}` : '尚未生成照片'}</span></div>{currentCapture && <a href={currentCapture.image} download={`indicator-${currentCapture.phase}-${currentCapture.capturedAt}.jpg`} title="下载当前照片" aria-label="下载当前照片"><Download /></a>}</header>
-            <div className="indicator-camera__photo-frame">
-              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{annotationsVisible && !recognitionPending && currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={{ left: `${slot.roi.x * 100}%`, top: `${slot.roi.y * 100}%`, width: `${slot.roi.width * 100}%` }}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
+            <div ref={photoFrameRef} className="indicator-camera__photo-frame">
+              {activeImage ? <><img src={activeImage} alt={`${currentCapture?.label ?? '指示灯'}现场照片`} />{annotationsVisible && !recognitionPending && photoGeometry && currentCapture?.slots.map((slot) => <div key={slot.slot} className={`indicator-camera__photo-roi ${slot.verdict === 'PASS' ? 'is-pass' : slot.verdict === 'FAIL' ? 'is-fail' : ''}`} style={roiDisplayStyle(slot.roi, photoGeometry)}><b>D{slot.slot}</b>{COLORS.map(({ key, className }) => slot.lights[key].bounds && <i key={key} className={`${className} is-detected`} style={{ left: `${(slot.lights[key].bounds.x - slot.roi.x) / slot.roi.width * 100}%`, top: `${(slot.lights[key].bounds.y - slot.roi.y) / slot.roi.height * 100}%`, width: `${slot.lights[key].bounds.width / slot.roi.width * 100}%`, height: `${slot.lights[key].bounds.height / slot.roi.height * 100}%` }} />)}</div>)}</> : <div className="indicator-camera__photo-empty"><Camera /><span>启用摄像头并完成一次取证后，这里会显示照片与 D1–D6 标注</span></div>}
             </div>
           </div>
           <div className="indicator-camera__capture-list"><header><b>采样记录</b><span>{captures.length} 张</span></header>{captures.length === 0 && <small className="indicator-camera__capture-empty">继电器测试时自动按阶段抓拍；绿灯至少跨 2 帧确认。</small>}{captures.map((capture) => <button type="button" key={capture.id} className={capture.id === currentCapture?.id ? 'is-selected' : ''} onClick={() => selectCapture(capture)}><img src={capture.image} alt="" /><span><b>{capture.label}</b><small>{formatCaptureTime(capture.capturedAt)} · {capture.sampleCount} 帧</small></span><em>{capture.slots.filter((slot) => slot.verdict === 'PASS').length}/6</em></button>)}</div>

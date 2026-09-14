@@ -5,6 +5,11 @@ import {
   indicatorVisionState,
   startsNewRelayStatusSession,
 } from '../../components/detector-status-lights-model.ts';
+import {
+  containMediaGeometry,
+  sourceRoiToViewportRoi,
+  viewportRoiToSourceRoi,
+} from '../../components/indicator-camera-geometry.ts';
 import { DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG } from '../src/relay-functional-test.ts';
 import { buildLiveRelayStatusUnits } from '../src/relay-status-lights-service.ts';
 
@@ -20,6 +25,21 @@ test('indicator vision verdicts map to active, inactive, and unknown states', ()
   assert.deepEqual(indicatorVisionState('FAIL'), { active: false, known: true });
   assert.deepEqual(indicatorVisionState('PENDING'), { active: false, known: false });
   assert.deepEqual(indicatorVisionState(undefined), { active: false, known: false });
+});
+
+test('indicator ROIs calibrated inside contain letterboxing map back to source pixels', () => {
+  const geometry = containMediaGeometry(320, 320, 16, 9);
+  const viewportRoi = { slot: 1, x: 40 / 320, y: 90 / 320, width: 40 / 320, height: 40 / 320 };
+  const sourceRoi = viewportRoiToSourceRoi(viewportRoi, geometry);
+
+  assert.deepEqual(sourceRoi, {
+    slot: 1,
+    x: 0.125,
+    y: 1 / 9,
+    width: 0.125,
+    height: 2 / 9,
+  });
+  assert.deepEqual(sourceRoiToViewportRoi(sourceRoi, geometry), viewportRoi);
 });
 
 test('a new relay batch resets latches before the active flag rises', () => {
