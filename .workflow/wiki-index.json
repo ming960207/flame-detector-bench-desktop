@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "generatedAt": 1789231184184,
+  "generatedAt": 1789370169682,
   "entries": [
     {
       "id": "kg-code-d-code-components-detector-status-lights-runtime-ts-applyunit",
@@ -77880,6 +77880,53 @@
       "related": [
         "kg-code-d-code-utils-waveform-ts-boundedsamplecount"
       ],
+      "repoId": null
+    },
+    {
+      "id": "knowhow-tip-20260914-1353",
+      "type": "knowhow",
+      "title": "上位机主屏验收尺寸",
+      "summary": "上位机主屏尺寸固定按 `1280 × 1024 px` 进行界面布局设计和验收。",
+      "tags": [
+        "屏幕尺寸",
+        "主屏验收",
+        "界面布局",
+        "视觉取证"
+      ],
+      "status": "active",
+      "created": "2026-09-14T05:53:42.598Z",
+      "updated": "2026-09-14T05:53:42.598Z",
+      "scope": null,
+      "category": "tip",
+      "specCategory": null,
+      "createdBy": null,
+      "sourceRef": null,
+      "parent": null,
+      "related": [],
+      "repoId": null
+    },
+    {
+      "id": "knowhow-TIP-20260914-1353-001",
+      "type": "knowhow",
+      "title": "Context",
+      "summary": "后续主屏比例、全屏视觉取证窗口、视频/图片可视区域和 Playwright 浏览器检查，默认以该尺寸为主要目标；其他尺寸只作为响应式兼容检查。",
+      "tags": [
+        "屏幕尺寸",
+        "主屏验收",
+        "界面布局",
+        "视觉取证",
+        "tip"
+      ],
+      "status": "active",
+      "created": "2026-09-14T05:53:42.598Z",
+      "updated": "2026-09-14T05:53:42.598Z",
+      "scope": null,
+      "category": "general",
+      "specCategory": null,
+      "createdBy": null,
+      "sourceRef": null,
+      "parent": "knowhow-tip-20260914-1353",
+      "related": [],
       "repoId": null
     },
     {
