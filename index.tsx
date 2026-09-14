@@ -4,6 +4,7 @@ import { OfflineClosureApp } from './components/OfflineClosureApp';
 import { FieldProcessStatusApp } from './components/FieldProcessStatusApp';
 import { TestProgramApp } from './components/TestProgramApp';
 import './components/detector-status-lights-live-runtime';
+import './components/mes-status-live-runtime';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
