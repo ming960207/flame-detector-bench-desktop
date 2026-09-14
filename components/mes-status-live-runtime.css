@@ -1,12 +1,23 @@
-.wutos-mes-status {
+.wutos-header__meta {
   position: relative;
+}
+
+.wutos-mes-status {
+  position: absolute;
+  top: 2.15em;
+  right: 0;
   display: inline-flex;
   align-items: center;
   gap: .38em;
   min-width: 0;
+  padding: .22em .52em;
   color: #b9e7ff;
+  border: 1px solid rgba(64, 155, 226, .34);
+  border-radius: 999px;
+  background: rgba(2, 23, 45, .74);
   cursor: default;
   outline: none;
+  box-shadow: 0 0 .7em rgba(0, 116, 220, .14);
 }
 
 .wutos-mes-status__dot {
@@ -25,6 +36,7 @@
 
 .wutos-mes-status.is-ready {
   color: var(--wutos-green, #79f574);
+  border-color: rgba(121, 245, 116, .34);
 }
 
 .wutos-mes-status.is-ready .wutos-mes-status__dot {
@@ -34,6 +46,7 @@
 
 .wutos-mes-status.is-pending {
   color: #ffd466;
+  border-color: rgba(255, 212, 102, .36);
 }
 
 .wutos-mes-status.is-pending .wutos-mes-status__dot {
@@ -43,6 +56,7 @@
 
 .wutos-mes-status.is-error {
   color: var(--wutos-red, #ff5552);
+  border-color: rgba(255, 85, 82, .38);
 }
 
 .wutos-mes-status.is-error .wutos-mes-status__dot {
