@@ -17,10 +17,16 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
   assertSupportedRuntimeMode(config.closureMode);
 
   if (config.closureMode === 'field') {
-    const [{ startProductAwareFieldStatusServer }, { startUnifiedAuxiliaryServices }, { startDiagnosticLogAutoUpload }] = await Promise.all([
+    const [
+      { startProductAwareFieldStatusServer },
+      { startUnifiedAuxiliaryServices },
+      { startDiagnosticLogAutoUpload },
+      { startRelayStatusLightsService },
+    ] = await Promise.all([
       import('./product-aware-field-runtime.js'),
       import('./unified-services.js'),
       import('./diagnostic-log-auto-upload.js'),
+      import('./relay-status-lights-service.js'),
     ]);
 
     const fieldRuntime = await startProductAwareFieldStatusServer();
@@ -36,6 +42,11 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
       throw error;
     }
 
+    // The original status-light endpoint intentionally reports relay feedback as
+    // unknown. Add a read-only DIO-backed endpoint for the production UI while
+    // keeping the formal relay-test coordinator unchanged.
+    const relayStatusLightsRuntime = startRelayStatusLightsService(fieldRuntime);
+
     // A completed field test is persisted by FileFieldTestResultLogger as one
     // append to test-results-*.log. Watching that durable completion artifact
     // keeps automatic GitHub upload inside the unified backend process and avoids
@@ -47,7 +58,12 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
       async close(): Promise<void> {
         if (closed) return;
         closed = true;
-        await closeAll([diagnosticUploadRuntime, auxiliaryRuntime, fieldRuntime]);
+        await closeAll([
+          diagnosticUploadRuntime,
+          relayStatusLightsRuntime,
+          auxiliaryRuntime,
+          fieldRuntime,
+        ]);
       },
     };
   }
