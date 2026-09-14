@@ -35,12 +35,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+let primaryRelayFeedbackInputSource: DioModbusTcpInputSource | null = null;
+
+/**
+ * The product-aware runtime creates the formal relay-test source before auxiliary
+ * services start. Reusing that source prevents the live status lamps from opening
+ * a second Modbus TCP connection that could disturb a single-client DIO module.
+ */
+export function getPrimaryRelayFeedbackInputSource(): DioModbusTcpInputSource | null {
+  return primaryRelayFeedbackInputSource;
+}
+
 /**
  * On-demand DIO feedback reader.
  *
- * It intentionally has no background timer. The relay test invokes readInputs
- * while it is checking an action or reset, so the main PLC page remains a PLC
- * page and does not become a second real-time DIO monitor.
+ * It intentionally has no background timer. Consumers invoke readInputs only
+ * while they need a sample; concurrent consumers share the same in-flight read.
  */
 export class DioModbusTcpInputSource {
   private config: RelayDioConfig;
@@ -53,6 +63,9 @@ export class DioModbusTcpInputSource {
     private readonly createClient: ModbusClientFactory = defaultClientFactory,
   ) {
     this.config = normalizeRelayDioConfig(config, DEFAULT_RELAY_DIO_CONFIG);
+    if (!primaryRelayFeedbackInputSource && createClient === defaultClientFactory) {
+      primaryRelayFeedbackInputSource = this;
+    }
   }
 
   getConfig(): RelayDioConfig {
@@ -74,7 +87,7 @@ export class DioModbusTcpInputSource {
     try {
       await client.close();
     } catch {
-      // The socket is already unusable; the next test will create a new client.
+      // The socket is already unusable; the next read will create a new client.
     }
   }
 
