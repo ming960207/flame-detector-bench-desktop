@@ -47,6 +47,10 @@ import {
   DetectorStartupTracker,
   type DetectorStartupDiagnostic,
 } from './detector-startup.js';
+import {
+  FLAME_DETECTOR_SIMULATION_COMMANDS,
+  type FlameDetectorSimulationCommand,
+} from './flame-detector-command.js';
 
 const SEND_MODE_BROADCAST_RETRY_INTERVAL_MS = 250;
 const TCP_RECONNECT_INTERVAL_MS = 250;
@@ -61,6 +65,14 @@ const PRECHECK_DRAIN_DELAY_MS = 150;
 const READY_BARRIER_TIMEOUT_MS = 15_000;
 const READY_BARRIER_POLL_INTERVAL_MS = 50;
 const PROTOCOL_DIAGNOSTIC_FRAME_LIMIT = 5;
+
+export interface FlameDetectorSimulationCommandResult {
+  command: FlameDetectorSimulationCommand;
+  label: string;
+  frameHex: string;
+  sentUnits: number[];
+  failedUnits: Array<{ index: number; error: string }>;
+}
 
 interface SocketBinding {
   socket: RawTcpSocket;
@@ -199,6 +211,7 @@ export class FlameDetectorService extends EventEmitter {
   private polling = false;
   private autoTesting = false;
   private inspectionPreparing = false;
+  private commandSending = false;
   private disposed = false;
   private closing = false;
   private lastError = '';
@@ -762,7 +775,7 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private async pollAll(): Promise<void> {
-    if (this.polling || this.autoTesting || this.inspectionPreparing) return;
+    if (this.polling || this.autoTesting || this.inspectionPreparing || this.commandSending) return;
     this.polling = true;
     try {
       for (const unit of this.config.units) {
@@ -1395,6 +1408,68 @@ export class FlameDetectorService extends EventEmitter {
 
   isConnected(): boolean { return this.isDataStreamConnected(); }
   getLastError(): string { return this.lastError; }
+
+  async sendSimulationCommand(command: FlameDetectorSimulationCommand): Promise<FlameDetectorSimulationCommandResult> {
+    if (this.disposed || this.closing) throw new Error('探测器服务未连接');
+    if (this.autoTesting || this.inspectionPreparing || this.commandSending) throw new Error('探测器当前正在执行其他操作');
+    const definition = FLAME_DETECTOR_SIMULATION_COMMANDS[command];
+    if (!definition) throw new Error('未知探测器模拟指令');
+    const enabled = this.config.units.filter((unit) => unit.enabled);
+    if (enabled.length === 0) throw new Error('没有启用的探测器');
+
+    while (this.polling && !this.disposed && !this.closing) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (this.disposed || this.closing) throw new Error('探测器服务未连接');
+    if (this.autoTesting || this.inspectionPreparing || this.commandSending) throw new Error('探测器当前正在执行其他操作');
+
+    this.commandSending = true;
+    try {
+      const frame = Buffer.from(definition.frameHex.replace(/\s+/g, ''), 'hex');
+      const groups = new Map<string, { units: FlameUnitConfig[]; client: FlameDetectorClient }>();
+      const failedUnits: Array<{ index: number; error: string }> = [];
+      for (const unit of enabled) {
+        const key = connKey(unit, this.config);
+        const entry = this.pool.get(key);
+        const group = groups.get(key);
+        if (group) {
+          group.units.push(unit);
+        } else if (entry?.ok) {
+          groups.set(key, { units: [unit], client: entry.client });
+        } else {
+          failedUnits.push({ index: unit.index, error: '设备通信未连接' });
+        }
+      }
+
+      const sentUnits: number[] = [];
+      await Promise.all([...groups.values()].map(async ({ units, client }) => {
+        const readyUnits = units.filter((unit) => !this.initializingUnits.has(unit.index) && !this.broadcastModeRequestingUnits.has(unit.index));
+        const notReadyUnits = units.filter((unit) => !readyUnits.includes(unit));
+        notReadyUnits.forEach((unit) => failedUnits.push({ index: unit.index, error: '设备通信初始化中' }));
+        if (readyUnits.length === 0) return;
+        try {
+          await this.getDevice(readyUnits[0]!, client).sendRawFrame(frame);
+          sentUnits.push(...readyUnits.map((unit) => unit.index));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          readyUnits.forEach((unit) => failedUnits.push({ index: unit.index, error: message }));
+        }
+      }));
+
+      sentUnits.sort((left, right) => left - right);
+      failedUnits.sort((left, right) => left.index - right.index);
+      if (sentUnits.length === 0) throw new Error(failedUnits[0]?.error || '未向任何探测器发送指令');
+      return {
+        command,
+        label: definition.label,
+        frameHex: definition.frameHex,
+        sentUnits,
+        failedUnits,
+      };
+    } finally {
+      this.commandSending = false;
+    }
+  }
 
   getStatus(): {
     connected: boolean;

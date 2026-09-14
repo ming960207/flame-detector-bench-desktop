@@ -16,7 +16,8 @@ import { PLCProcessMonitor } from '../plc-process-monitor.js';
 import type { PLCProcessStatus } from '../process-status.js';
 import { FlameDetectorService } from '../modbus/flame-detector-service.js';
 import { WSMessageType, type FlameDetectorState } from '../types.js';
-import type { AutoTestProgress, AutoTestReport, DetectorReadyReport } from '../modbus/flame-detector-service.js';
+import type { AutoTestProgress, AutoTestReport, DetectorReadyReport, FlameDetectorSimulationCommandResult } from '../modbus/flame-detector-service.js';
+import { isFlameDetectorSimulationCommand, type FlameDetectorSimulationCommand } from '../modbus/flame-detector-command.js';
 import type { RelayFunctionalTestProgress } from '../product-aware-flame-detector-service.js';
 import { evaluateFieldDetectorBatch, type FieldDetectorBatchVerdict } from './field-detector-verdict.js';
 import { evaluateFieldFinalVerdict, type FieldFinalVerdict } from './field-final-verdict.js';
@@ -108,6 +109,7 @@ export interface FlameDetectorStatusSource {
   getConfig?(): FlameConfig;
   updateConfig?(config: FlameConfig): void;
   runAutoTest?(onProgress?: (progress: AutoTestProgress) => void, options?: { enabledStepKeys?: string[] }): Promise<AutoTestReport>;
+  sendSimulationCommand?(command: FlameDetectorSimulationCommand): Promise<FlameDetectorSimulationCommandResult>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -516,6 +518,7 @@ export function createFieldStatusRuntime(
       plcWrite: false,
       detectorConfig: true,
       detectorReadonlyAutoTest: true,
+      detectorSimulationCommand: true,
       productPrecheck: true,
       testObserver: true,
       mqttUpload: true,
@@ -581,6 +584,23 @@ export function createFieldStatusRuntime(
   app.get('/api/flame/config', (_req, res) => {
     const current = detectors.getConfig?.() ?? config.flame;
     res.json({ success: true, config: current });
+  });
+  app.post('/api/flame/simulation-command', requireDesktopMutation, async (req, res) => {
+    if (detectorMutationBusy || productPrecheckBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
+    if (!isFlameDetectorSimulationCommand(req.body?.command)) {
+      return res.status(400).json({ code: 'FLAME_SIMULATION_COMMAND_INVALID' });
+    }
+    if (!detectors.sendSimulationCommand) return res.status(501).json({ code: 'FLAME_SIMULATION_COMMAND_UNSUPPORTED' });
+    detectorMutationBusy = true;
+    try {
+      const result = await detectors.sendSimulationCommand(req.body.command);
+      broadcastSummary();
+      return res.json({ success: true, result });
+    } catch (error: any) {
+      return res.status(409).json({ code: 'FLAME_SIMULATION_COMMAND_FAILED', error: error?.message || String(error) });
+    } finally {
+      detectorMutationBusy = false;
+    }
   });
   app.put('/api/flame/config', requireDesktopMutation, async (req, res) => {
     if (detectorMutationBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });

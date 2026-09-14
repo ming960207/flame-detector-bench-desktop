@@ -9,6 +9,8 @@ import type { FlameDetectorState, FlameDetectorWaveformDelta } from '../server/s
 import type { FlameDetectorConfig } from '../types';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
+import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
+import type { FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
 import { mergeFlameWaveformDelta } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
@@ -158,6 +160,25 @@ export function FieldProcessStatusApp() {
     if (payload.report) setProductPrecheck((current) => current ? { ...current, indicatorVision: payload.report } : current);
   }, []);
 
+  const sendSimulationCommand = useCallback(async (command: FlameDetectorSimulationCommand): Promise<FlameDetectorSimulationCommandResult> => {
+    const response = await fetch(`${HTTP}/api/flame/simulation-command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command }),
+    });
+    const payload = await response.json() as {
+      success?: boolean;
+      result?: FlameDetectorSimulationCommandResult;
+      error?: string;
+      code?: string;
+    };
+    if (!response.ok || !payload.success || !payload.result) {
+      throw new Error(payload.error || payload.code || `探测器指令发送失败 (${response.status})`);
+    }
+    void refresh().catch(() => undefined);
+    return payload.result;
+  }, [refresh]);
+
   const handleRefresh = useCallback(() => {
     void refresh().catch(() => setNotice('PLC 未接入：工序监测处于待同步状态。'));
   }, [refresh]);
@@ -255,6 +276,7 @@ export function FieldProcessStatusApp() {
       productPrecheckBusy={productPrecheckBusy}
       relayTest={relayTest}
       onSubmitIndicatorVision={submitIndicatorVision}
+      onSendSimulationCommand={sendSimulationCommand}
       resultTitleMeta={<ProductModelSelector config={productConfig} locked={productLocked} busy={productPrecheckBusy} onUpdate={updateProductConfig} />}
       onRefresh={handleRefresh}
       onOpenDetails={() => openDetails('device')}

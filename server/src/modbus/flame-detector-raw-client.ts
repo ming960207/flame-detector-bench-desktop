@@ -93,6 +93,12 @@ export class RawTcpModbusClient {
     await this.enqueue(() => this.exchange(appendCRC(body), targetAddress, 0x10, values.length));
   }
 
+  async sendRawFrame(frame: Buffer): Promise<void> {
+    if (!Buffer.isBuffer(frame) || frame.length < 3) throw new Error('探测器原始帧无效');
+    const request = Buffer.from(frame);
+    await this.enqueue(() => this.writeOneWay(request));
+  }
+
   async close(): Promise<void> {
     if (this.socket.destroyed) return;
     await new Promise<void>((resolve) => {
@@ -165,6 +171,17 @@ export class RawTcpModbusClient {
         });
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private writeOneWay(request: Buffer): Promise<void> {
+    if (!this.isOpen) return Promise.reject(new Error('探测器原始 TCP 连接不可用'));
+    return new Promise<void>((resolve, reject) => {
+      try {
+        this.socket.write(request, (error) => error ? reject(error) : resolve());
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }

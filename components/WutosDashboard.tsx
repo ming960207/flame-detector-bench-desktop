@@ -16,11 +16,13 @@ import {
   MoveUp,
   RefreshCw,
   RotateCcw,
+  Send,
   Settings2,
   SunMedium,
   TriangleAlert,
   Wifi,
   WifiOff,
+  X,
   Zap,
 } from 'lucide-react';
 import { hasActivePLCProcessAlarm, isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../server/src/process-status';
@@ -33,6 +35,8 @@ import type { FlameSample } from '../server/src/types';
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
+import { FLAME_DETECTOR_SIMULATION_COMMANDS, type FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
+import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
 import './wutos-dashboard.css';
@@ -696,6 +700,107 @@ const LiveWaveformPanel: FC<{
   return liveWaveformPanel;
 };
 
+const SIMULATION_COMMAND_ORDER: FlameDetectorSimulationCommand[] = ['simulateFire', 'simulateFault', 'systemReset'];
+
+function detectorNames(indices: number[]): string {
+  return indices.length > 0 ? indices.map((index) => `D${index}`).join('、') : '无';
+}
+
+const DetectorSimulationDialog: FC<{
+  units: Array<FlameDetectorUnitState | undefined>;
+  onSend?: (command: FlameDetectorSimulationCommand) => Promise<FlameDetectorSimulationCommandResult>;
+  onClose: () => void;
+}> = ({ units, onSend, onClose }) => {
+  const [busyCommand, setBusyCommand] = useState<FlameDetectorSimulationCommand | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; text: string; detail?: string } | null>(null);
+  const onlineUnits = units.filter((unit): unit is FlameDetectorUnitState => Boolean(unit?.online)).map((unit) => unit.index);
+
+  const sendCommand = async (command: FlameDetectorSimulationCommand) => {
+    if (!onSend) {
+      setFeedback({ tone: 'error', text: '当前运行环境不支持探测器指令发送。' });
+      return;
+    }
+    setBusyCommand(command);
+    setFeedback(null);
+    try {
+      const result = await onSend(command);
+      const failedNames = result.failedUnits.map((unit) => `D${unit.index}`);
+      const sentText = `已发送至 ${detectorNames(result.sentUnits)}`;
+      const text = failedNames.length > 0
+        ? `${sentText}；${detectorNames(result.failedUnits.map((unit) => unit.index))} 未发送`
+        : sentText;
+      const detail = failedNames.length > 0
+        ? result.failedUnits.map((unit) => `D${unit.index}：${unit.error}`).join(' · ')
+        : `${result.label} · ${result.frameHex}`;
+      setFeedback({ tone: failedNames.length > 0 ? 'error' : 'success', text, detail });
+    } catch (error) {
+      setFeedback({ tone: 'error', text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusyCommand(null);
+    }
+  };
+
+  return (
+    <div className="wutos-simulation-backdrop" role="presentation">
+      <section className="wutos-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="wutos-simulation-title">
+        <header className="wutos-simulation-dialog__header">
+          <div>
+            <span className="wutos-simulation-eyebrow"><Send /> DETECTOR COMMAND LINK</span>
+            <h2 id="wutos-simulation-title">探测器模拟指令</h2>
+            <p>使用现场广播帧，直接对 6 台探测器进行状态联动验证</p>
+          </div>
+          <button type="button" className="wutos-simulation-close" onClick={onClose} aria-label="关闭探测器模拟指令"><X size={17} /></button>
+        </header>
+
+        <div className="wutos-simulation-dialog__body">
+          <div className="wutos-simulation-targets">
+            <div>
+              <span className="wutos-simulation-label">广播目标</span>
+              <strong>D1 — D6</strong>
+              <small>FF 地址 · 一次写入覆盖 6 台</small>
+            </div>
+            <div className="wutos-simulation-target-lights" aria-label={`六台探测器在线 ${onlineUnits.length} 台`}>
+              {Array.from({ length: 6 }, (_, index) => {
+                const detectorIndex = index + 1;
+                const isOnline = onlineUnits.includes(detectorIndex);
+                return <span className={isOnline ? 'is-online' : ''} key={detectorIndex}><i />D{detectorIndex}</span>;
+              })}
+            </div>
+          </div>
+
+          <div className="wutos-simulation-command-grid">
+            {SIMULATION_COMMAND_ORDER.map((command) => {
+              const definition = FLAME_DETECTOR_SIMULATION_COMMANDS[command];
+              const isBusy = busyCommand === command;
+              return (
+                <button
+                  type="button"
+                  key={command}
+                  className={`wutos-simulation-command wutos-simulation-command--${command}`}
+                  onClick={() => void sendCommand(command)}
+                  disabled={busyCommand !== null || !onSend}
+                  aria-label={`${definition.label}：${definition.description}`}
+                >
+                  <span className="wutos-simulation-command__mark">{command === 'simulateFire' ? '火' : command === 'simulateFault' ? '障' : '复'}</span>
+                  <span className="wutos-simulation-command__copy">
+                    <strong>{isBusy ? '发送中…' : definition.label}</strong>
+                    <small>{definition.description}</small>
+                    <code>{definition.frameHex}</code>
+                  </span>
+                  <span className="wutos-simulation-command__send"><Send size={13} /> 广播</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {feedback && <div className={`wutos-simulation-feedback is-${feedback.tone}`} role="status"><strong>{feedback.text}</strong>{feedback.detail && <code>{feedback.detail}</code>}</div>}
+          <p className="wutos-simulation-note"><TriangleAlert size={13} /> 仅建议在工序空闲或完成后使用；系统会按当前已建立的探测器通信连接发送，未连接设备会明确列出。</p>
+        </div>
+      </section>
+    </div>
+  );
+};
+
 export interface WutosDashboardProps {
   status: PLCProcessStatus | null;
   detectors: FlameDetectorState | null;
@@ -713,6 +818,7 @@ export interface WutosDashboardProps {
   productPrecheckBusy?: boolean;
   relayTest?: RelayFunctionalTestProgress | null;
   onSubmitIndicatorVision?: (report: IndicatorVisionReport) => Promise<void>;
+  onSendSimulationCommand?: (command: FlameDetectorSimulationCommand) => Promise<FlameDetectorSimulationCommandResult>;
 }
 
 export function WutosDashboard({
@@ -732,12 +838,25 @@ export function WutosDashboard({
   productPrecheckBusy = false,
   relayTest = null,
   onSubmitIndicatorVision,
+  onSendSimulationCommand,
 }: WutosDashboardProps) {
   const [clock, setClock] = useState(() => new Date());
+  const [simulationOpen, setSimulationOpen] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(() => setClock(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!simulationOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setSimulationOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [simulationOpen]);
 
   const units = useMemo(
     () => Array.from({ length: 6 }, (_, index) => detectors?.units.find((unit) => unit.index === index + 1)),
@@ -778,6 +897,7 @@ export function WutosDashboard({
             <span><CalendarDays />{formatDate(clock)}</span>
             <span><Clock3 />{formatTime(clock)}</span>
             <button type="button" className="wutos-icon-button" onClick={onRefresh} title="刷新状态" aria-label="刷新状态"><RefreshCw /></button>
+            <button type="button" className="wutos-command-button" onClick={() => setSimulationOpen(true)}><Send />模拟指令</button>
             {onOpenDetails && <button type="button" className="wutos-detail-button" onClick={onOpenDetails}><Settings2 />详情</button>}
           </div>
         </header>
@@ -866,6 +986,8 @@ export function WutosDashboard({
           </div>
           <div className="wutos-flow-note"><span>{status?.valid ? 'PLC 工序已同步' : 'PLC 未接入：工序待同步'}</span><code>{status ? 'VW600=' + status.stageCode + ' · VW602=' + status.stepCode : 'READ ONLY'}</code><span>{onlineCount}/6 在线 · 火警 {fireCount} · 故障 {faultCount}</span></div>
         </Panel>
+
+        {simulationOpen && <DetectorSimulationDialog units={units} onSend={onSendSimulationCommand} onClose={() => setSimulationOpen(false)} />}
       </div>
     </main>
   );

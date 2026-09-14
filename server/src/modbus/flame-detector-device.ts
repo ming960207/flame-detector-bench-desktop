@@ -246,6 +246,28 @@ export class FlameDetectorDevice {
     await client.writeRegisters(startAddress, values.map((value) => Number(value) & 0xFFFF));
   }
 
+  async sendRawFrame(frame: Buffer): Promise<void> {
+    if (!Buffer.isBuffer(frame) || frame.length < 3) throw new Error('探测器原始帧无效');
+    if (isRawTcpClient(this.client)) {
+      await this.client.sendRawFrame(frame);
+      return;
+    }
+    const port = (this.client as any)._port as {
+      destroyed?: boolean;
+      write?: (data: Buffer, callback?: (error?: Error | null) => void) => boolean;
+    } | undefined;
+    if (!port || typeof port.write !== 'function' || port.destroyed) {
+      throw new Error('探测器串口连接不可写');
+    }
+    await new Promise<void>((resolve, reject) => {
+      try {
+        port.write!(Buffer.from(frame), (error?: Error | null) => error ? reject(error) : resolve());
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
   /**
    * 原样发送现场要求的发送模式 RTU 帧。
    *

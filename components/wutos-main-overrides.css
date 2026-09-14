@@ -165,6 +165,338 @@
   box-shadow: 0 0 9px rgba(67, 220, 237, .24);
 }
 
+.wutos-command-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25em;
+  min-width: 1.9em;
+  padding: .35em .55em;
+  color: #dffbff;
+  border: 1px solid rgba(59, 222, 232, .82);
+  background: linear-gradient(135deg, rgba(8, 92, 109, .92), rgba(5, 46, 70, .9));
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wutos-command-button:hover {
+  color: #fff;
+  border-color: #79fbff;
+  background: linear-gradient(135deg, rgba(13, 126, 139, .98), rgba(6, 67, 91, .96));
+  box-shadow: 0 0 10px rgba(40, 235, 243, .5);
+}
+
+.wutos-command-button svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+
+.wutos-simulation-backdrop {
+  position: absolute;
+  z-index: 300;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 4%;
+  background: rgba(1, 8, 20, .82);
+  backdrop-filter: blur(4px);
+}
+
+.wutos-simulation-dialog {
+  width: min(760px, 100%);
+  max-height: 92%;
+  overflow: auto;
+  border: 1px solid #3eeaf4;
+  background:
+    linear-gradient(135deg, rgba(5, 41, 65, .98), rgba(2, 16, 34, .99)),
+    #021022;
+  box-shadow: 0 0 34px rgba(0, 223, 255, .28), inset 0 0 26px rgba(0, 145, 255, .12);
+}
+
+.wutos-simulation-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(60, 204, 225, .42);
+}
+
+.wutos-simulation-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #4feaf2;
+  font: 800 10px / 1 "Consolas", monospace;
+  letter-spacing: .12em;
+}
+
+.wutos-simulation-eyebrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wutos-simulation-dialog__header h2 {
+  margin: 9px 0 0;
+  color: #f1fdff;
+  font-size: 24px;
+  line-height: 1.1;
+  text-shadow: 0 0 10px rgba(72, 224, 255, .48);
+}
+
+.wutos-simulation-dialog__header p {
+  margin: 8px 0 0;
+  color: #82afbd;
+  font-size: 12px;
+}
+
+.wutos-simulation-close {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: #b9eff7;
+  border: 1px solid rgba(56, 215, 231, .6);
+  background: rgba(7, 38, 53, .86);
+  cursor: pointer;
+}
+
+.wutos-simulation-close:hover {
+  color: #fff;
+  border-color: #79fbff;
+  box-shadow: 0 0 9px rgba(67, 220, 237, .3);
+}
+
+.wutos-simulation-dialog__body {
+  display: grid;
+  gap: 16px;
+  padding: 18px 24px 22px;
+}
+
+.wutos-simulation-targets {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(45, 139, 163, .68);
+  background: rgba(2, 25, 46, .76);
+}
+
+.wutos-simulation-targets > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.wutos-simulation-label {
+  color: #5fc1d1;
+  font: 800 10px / 1 "Consolas", monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.wutos-simulation-targets strong {
+  color: #effcff;
+  font: 900 18px / 1 "Consolas", monospace;
+  letter-spacing: .06em;
+}
+
+.wutos-simulation-targets small {
+  color: #789cab;
+  font-size: 11px;
+}
+
+.wutos-simulation-target-lights {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wutos-simulation-target-lights span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+  color: #698694;
+  border: 1px solid rgba(72, 126, 145, .42);
+  background: rgba(4, 23, 40, .76);
+  font: 700 10px / 1 "Consolas", monospace;
+}
+
+.wutos-simulation-target-lights span.is-online {
+  color: #b8ffe9;
+  border-color: rgba(58, 224, 173, .75);
+  background: rgba(5, 77, 69, .48);
+}
+
+.wutos-simulation-target-lights i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #526b78;
+}
+
+.wutos-simulation-target-lights .is-online i {
+  background: #59efb4;
+  box-shadow: 0 0 7px #59efb4;
+}
+
+.wutos-simulation-command-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wutos-simulation-command {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  gap: 0 10px;
+  min-width: 0;
+  min-height: 144px;
+  padding: 14px;
+  color: #eafaff;
+  border: 1px solid rgba(53, 153, 193, .72);
+  background: linear-gradient(145deg, rgba(7, 50, 79, .96), rgba(3, 25, 49, .96));
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.wutos-simulation-command:hover:not(:disabled) {
+  border-color: #6cf2fb;
+  background: linear-gradient(145deg, rgba(9, 74, 96, .98), rgba(3, 31, 57, .98));
+  box-shadow: 0 0 14px rgba(28, 206, 229, .28), inset 0 0 16px rgba(0, 165, 255, .14);
+  transform: translateY(-2px);
+}
+
+.wutos-simulation-command:focus-visible,
+.wutos-simulation-close:focus-visible,
+.wutos-command-button:focus-visible {
+  outline: 2px solid #f0fdff;
+  outline-offset: 2px;
+}
+
+.wutos-simulation-command:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.wutos-simulation-command__mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wutos-simulation-command--simulateFire { color: #ffb36e; border-color: rgba(239, 145, 54, .72); }
+.wutos-simulation-command--simulateFault { color: #ff8d89; border-color: rgba(228, 80, 76, .72); }
+.wutos-simulation-command--systemReset { color: #79edff; border-color: rgba(62, 202, 225, .72); }
+.wutos-simulation-command--simulateFire .wutos-simulation-command__mark { background: rgba(170, 76, 19, .32); }
+.wutos-simulation-command--simulateFault .wutos-simulation-command__mark { background: rgba(167, 35, 43, .32); }
+.wutos-simulation-command--systemReset .wutos-simulation-command__mark { background: rgba(17, 109, 131, .32); }
+
+.wutos-simulation-command__copy {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 5px;
+}
+
+.wutos-simulation-command__copy strong {
+  color: #f3fdff;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.wutos-simulation-command__copy small {
+  min-height: 2.5em;
+  color: #8ab3c0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.wutos-simulation-command__copy code {
+  display: block;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: #62d8ff;
+  font: 700 10px / 1.45 "Consolas", monospace;
+}
+
+.wutos-simulation-command__send {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 14px;
+  color: #77a7b6;
+  font: 700 10px / 1 "Consolas", monospace;
+  letter-spacing: .06em;
+}
+
+.wutos-simulation-feedback {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-left: 3px solid #5ceeb5;
+  background: rgba(5, 72, 59, .42);
+  color: #c7ffe9;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wutos-simulation-feedback.is-error {
+  border-left-color: #ff706c;
+  background: rgba(103, 31, 39, .42);
+  color: #ffd4d0;
+}
+
+.wutos-simulation-feedback code {
+  color: #8cd0d4;
+  font: 10px / 1.45 "Consolas", monospace;
+  overflow-wrap: anywhere;
+}
+
+.wutos-simulation-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: #769aaa;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.wutos-simulation-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #e8bf68;
+}
+
+@container (max-width: 760px) {
+  .wutos-simulation-command-grid { grid-template-columns: 1fr; }
+  .wutos-simulation-command { min-height: 112px; }
+}
+
+@media (max-width: 650px) {
+  .wutos-simulation-dialog__header,
+  .wutos-simulation-dialog__body { padding-inline: 14px; }
+  .wutos-simulation-dialog__header h2 { font-size: 20px; }
+  .wutos-simulation-targets { align-items: flex-start; flex-direction: column; }
+  .wutos-simulation-target-lights { justify-content: flex-start; }
+}
+
 .wutos-detail-product,
 .wutos-detail-production {
   min-height: 210px;
