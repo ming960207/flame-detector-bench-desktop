@@ -3,6 +3,7 @@ import type { IndicatorVisionLightVerdict } from '../server/src/indicator-vision
 import {
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
+  startsNewRelayStatusSession,
   type DetectorStatusLightKind,
   type IndicatorVisionField,
   type RelayLightField,
@@ -176,6 +177,8 @@ let relaySessionActive = false;
 let relaySessionBatchId: string | null = null;
 let cachedProductConfig: ProductConfigPayload | null = null;
 let lastProductConfigFetchAt = 0;
+let runtimeDisposed = false;
+let activeRequestController: AbortController | null = null;
 const latchedLightKinds = new Map<number, Set<LightKind>>();
 
 function resetLatchedLights(): void {
@@ -186,7 +189,10 @@ function updateRelaySession(active: boolean, batchId: string | null): void {
   // Keep completed relay evidence visible while idle. As soon as the next
   // production process becomes active, or its formal batch id changes, clear all
   // relay LED latches before applying evidence from the new run.
-  const startsNewTest = active && (!relaySessionActive || batchId !== relaySessionBatchId);
+  const startsNewTest = startsNewRelayStatusSession(
+    { active: relaySessionActive, batchId: relaySessionBatchId },
+    { active, batchId },
+  );
   if (startsNewTest) {
     resetLatchedLights();
     // Do not allow a 500 ms cached /api/product-config response from the previous
@@ -194,7 +200,7 @@ function updateRelaySession(active: boolean, batchId: string | null): void {
     cachedProductConfig = null;
     lastProductConfigFetchAt = 0;
   }
-  if (active) relaySessionBatchId = batchId;
+  if (batchId !== null) relaySessionBatchId = batchId;
   relaySessionActive = active;
 }
 
@@ -231,8 +237,7 @@ function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductC
   // During a new active test, evidence is valid only when it belongs to the exact
   // current batch. This prevents the previous batch's completed relay evidence
   // from being merged during the short interval before the new precheck exists.
-  if (payload.active && evidenceBatchId !== payload.batchId) return payload;
-  if (payload.batchId && evidenceBatchId && payload.batchId !== evidenceBatchId) return payload;
+  if (evidenceBatchId && evidenceBatchId !== payload.batchId) return payload;
 
   const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.detectorIndex, unit]));
   return {
@@ -266,8 +271,7 @@ function mergeIndicatorVisionEvidence(payload: StatusLightPayload, configPayload
   if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
 
   const evidenceBatchId = precheck?.batchId ?? vision?.batchId ?? null;
-  if (payload.active && evidenceBatchId !== payload.batchId) return payload;
-  if (payload.batchId && evidenceBatchId && payload.batchId !== evidenceBatchId) return payload;
+  if (evidenceBatchId && evidenceBatchId !== payload.batchId) return payload;
 
   const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.slot, unit]));
   return {
@@ -288,11 +292,11 @@ function mergeIndicatorVisionEvidence(payload: StatusLightPayload, configPayload
   };
 }
 
-async function productConfigEvidence(): Promise<ProductConfigPayload | null> {
+async function productConfigEvidence(signal?: AbortSignal): Promise<ProductConfigPayload | null> {
   const now = Date.now();
   if (cachedProductConfig && now - lastProductConfigFetchAt < 500) return cachedProductConfig;
   try {
-    const response = await fetch(`${backendHttpUrl()}/api/product-config`, { cache: 'no-store' });
+    const response = await fetch(`${backendHttpUrl()}/api/product-config`, { cache: 'no-store', signal });
     if (!response.ok) return cachedProductConfig;
     cachedProductConfig = await response.json() as ProductConfigPayload;
     lastProductConfigFetchAt = now;
@@ -303,13 +307,16 @@ async function productConfigEvidence(): Promise<ProductConfigPayload | null> {
 }
 
 async function refreshStatusLights(): Promise<void> {
-  if (!document.querySelector('.wutos-detector-grid') || requestBusy) return;
+  if (runtimeDisposed || !document.querySelector('.wutos-detector-grid') || requestBusy) return;
   requestBusy = true;
+  const controller = new AbortController();
+  activeRequestController = controller;
   try {
-    const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store' });
+    const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`STATUS_LIGHTS_HTTP_${response.status}`);
     const rawPayload = await response.json() as StatusLightPayload;
-    const configPayload = await productConfigEvidence();
+    const configPayload = await productConfigEvidence(controller.signal);
+    if (runtimeDisposed) return;
     const payload = mergeIndicatorVisionEvidence(mergeRelayEvidence(rawPayload, configPayload), configPayload);
     updateRelaySession(Boolean(payload.active), payload.batchId ?? null);
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
@@ -327,14 +334,32 @@ async function refreshStatusLights(): Promise<void> {
     }
     lastSuccessAt = Date.now();
   } catch {
-    if (Date.now() - lastSuccessAt > 1500) markStale();
+    if (!runtimeDisposed && Date.now() - lastSuccessAt > 1500) markStale();
   } finally {
+    if (activeRequestController === controller) activeRequestController = null;
     requestBusy = false;
   }
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.setInterval(() => { void refreshStatusLights(); }, 200);
-  window.addEventListener('focus', () => { void refreshStatusLights(); });
+  type StatusLightRuntimeHandle = { dispose: () => void };
+  type StatusLightRuntimeWindow = Window & { __wutosStatusLightRuntime?: StatusLightRuntimeHandle };
+  const runtimeWindow = window as StatusLightRuntimeWindow;
+  runtimeWindow.__wutosStatusLightRuntime?.dispose();
+  runtimeDisposed = false;
+  const handleFocus = () => { void refreshStatusLights(); };
+  const timer = window.setInterval(() => { void refreshStatusLights(); }, 200);
+  window.addEventListener('focus', handleFocus);
+  const handle: StatusLightRuntimeHandle = {
+    dispose: () => {
+      runtimeDisposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', handleFocus);
+      activeRequestController?.abort();
+      activeRequestController = null;
+      if (runtimeWindow.__wutosStatusLightRuntime === handle) delete runtimeWindow.__wutosStatusLightRuntime;
+    },
+  };
+  runtimeWindow.__wutosStatusLightRuntime = handle;
   void refreshStatusLights();
 }

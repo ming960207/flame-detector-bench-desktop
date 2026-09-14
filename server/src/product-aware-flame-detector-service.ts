@@ -32,6 +32,8 @@ const POSITION_ONE_CONTACT_SETTLE_MS = 800;
 const POST_PRECHECK_WAVEFORM_RECOVERY_MS = 500;
 const PRECHECK_READ_MAX_ATTEMPTS = 3;
 const PRECHECK_READ_RETRY_DELAY_MS = 80;
+const MAX_RETAINED_BATCH_CONTEXTS = 8;
+const MAX_RETAINED_PRODUCT_CODE_RESERVATIONS = 8;
 
 export interface ProductAwareBatchContext {
   batchId: string;
@@ -127,6 +129,16 @@ function uniquePush(target: string[], value: string): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function rememberBoundedCacheEntry<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
 }
 
 async function readWithRetry<T>(operation: () => Promise<T>): Promise<T | null> {
@@ -242,7 +254,12 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       6,
       normalizedBatchId,
     ).catch((error) => allocationError(profile.productModel, productionDate, normalizedBatchId, error));
-    this.productCodeReservations.set(normalizedBatchId, reservation);
+    rememberBoundedCacheEntry(
+      this.productCodeReservations,
+      normalizedBatchId,
+      reservation,
+      MAX_RETAINED_PRODUCT_CODE_RESERVATIONS,
+    );
     return reservation;
   }
 
@@ -519,15 +536,14 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         units,
       };
 
-      this.batchContexts.set(contextKey, {
+      rememberBoundedCacheEntry(this.batchContexts, contextKey, {
         batchId: contextKey,
         productionDate: productionDate.getTime(),
         productCodeAllocation: allocation,
         relayFunctionalTest,
         sensitivityByDetector,
         updatedAt: completedAt,
-      });
-      if (batchId) this.batchContexts.set(batchId, this.batchContexts.get(contextKey)!);
+      }, MAX_RETAINED_BATCH_CONTEXTS);
       this.pendingBatchStartedAt = null;
       return report;
     } finally {

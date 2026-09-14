@@ -446,6 +446,10 @@
   box-shadow: 0 12px 26px rgba(34, 84, 112, .16);
 }
 
+.wutos-stage:has(.wutos-live-waveform.is-expanded) {
+  z-index: 1000;
+}
+
 .wutos-stage::before {
   content: none;
 }

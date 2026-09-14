@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FC, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
@@ -694,9 +693,7 @@ const LiveWaveformPanel: FC<{
     </section>
   );
 
-  return expanded && typeof document !== 'undefined'
-    ? createPortal(liveWaveformPanel, document.body)
-    : liveWaveformPanel;
+  return liveWaveformPanel;
 };
 
 export interface WutosDashboardProps {

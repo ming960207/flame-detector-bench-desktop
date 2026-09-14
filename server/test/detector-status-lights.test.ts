@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
+  startsNewRelayStatusSession,
 } from '../../components/detector-status-lights-model.ts';
 import { DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG } from '../src/relay-functional-test.ts';
 import { buildLiveRelayStatusUnits } from '../src/relay-status-lights-service.ts';
@@ -19,6 +20,30 @@ test('indicator vision verdicts map to active, inactive, and unknown states', ()
   assert.deepEqual(indicatorVisionState('FAIL'), { active: false, known: true });
   assert.deepEqual(indicatorVisionState('PENDING'), { active: false, known: false });
   assert.deepEqual(indicatorVisionState(undefined), { active: false, known: false });
+});
+
+test('a new relay batch resets latches before the active flag rises', () => {
+  assert.equal(
+    startsNewRelayStatusSession(
+      { active: false, batchId: 'batch-old' },
+      { active: false, batchId: 'batch-new' },
+    ),
+    true,
+  );
+  assert.equal(
+    startsNewRelayStatusSession(
+      { active: false, batchId: 'batch-old' },
+      { active: false, batchId: 'batch-old' },
+    ),
+    false,
+  );
+  assert.equal(
+    startsNewRelayStatusSession(
+      { active: false, batchId: 'batch-old' },
+      { active: true, batchId: null },
+    ),
+    true,
+  );
 });
 
 test('live relay lamps reflect physical DIO levels using configured normal polarity', () => {

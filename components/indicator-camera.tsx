@@ -325,6 +325,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraStartRef = useRef<Promise<void> | null>(null);
+  const cameraGenerationRef = useRef(0);
+  const captureFrameRequestRef = useRef<number | null>(null);
   const slotRoisRef = useRef<IndicatorSlotRoi[]>(loadSlotRois());
   const phaseSamplesRef = useRef<FrameSample[]>([]);
   const runSamplesRef = useRef<FrameSample[]>([]);
@@ -349,12 +352,18 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const [recognitionPending, setRecognitionPending] = useState(false);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
 
-  const activePhase: IndicatorPhase = relayTest
+  const relayTestBelongsToBatch = Boolean(relayTest?.batchId && batchId && relayTest.batchId === batchId);
+  const activePhase: IndicatorPhase = relayTest?.active === true && relayTestBelongsToBatch
     ? relayTest.phase
     : precheckBusy
       ? 'BASELINE'
-      : 'MANUAL';
-  const samplingActive = precheckBusy && relayTest?.active !== false && activePhase !== 'COMPLETE';
+      : relayTest
+        ? relayTest.phase
+        : 'MANUAL';
+  const relayTestCompletedForBatch = relayTestBelongsToBatch && relayTest?.active === false && relayTest.phase === 'COMPLETE';
+  const samplingActive = (precheckBusy || relayTest?.active === true)
+    && !relayTestCompletedForBatch
+    && activePhase !== 'COMPLETE';
   const autoStartKey = batchId ?? relayTest?.batchId ?? 'active';
   const currentCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
   const expectedColor = expectedLightForPhase(activePhase);
@@ -475,44 +484,73 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange);
   }, [enumerateCameras]);
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+  const releaseCamera = useCallback(() => {
+    const stream = streamRef.current;
     streamRef.current = null;
+    stream?.getTracks().forEach((track) => track.stop());
     if (captureVideoRef.current) captureVideoRef.current.srcObject = null;
     if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
-    setCameraStatus('idle');
   }, []);
 
-  const startCamera = useCallback(async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError('当前运行环境不支持 UVC 摄像头访问');
-      setCameraStatus('error');
-      return;
-    }
-    setCameraStatus('requesting');
-    setCameraError('');
-    try {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      const video = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
-          width: { ideal: CAMERA_WIDTH },
-          height: { ideal: 540 },
-          frameRate: { ideal: 30, max: 30 },
-        },
-      });
-      streamRef.current = video;
-      const videos = [captureVideoRef.current, previewVideoRef.current].filter((element): element is HTMLVideoElement => Boolean(element));
-      videos.forEach((element) => { element.srcObject = video; });
-      await Promise.all(videos.map((element) => element.play().catch(() => undefined)));
-      setCameraStatus('ready');
-      await enumerateCameras();
-    } catch (error) {
-      setCameraStatus('error');
-      setCameraError(cameraErrorText(error));
-    }
-  }, [enumerateCameras, selectedDeviceId]);
+  const stopCamera = useCallback(() => {
+    cameraGenerationRef.current += 1;
+    cameraStartRef.current = null;
+    releaseCamera();
+    setCameraStatus('idle');
+  }, [releaseCamera]);
+
+  const startCamera = useCallback(() => {
+    if (cameraStartRef.current) return cameraStartRef.current;
+    const generation = cameraGenerationRef.current;
+    const request = (async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (cameraGenerationRef.current !== generation) return;
+        setCameraError('当前运行环境不支持 UVC 摄像头访问');
+        setCameraStatus('error');
+        return;
+      }
+      if (cameraGenerationRef.current !== generation) return;
+      setCameraStatus('requesting');
+      setCameraError('');
+      try {
+        releaseCamera();
+        const video = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
+            width: { ideal: CAMERA_WIDTH },
+            height: { ideal: 540 },
+            frameRate: { ideal: 30, max: 30 },
+          },
+        });
+        if (cameraGenerationRef.current !== generation) {
+          video.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = video;
+        const videos = [captureVideoRef.current, previewVideoRef.current].filter((element): element is HTMLVideoElement => Boolean(element));
+        videos.forEach((element) => { element.srcObject = video; });
+        await Promise.all(videos.map((element) => element.play().catch(() => undefined)));
+        if (cameraGenerationRef.current !== generation) {
+          if (streamRef.current === video) releaseCamera();
+          else video.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        setCameraStatus('ready');
+        await enumerateCameras();
+      } catch (error) {
+        if (cameraGenerationRef.current !== generation) return;
+        setCameraStatus('error');
+        setCameraError(cameraErrorText(error));
+      }
+    })();
+    let trackedRequest: Promise<void>;
+    trackedRequest = request.finally(() => {
+      if (cameraStartRef.current === trackedRequest) cameraStartRef.current = null;
+    });
+    cameraStartRef.current = trackedRequest;
+    return trackedRequest;
+  }, [enumerateCameras, releaseCamera, selectedDeviceId]);
 
   useEffect(() => {
     if (!samplingActive) {
@@ -525,7 +563,13 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     void startCamera();
   }, [autoStartKey, cameraStatus, samplingActive, startCamera]);
 
-  useEffect(() => () => stopCamera(), [stopCamera]);
+  useEffect(() => () => {
+    if (captureFrameRequestRef.current !== null) {
+      window.cancelAnimationFrame(captureFrameRequestRef.current);
+      captureFrameRequestRef.current = null;
+    }
+    stopCamera();
+  }, [stopCamera]);
 
   useEffect(() => {
     if (!streamRef.current || cameraStatus !== 'ready') return;
@@ -609,10 +653,17 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const captureFrame = useCallback((savePhoto: boolean) => {
     // Paint one clean frame before recognition so boxes from the previous
     // capture cannot remain on screen while the new image is being analyzed.
+    if (captureFrameRequestRef.current !== null) {
+      window.cancelAnimationFrame(captureFrameRequestRef.current);
+      captureFrameRequestRef.current = null;
+    }
     setLiveResults([]);
     setAnnotationsVisible(false);
     setRecognitionPending(true);
-    window.requestAnimationFrame(() => captureFrameNow(savePhoto));
+    captureFrameRequestRef.current = window.requestAnimationFrame(() => {
+      captureFrameRequestRef.current = null;
+      captureFrameNow(savePhoto);
+    });
   }, [captureFrameNow]);
 
   useEffect(() => {

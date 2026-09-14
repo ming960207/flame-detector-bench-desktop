@@ -15,6 +15,8 @@ import {
   type ProductionInspectionRecordConfig,
 } from './production-inspection-record.js';
 
+const MAX_RETAINED_SAVED_BATCHES = 32;
+
 export interface ProductionRunArchive {
   schemaVersion: 1;
   batchId: string;
@@ -137,6 +139,11 @@ export class ProductionRunCoordinator extends EventEmitter {
       await this.recordStore.save(record);
       await this.saveRawArchive(archive);
       this.saved.add(batchId);
+      while (this.saved.size > MAX_RETAINED_SAVED_BATCHES) {
+        const oldest = this.saved.values().next().value;
+        if (oldest === undefined) break;
+        this.saved.delete(oldest);
+      }
       this.emit('archive', archive);
     } catch (error) {
       // Do not emit Node's special `error` event: without a listener EventEmitter

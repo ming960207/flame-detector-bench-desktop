@@ -29,11 +29,16 @@ function remapStatusLightsRequest(input: RequestInfo | URL): RequestInfo | URL {
   return input;
 }
 
-if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+if (
+  typeof window !== 'undefined'
+  && typeof window.fetch === 'function'
+  && !(window as Window & { __wutosStatusLightFetchPatched?: boolean }).__wutosStatusLightFetchPatched
+) {
   const nativeFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     return nativeFetch(remapStatusLightsRequest(input), init);
   }) as typeof window.fetch;
+  (window as Window & { __wutosStatusLightFetchPatched?: boolean }).__wutosStatusLightFetchPatched = true;
 }
 
 // Load the existing status-light runtime after the compatibility redirect is in

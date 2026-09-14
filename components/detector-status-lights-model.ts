@@ -17,6 +17,19 @@ export const DETECTOR_STATUS_LIGHTS = [
   field: IndicatorVisionField | RelayLightField;
 }>;
 
+export interface RelayStatusSessionState {
+  active: boolean;
+  batchId: string | null;
+}
+
+export function startsNewRelayStatusSession(
+  previous: RelayStatusSessionState,
+  next: RelayStatusSessionState,
+): boolean {
+  const batchChanged = next.batchId !== null && next.batchId !== previous.batchId;
+  return batchChanged || (next.active && !previous.active);
+}
+
 export function indicatorVisionState(verdict: IndicatorVisionLightVerdict | undefined): { active: boolean; known: boolean } {
   if (verdict === 'PASS') return { active: true, known: true };
   if (verdict === 'FAIL') return { active: false, known: true };
