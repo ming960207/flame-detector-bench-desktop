@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS,
   RELAY_VISUAL_OBSERVATION_HOLD_MS,
   RelayFunctionalTestCoordinator,
   type RelayDetectorPort,
@@ -11,10 +12,12 @@ test('alarm and fault verify phases remain observable before reset', async () =>
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   const phaseAt = new Map<RelayFunctionalTestPhase, number>();
+  let alarmCommandAt = 0;
 
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
+      if (state.fire && !state.fault) alarmCommandAt = Date.now();
       internal = { ...state };
       inputs.X1 = state.fire;
       inputs.X2 = state.fault;
@@ -60,6 +63,7 @@ test('alarm and fault verify phases remain observable before reset', async () =>
   const faultVerify = phaseAt.get('FAULT_VERIFY');
   const faultReset = phaseAt.get('FAULT_RESET');
   assert.ok(alarmVerify && alarmReset && faultVerify && faultReset);
+  assert.ok(alarmVerify - alarmCommandAt >= RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS - 100);
 
   // Allow a small scheduler tolerance while still proving a real observation window exists.
   assert.ok(alarmReset - alarmVerify >= RELAY_VISUAL_OBSERVATION_HOLD_MS - 100);

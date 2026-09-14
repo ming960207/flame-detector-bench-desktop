@@ -304,6 +304,17 @@ function visualSummary(slots: IndicatorSlotResult[], relayFunctionalTest: Produc
   return { pass, fail, waiting: Math.max(0, slots.length - pass - fail) };
 }
 
+function automaticEvidenceReady(phase: IndicatorPhase, slots: IndicatorSlotResult[], requiredSlots?: readonly number[]): boolean {
+  const expectedColor = expectedLightForPhase(phase);
+  if (!expectedColor) return phase === 'BASELINE';
+  const scoped = requiredSlots?.length
+    ? slots.filter((slot) => requiredSlots.includes(slot.slot))
+    : slots;
+  return scoped.length > 0
+    && (!requiredSlots?.length || scoped.length === requiredSlots.length)
+    && scoped.every((slot) => slot.lights[expectedColor].state === 'ON');
+}
+
 export interface IndicatorCameraPanelProps {
   expanded: boolean;
   batchId: string | null;
@@ -334,6 +345,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const phaseResultsRef = useRef<Map<IndicatorPhase, IndicatorSlotResult[]>>(new Map());
   const captureFrameRef = useRef<(savePhoto: boolean) => void>(() => undefined);
   const lastPhotoAtRef = useRef(0);
+  const lastAutomaticPhotoPhaseRef = useRef<IndicatorPhase | null>(null);
   const lastPhaseRef = useRef<IndicatorPhase>('MANUAL');
   const wasBusyRef = useRef(false);
   const lastBatchKeyRef = useRef<string | null>(batchId);
@@ -438,6 +450,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       runSamplesRef.current = [];
       phaseResultsRef.current.clear();
       submittedBatchRef.current = null;
+      lastAutomaticPhotoPhaseRef.current = null;
       setCaptures([]);
       setSelectedCaptureId(null);
       setLiveResults([]);
@@ -452,6 +465,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       runSamplesRef.current = [];
       phaseResultsRef.current.clear();
       submittedBatchRef.current = null;
+      lastAutomaticPhotoPhaseRef.current = null;
       setCaptures([]);
       setSelectedCaptureId(null);
       setLiveResults([]);
@@ -638,17 +652,19 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     setAnnotationsVisible(true);
     setRecognitionPending(false);
 
-    const shouldSave = savePhoto || phase !== 'MANUAL' && (
-      frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS
-      || phaseChanged
+    const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
+    const shouldSave = savePhoto || automaticPhotoAllowed && automaticEvidenceReady(phase, frame.slots, relayTest?.detectorIndexes) && (
+      lastAutomaticPhotoPhaseRef.current !== phase
+      || frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS
     );
     if (!shouldSave) return;
     lastPhotoAtRef.current = frame.capturedAt;
+    if (!savePhoto) lastAutomaticPhotoPhaseRef.current = phase;
     const image = canvas.toDataURL('image/jpeg', 0.78);
     const capture = makeCapture(phase, image, aggregated, phaseSamplesRef.current.length);
     setCaptures((current) => [capture, ...current].slice(0, MAX_CAPTURE_HISTORY));
     setSelectedCaptureId(capture.id);
-  }, [activePhase, makeCapture]);
+  }, [activePhase, makeCapture, relayTest?.detectorIndexes]);
 
   const captureFrame = useCallback((savePhoto: boolean) => {
     // Paint one clean frame before recognition so boxes from the previous

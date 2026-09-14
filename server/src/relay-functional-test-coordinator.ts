@@ -31,6 +31,7 @@ const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
+export const RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS = 1200;
 export const RELAY_VISUAL_OBSERVATION_HOLD_MS = 1600;
 
 function emptyAction(): RelayActionResult {
@@ -90,10 +91,11 @@ function sleep(ms: number): Promise<void> {
  * 和 DIO 反馈读取均为只读操作，因此增加同样的有限重试；只有连续 3 次读取失败才保留
  * 链路异常原因并进入“需复测”，不改变任何实体继电器功能判据。
  *
- * 2026-09-14 指示灯视觉取证实机反馈表明：实体继电器达到稳定判据后立即复位，会让
- * ALARM_VERIFY / FAULT_VERIFY 阶段短于摄像头稳定取帧窗口。只要存在阶段监听器（正式
- * FieldRuntime 会提供），动作验证结束后额外保持 1.6 s，再进入复位。该保持不改变
- * 继电器 PASS/FAIL 判据，只为物理红/黄指示灯提供确定的可观测窗口。
+ * 2026-09-14 指示灯视觉取证实机反馈表明：模拟动作后物理红/黄灯需要时间点亮，且
+ * 实时相机可能在动作验证阶段刚开始时先抓到未点亮画面。只要存在阶段监听器（正式
+ * FieldRuntime 会提供），模拟动作成功后先稳定等待 1.2 s，动作验证结束后再保持 1.6 s
+ * 才进入复位。该等待不改变继电器 PASS/FAIL 判据，只为物理红/黄指示灯提供确定的
+ * 可观测窗口。
  *
  * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
  * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
@@ -290,6 +292,13 @@ export class RelayFunctionalTestCoordinator {
     await sleep(RELAY_VISUAL_OBSERVATION_HOLD_MS);
   }
 
+  private async settleBeforeVisualVerification(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
+    if (!this.onPhase) return;
+    const commandWasAccepted = [...work.values()].some((state) => state.result[kind].commandAccepted);
+    if (!commandWasAccepted) return;
+    await sleep(RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS);
+  }
+
   private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
@@ -357,6 +366,7 @@ export class RelayFunctionalTestCoordinator {
   private async runActionCycle(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     this.emitPhase(kind === 'alarm' ? 'ALARM_COMMAND' : 'FAULT_COMMAND', work);
     await this.sendCommand(work, kind);
+    await this.settleBeforeVisualVerification(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_VERIFY' : 'FAULT_VERIFY', work);
     await this.waitForAction(work, kind);
     await this.holdForVisualObservation(work, kind);
