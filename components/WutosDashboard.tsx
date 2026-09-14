@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FC, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
@@ -645,14 +646,31 @@ const LiveWaveformPanel: FC<{
   const activeAnalysis = waveformAnalysis?.units.find((unit) => unit.index === activeIndex);
   const stateLabel = activeUnit?.online ? signalCaptureLabel(status, waveformAnalysis ?? activeAnalysis, true) : '等待探测器通讯';
 
-  return (
-    <section className={`wutos-live-waveform ${expanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="实时波形监视">
+  useEffect(() => {
+    if (!expanded) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setExpanded(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expanded]);
+
+  const liveWaveformPanel = (
+    <section
+      className={`wutos-live-waveform ${expanded ? 'is-expanded' : 'is-collapsed'}`}
+      role={expanded ? 'dialog' : undefined}
+      aria-modal={expanded || undefined}
+      aria-label={expanded ? '指示灯视觉取证全屏窗口' : '实时波形监视'}
+    >
       <button
         type="button"
         className="wutos-live-waveform__header wutos-live-waveform__toggle"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         aria-label={`${expanded ? '收起' : '展开'}实时波形监视`}
+        aria-keyshortcuts={expanded ? 'Escape' : undefined}
       >
         <div>
           <span className="wutos-live-waveform__eyebrow"><Activity />实时波形监视</span>
@@ -662,6 +680,7 @@ const LiveWaveformPanel: FC<{
           <span>{productPrecheckBusy ? `相机自动采样 · ${relayTest?.phase ?? '继电器测试'}` : `${waveformDisplayMode === 'raw' ? '原始值' : '归一化值'} · ${samples.length} 点`}</span>
           <b className={isLive || productPrecheckBusy ? 'is-live' : ''}>{productPrecheckBusy ? '视觉取证中' : stateLabel}</b>
         </div>
+        {expanded && <span className="wutos-live-waveform__collapse-hint">收起 · Esc</span>}
         {expanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
       </button>
       <IndicatorCameraPanel
@@ -674,6 +693,10 @@ const LiveWaveformPanel: FC<{
       />
     </section>
   );
+
+  return expanded && typeof document !== 'undefined'
+    ? createPortal(liveWaveformPanel, document.body)
+    : liveWaveformPanel;
 };
 
 export interface WutosDashboardProps {
