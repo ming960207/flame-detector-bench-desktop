@@ -1,4 +1,5 @@
 import { execFile as execFileCallback, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -74,6 +75,18 @@ function safeText(value: unknown, maxLength: number): string {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+export function resolveSoftwareRepositoryRoot(workingDirectory = process.cwd()): string {
+  const configuredRoot = safeText(process.env.FLAME_BENCH_REPO_ROOT, 4_096);
+  if (configuredRoot) return resolve(configuredRoot);
+
+  const currentDirectory = resolve(workingDirectory);
+  const candidates = [currentDirectory, resolve(currentDirectory, '..')];
+  return candidates.find((candidate) => (
+    existsSync(join(candidate, 'package.json'))
+    && existsSync(join(candidate, 'scripts', 'update-current-branch.ps1'))
+  )) ?? currentDirectory;
+}
+
 function validCommit(value: string): boolean {
   return /^[0-9a-f]{7,64}$/i.test(value);
 }
@@ -89,7 +102,7 @@ function outputTail(stdout: string, stderr: string): string {
 }
 
 export class SoftwareReleaseService {
-  private readonly repoRoot = resolve(process.env.FLAME_BENCH_REPO_ROOT || process.cwd());
+  private readonly repoRoot = resolveSoftwareRepositoryRoot();
   private readonly branch = process.env.FLAME_BENCH_UPDATE_BRANCH || DEFAULT_BRANCH;
   private busy = false;
 
