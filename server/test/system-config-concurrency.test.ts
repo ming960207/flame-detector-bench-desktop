@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -58,6 +58,24 @@ test('update serializes true read-modify-write mutations', async () => {
     const final = await repository.load();
     assert.equal((final?.tempConfig as { count?: number } | undefined)?.count, 20);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Windows read-only config files remain persistable', { skip: process.platform !== 'win32' }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'flame-system-config-readonly-'));
+  const file = join(directory, 'system-config.json');
+  const repository = new SystemConfigRepository(file);
+  try {
+    await repository.update((current) => ({ ...current, tempConfig: { version: 1 }, lastUpdated: 1 }));
+    await chmod(file, 0o444);
+
+    await repository.update((current) => ({ ...current, tempConfig: { version: 2 }, lastUpdated: 2 }));
+
+    const final = await repository.load();
+    assert.deepEqual(final?.tempConfig, { version: 2 });
+  } finally {
+    await chmod(file, 0o666).catch(() => undefined);
     await rm(directory, { recursive: true, force: true });
   }
 });
