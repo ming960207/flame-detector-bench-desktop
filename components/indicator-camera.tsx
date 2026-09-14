@@ -17,6 +17,7 @@ import type { RelayFunctionalTestProgress } from '../server/src/product-aware-fl
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import {
   containMediaGeometry,
+  coverMediaGeometry,
   sourceRoiToViewportRoi,
   viewportRoiToSourceRoi,
   type ContainMediaGeometry,
@@ -72,7 +73,8 @@ interface CameraDeviceOption {
   label: string;
 }
 
-const CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v2';
+const CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v3';
+const COVER_MISMATCH_CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v2';
 const LEGACY_CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
 const CAMERA_WIDTH = 960;
 const SLOT_ROI_SIZE = 0.1;
@@ -139,9 +141,11 @@ function normalizeRoi(value: unknown, fallback: IndicatorSlotRoi, preserveSize =
   };
 }
 
+type SlotRoiMigration = 'none' | 'viewport-v1' | 'contain-source-v2';
+
 interface SlotRoiStorage {
   rois: IndicatorSlotRoi[];
-  legacyViewportCoordinates: boolean;
+  migration: SlotRoiMigration;
 }
 
 function parseStoredRois(rawValue: string | null, preserveSize: boolean): IndicatorSlotRoi[] | null {
@@ -156,16 +160,18 @@ function parseStoredRois(rawValue: string | null, preserveSize: boolean): Indica
 }
 
 function loadSlotRoiStorage(): SlotRoiStorage {
-  if (typeof window === 'undefined') return { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+  if (typeof window === 'undefined') return { rois: DEFAULT_SLOT_ROIS, migration: 'none' };
   try {
     const current = parseStoredRois(window.localStorage.getItem(CAMERA_CONFIG_KEY), true);
-    if (current) return { rois: current, legacyViewportCoordinates: false };
+    if (current) return { rois: current, migration: 'none' };
+    const coverMismatch = parseStoredRois(window.localStorage.getItem(COVER_MISMATCH_CAMERA_CONFIG_KEY), true);
+    if (coverMismatch) return { rois: coverMismatch, migration: 'contain-source-v2' };
     const legacy = parseStoredRois(window.localStorage.getItem(LEGACY_CAMERA_CONFIG_KEY), false);
     return legacy
-      ? { rois: legacy, legacyViewportCoordinates: true }
-      : { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+      ? { rois: legacy, migration: 'viewport-v1' }
+      : { rois: DEFAULT_SLOT_ROIS, migration: 'none' };
   } catch {
-    return { rois: DEFAULT_SLOT_ROIS, legacyViewportCoordinates: false };
+    return { rois: DEFAULT_SLOT_ROIS, migration: 'none' };
   }
 }
 
@@ -379,7 +385,8 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   if (initialSlotRoiStorageRef.current === null) initialSlotRoiStorageRef.current = loadSlotRoiStorage();
   const initialSlotRoiStorage = initialSlotRoiStorageRef.current;
   const slotRoisRef = useRef<IndicatorSlotRoi[]>(initialSlotRoiStorage.rois);
-  const legacySlotRoisRef = useRef<IndicatorSlotRoi[] | null>(initialSlotRoiStorage.legacyViewportCoordinates ? initialSlotRoiStorage.rois : null);
+  const roiMigrationRef = useRef<SlotRoiMigration>(initialSlotRoiStorage.migration);
+  const migratedRoisRef = useRef<IndicatorSlotRoi[] | null>(null);
   const phaseSamplesRef = useRef<FrameSample[]>([]);
   const runSamplesRef = useRef<FrameSample[]>([]);
   const phaseResultsRef = useRef<Map<IndicatorPhase, IndicatorSlotResult[]>>(new Map());
@@ -425,12 +432,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const currentCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
   const liveGeometry = useMemo(() => (
     mediaSize.width > 0 && mediaSize.height > 0 && viewportSize.width > 0 && viewportSize.height > 0
-      ? containMediaGeometry(viewportSize.width, viewportSize.height, mediaSize.width, mediaSize.height)
+      ? coverMediaGeometry(viewportSize.width, viewportSize.height, mediaSize.width, mediaSize.height)
       : null
   ), [mediaSize, viewportSize]);
   const photoGeometry = useMemo(() => (
     currentCapture && currentCapture.frameWidth > 0 && currentCapture.frameHeight > 0 && photoFrameSize.width > 0 && photoFrameSize.height > 0
-      ? containMediaGeometry(photoFrameSize.width, photoFrameSize.height, currentCapture.frameWidth, currentCapture.frameHeight)
+      ? coverMediaGeometry(photoFrameSize.width, photoFrameSize.height, currentCapture.frameWidth, currentCapture.frameHeight)
       : null
   ), [currentCapture, photoFrameSize]);
   const expectedColor = expectedLightForPhase(activePhase);
@@ -518,18 +525,39 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   }, [cameraStatus, currentCapture, expanded, updateLayoutGeometry]);
 
   useEffect(() => {
-    const legacy = legacySlotRoisRef.current;
-    if (!legacy || !liveGeometry) return;
-    const migrated = legacy.map((roi) => viewportRoiToSourceRoi(roi, liveGeometry));
-    legacySlotRoisRef.current = null;
+    const migration = roiMigrationRef.current;
+    if (migration === 'none' || !liveGeometry) return;
+    let migrated: IndicatorSlotRoi[];
+    if (migration === 'viewport-v1') {
+      migrated = slotRoisRef.current.map((roi) => viewportRoiToSourceRoi(roi, liveGeometry));
+    } else {
+      const legacyContainGeometry = containMediaGeometry(
+        viewportSize.width,
+        viewportSize.height,
+        mediaSize.width,
+        mediaSize.height,
+      );
+      migrated = slotRoisRef.current.map((roi) => viewportRoiToSourceRoi(
+        sourceRoiToViewportRoi(roi, legacyContainGeometry),
+        liveGeometry,
+      ));
+    }
+    migratedRoisRef.current = migrated;
     slotRoisRef.current = migrated;
     setSlotRois(migrated);
     try { window.localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(migrated)); } catch { /* best effort */ }
-  }, [liveGeometry]);
+  }, [liveGeometry, mediaSize.height, mediaSize.width, viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
+    const migrated = migratedRoisRef.current;
+    if (migrated) {
+      if (slotRois !== migrated) return;
+      migratedRoisRef.current = null;
+      roiMigrationRef.current = 'none';
+    } else if (roiMigrationRef.current !== 'none') {
+      return;
+    }
     slotRoisRef.current = slotRois;
-    if (legacySlotRoisRef.current) return;
     try { window.localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(slotRois)); } catch { /* best effort */ }
   }, [slotRois]);
 
