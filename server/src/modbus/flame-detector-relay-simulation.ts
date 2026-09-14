@@ -90,7 +90,7 @@ export async function setAlarmFaultSimulation(
 ): Promise<void> {
   const rawFire = fire ? 0x0000 : 0xFFFF;
   const rawFault = fault ? 0x0001 : 0x0000;
-  await writeBroadcastRegisters(FLAME_DETECTOR_REGISTERS.FIRE_ALARM_STATUS, [rawFire, rawFault]);
+  await writeBroadcastRegisters(device, FLAME_DETECTOR_REGISTERS.FIRE_ALARM_STATUS, [rawFire, rawFault]);
 }
 
 export async function simulateAlarm(device: FlameDetectorDevice): Promise<void> {
@@ -136,5 +136,5 @@ export async function readLatchedAlarmFaultState(device: FlameDetectorDevice): P
 }
 
 export async function resetAlarmFaultSimulation(device: FlameDetectorDevice): Promise<void> {
-  await writeBroadcastRegisters(FLAME_DETECTOR_REGISTERS.SYSTEM_RESET, [0x1234]);
+  await writeBroadcastRegisters(device, FLAME_DETECTOR_REGISTERS.SYSTEM_RESET, [0x1234]);
 }
