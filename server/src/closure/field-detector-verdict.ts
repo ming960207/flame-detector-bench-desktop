@@ -213,6 +213,25 @@ function precheckIsTestInvalid(precheck: ProductPrecheckUnitResult | undefined):
     || precheck.reasons.includes('SENSITIVITY_READ_FAILED');
 }
 
+function analysisTestInvalidReason(analysis: WaveformAnalysisUnitResult | undefined): string | undefined {
+  if (!analysis || analysis.verdict !== 'FAIL') return undefined;
+  const directReason = analysis.reason;
+  if (directReason === 'NOISE_SAMPLES_MISSING'
+    || directReason === 'NOISE_ROLLING_WINDOW_MISSING'
+    || directReason === 'HEAT_SAMPLES_MISSING'
+    || directReason === 'FLASH_SAMPLES_MISSING'
+    || directReason === 'EMC_SAMPLES_MISSING') {
+    return directReason;
+  }
+  for (const stage of ['heat', 'flash', 'emc'] as InterferenceStage[]) {
+    const stageResult = analysis.stages?.[stage];
+    if (stageResult?.completed && stageResult.verdict === 'FAIL' && stageResult.reason === 'SAMPLES_MISSING') {
+      return `${stage.toUpperCase()}_SAMPLES_MISSING`;
+    }
+  }
+  return undefined;
+}
+
 function result(
   base: Pick<FieldDetectorResult, 'index' | 'address' | 'sampledAt'>,
   metrics: FieldDetectorMetrics,
@@ -254,19 +273,26 @@ function evaluateUnit(
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
-  // Startup failures remain authoritative. However, after a quantitative batch is
-  // COMPLETE, stopWaveformStreaming() intentionally resets startup to DISCONNECTED
-  // and broadcasts one last transport state. A completed waveform PASS is evidence
-  // gathered while the unit was online/source-ready/synchronized, so that terminal
-  // cleanup state must not rewrite the finished inspection to NG.
-  if (unit.startup?.state === 'FAILED') {
-    return result(base, metrics, 'FAIL', 'FAIL', unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED', precheck, missingProbes);
+  // Startup state is transport evidence, not product-quality evidence. Before the
+  // quantitative run completes it can block progress/recommend a retest, but after
+  // COMPLETE the captured analysis/precheck is authoritative. This prevents a late
+  // cleanup/retry transient or a stale earlier failure from rewriting a finished
+  // product result to NG.
+  if (!complete && unit.startup?.state === 'FAILED') {
+    return result(
+      base,
+      metrics,
+      'FAIL',
+      'FAIL',
+      unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED',
+      precheck,
+      missingProbes,
+      'TEST_INVALID',
+    );
   }
-  const completedWaveformPass = complete && analysis?.verdict === 'PASS';
-  if (unit.startup && unit.startup.state !== 'TEST_READY' && !completedWaveformPass) {
+  if (!complete && unit.startup && unit.startup.state !== 'TEST_READY') {
     const reason = `DETECTOR_STARTUP_${unit.startup.state}`;
-    if (complete) return result(base, metrics, 'FAIL', 'FAIL', reason, precheck, missingProbes);
-    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes);
+    return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes, 'TEST_INVALID');
   }
   // Product precheck is evidence collected during the signal-stabilization wait.
   // Transport/configuration failures remain blocking, but are explicitly classified
@@ -292,6 +318,9 @@ function evaluateUnit(
     return result(base, metrics, 'FAIL', 'FAIL', `${missingProbes[0].toUpperCase()}_SIGNAL_NO_DATA`, precheck, missingProbes);
   }
   if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT', precheck);
+  if (complete && !analysis) {
+    return result(base, metrics, 'FAIL', 'FAIL', 'WAVEFORM_ANALYSIS_MISSING', precheck, missingProbes, 'TEST_INVALID');
+  }
   if (!complete || !analysis) {
     if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE', precheck);
     if (!unit.sourceReady) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_SOURCE_NOT_READY', precheck);
@@ -300,7 +329,14 @@ function evaluateUnit(
   if (!analysisSnapshot) {
     return result(base, metrics, 'PASS', 'PENDING', undefined, precheck);
   }
+  const testInvalidReason = complete ? analysisTestInvalidReason(analysis) : undefined;
+  if (testInvalidReason) {
+    return result(base, metrics, 'FAIL', 'FAIL', testInvalidReason, precheck, missingProbes, 'TEST_INVALID');
+  }
   if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
+  if (complete && analysis?.verdict === 'PENDING') {
+    return result(base, metrics, 'FAIL', 'FAIL', 'WAVEFORM_ANALYSIS_INCOMPLETE', precheck, missingProbes, 'TEST_INVALID');
+  }
   if (analysisSnapshot.phase !== 'COMPLETE' || analysis?.verdict !== 'PASS') {
     return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA', precheck);
   }
