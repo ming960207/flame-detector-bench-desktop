@@ -48,8 +48,8 @@ async function writeBroadcastRegisters(
   const client = (device as unknown as { client?: unknown }).client;
   const socket = getRawTcpSocket(client);
 
-  // 现场 TCP 拓扑为“一个 TCP 端口仅挂一个探测器”，控制写命令统一使用 FF 广播地址；
-  // 端口本身负责区分 D1-D6，禁止 detectorIndex/unit.address 参与控制帧地址。
+  // 现场 TCP 拓扑为“一个 TCP 端口仅挂一个探测器”，模拟控制写命令统一使用 FF 广播地址；
+  // 端口本身负责区分 D1-D6，禁止 detectorIndex/unit.address 参与模拟控制帧地址。
   if (socket) {
     if (socket.destroyed || socket.writable === false) {
       throw new Error('探测器 TCP 连接不可写');
@@ -77,7 +77,7 @@ async function writeBroadcastRegisters(
  * 实机已验证：当前固件不能分别单寄存器写 A000/A001；必须从 A000 开始
  * 使用 FC10 连续写两个寄存器。
  *
- * TCP 独立端口现场控制统一使用 FF 广播地址：
+ * TCP 独立端口现场模拟控制统一使用 FF 广播地址：
  * normal      = FFFF / 0000
  * fire        = 0000 / 0000
  * fault       = FFFF / 0001
@@ -136,5 +136,7 @@ export async function readLatchedAlarmFaultState(device: FlameDetectorDevice): P
 }
 
 export async function resetAlarmFaultSimulation(device: FlameDetectorDevice): Promise<void> {
-  await writeBroadcastRegisters(device, FLAME_DETECTOR_REGISTERS.SYSTEM_RESET, [0x1234]);
+  // F000=1234 系统复位必须使用有地址 01 的 FC10 写入并等待正常回包；
+  // Raw TCP 的 writeRegisters() 已固定现场设备地址为 01。
+  await device.systemReset();
 }
