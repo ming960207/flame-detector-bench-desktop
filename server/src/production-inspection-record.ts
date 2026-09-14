@@ -11,7 +11,7 @@ export interface ProductionInspectionRecordConfig {
 }
 
 export const DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG: Readonly<ProductionInspectionRecordConfig> = Object.freeze({
-  inspector: '',
+  inspector: '自动检测',
   standard: 'GB15631－2008',
   formNumber: 'WUTOS/IMS-JL836',
   formVersion: 'A/0',
@@ -147,7 +147,7 @@ export function normalizeProductionInspectionRecordConfig(
     : {};
   const text = (value: unknown, base: string, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : base;
   return {
-    inspector: text(source.inspector, fallback.inspector, 64),
+    inspector: text(source.inspector, fallback.inspector, 64) || fallback.inspector,
     standard: text(source.standard, fallback.standard, 128) || fallback.standard,
     formNumber: text(source.formNumber, fallback.formNumber, 64) || fallback.formNumber,
     formVersion: text(source.formVersion, fallback.formVersion, 32) || fallback.formVersion,
