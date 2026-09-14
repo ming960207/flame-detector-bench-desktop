@@ -12,17 +12,23 @@ test('alarm and fault verify phases remain observable before reset', async () =>
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   const phaseAt = new Map<RelayFunctionalTestPhase, number>();
+  const stateSwitches: Array<{ kind: 'simulate' | 'reset'; at: number }> = [];
   let alarmCommandAt = 0;
+  let faultCommandAt = 0;
 
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
-      if (state.fire && !state.fault) alarmCommandAt = Date.now();
+      const at = Date.now();
+      stateSwitches.push({ kind: 'simulate', at });
+      if (state.fire && !state.fault) alarmCommandAt = at;
+      if (state.fault && !state.fire) faultCommandAt = at;
       internal = { ...state };
       inputs.X1 = state.fire;
       inputs.X2 = state.fault;
     },
     async reset() {
+      stateSwitches.push({ kind: 'reset', at: Date.now() });
       internal = { fire: false, fault: false };
       inputs.X1 = false;
       inputs.X2 = false;
@@ -64,6 +70,17 @@ test('alarm and fault verify phases remain observable before reset', async () =>
   const faultReset = phaseAt.get('FAULT_RESET');
   assert.ok(alarmVerify && alarmReset && faultVerify && faultReset);
   assert.ok(alarmVerify - alarmCommandAt >= RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS - 100);
+  assert.equal(
+    stateSwitches.some(({ at }) => at > alarmCommandAt && at < alarmVerify),
+    false,
+    'alarm settle window must not send another state-switch command',
+  );
+  assert.ok(faultVerify - faultCommandAt >= RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS - 100);
+  assert.equal(
+    stateSwitches.some(({ at }) => at > faultCommandAt && at < faultVerify),
+    false,
+    'fault settle window must not send another state-switch command',
+  );
 
   // Allow a small scheduler tolerance while still proving a real observation window exists.
   assert.ok(alarmReset - alarmVerify >= RELAY_VISUAL_OBSERVATION_HOLD_MS - 100);
