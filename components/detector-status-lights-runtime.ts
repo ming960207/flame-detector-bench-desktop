@@ -1,6 +1,7 @@
 import './detector-status-lights.css';
 import type { IndicatorVisionLightVerdict } from '../server/src/indicator-vision';
 import {
+  canMergeRelayEvidence,
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
   startsNewRelayStatusSession,
@@ -232,6 +233,7 @@ function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductC
   const precheck = configPayload?.precheck;
   const evidenceUnits = precheck?.relayFunctionalTest?.units;
   if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
+  if (!canMergeRelayEvidence(payload.active, precheck?.verdict === 'PENDING', relaySessionActive)) return payload;
 
   const evidenceBatchId = precheck?.batchId ?? null;
   // During a new active test, evidence is valid only when it belongs to the exact

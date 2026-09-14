@@ -30,6 +30,14 @@ export function startsNewRelayStatusSession(
   return batchChanged || (next.active && !previous.active);
 }
 
+export function canMergeRelayEvidence(
+  payloadActive: boolean,
+  precheckPending: boolean,
+  sessionActive: boolean,
+): boolean {
+  return payloadActive || precheckPending || sessionActive;
+}
+
 export function indicatorVisionState(verdict: IndicatorVisionLightVerdict | undefined): { active: boolean; known: boolean } {
   if (verdict === 'PASS') return { active: true, known: true };
   if (verdict === 'FAIL') return { active: false, known: true };

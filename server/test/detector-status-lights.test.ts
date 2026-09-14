@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canMergeRelayEvidence,
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
   startsNewRelayStatusSession,
@@ -74,6 +75,13 @@ test('a new relay batch resets latches before the active flag rises', () => {
     ),
     true,
   );
+});
+
+test('cold-start idle state does not resurrect completed relay evidence', () => {
+  assert.equal(canMergeRelayEvidence(false, false, false), false);
+  assert.equal(canMergeRelayEvidence(true, false, false), true);
+  assert.equal(canMergeRelayEvidence(false, true, false), true);
+  assert.equal(canMergeRelayEvidence(false, false, true), true);
 });
 
 test('live relay lamps reflect physical DIO levels using configured normal polarity', () => {
