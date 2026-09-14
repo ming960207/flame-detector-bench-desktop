@@ -153,18 +153,28 @@ async function refreshMESStatus(): Promise<void> {
 function startMESStatusRuntime(): void {
   if (!isFieldRuntimePage()) return;
 
+  let timer: number | undefined;
+  let pollingStarted = false;
   const observer = new MutationObserver(() => {
-    if (ensureBadge()) void refreshMESStatus();
+    if (!ensureBadge() || pollingStarted) return;
+    pollingStarted = true;
+    observer.disconnect();
+    void refreshMESStatus();
+    timer = window.setInterval(() => void refreshMESStatus(), POLL_INTERVAL_MS);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 
-  const timer = window.setInterval(() => void refreshMESStatus(), POLL_INTERVAL_MS);
+  if (ensureBadge()) {
+    pollingStarted = true;
+    void refreshMESStatus();
+    timer = window.setInterval(() => void refreshMESStatus(), POLL_INTERVAL_MS);
+  } else {
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
   window.addEventListener('beforeunload', () => {
     observer.disconnect();
-    window.clearInterval(timer);
+    if (timer !== undefined) window.clearInterval(timer);
   }, { once: true });
-
-  void refreshMESStatus();
 }
 
 if (typeof window !== 'undefined') {
