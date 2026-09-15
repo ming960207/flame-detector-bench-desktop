@@ -94,6 +94,64 @@ function closeNoiseWindow(analysis: FieldWaveformAnalysis, timestamp: number): v
   analysis.observeProcess(end);
 }
 
+test('a new INIT cycle starts a new waveform batch even when auto-running stays high', () => {
+  const analysis = new FieldWaveformAnalysis();
+  analysis.observeProcess(status(1_000));
+  const firstBatchId = analysis.snapshot().batchId;
+
+  const returningHome = status(2_000);
+  returningHome.stageCode = 1;
+  returningHome.stepCode = 1;
+  returningHome.stage = 'RETURN_HOME';
+  returningHome.label = '回初始位确认';
+  returningHome.processStage = 'RETURN_HOME';
+  returningHome.processLabel = '回初始位确认';
+  returningHome.returningHome = true;
+  returningHome.io!.internal!.returnHomeFlag = true;
+  analysis.observeProcess(returningHome);
+
+  const nextInit = status(3_000);
+  nextInit.stageCode = 1;
+  nextInit.stepCode = 1;
+  nextInit.stage = 'INIT';
+  nextInit.label = '初始化';
+  nextInit.processStage = 'INIT';
+  nextInit.processLabel = '初始化';
+  analysis.observeProcess(nextInit);
+
+  assert.notEqual(analysis.snapshot().batchId, firstBatchId);
+  assert.equal(analysis.snapshot().phase, 'NOISE');
+});
+
+test('an auto-running edge after stage-based startup does not create a duplicate batch', () => {
+  const analysis = new FieldWaveformAnalysis();
+  const initWithoutAuto = status(1_000);
+  initWithoutAuto.stageCode = 1;
+  initWithoutAuto.stepCode = 1;
+  initWithoutAuto.stage = 'INIT';
+  initWithoutAuto.label = '初始化';
+  initWithoutAuto.processStage = 'INIT';
+  initWithoutAuto.processLabel = '初始化';
+  initWithoutAuto.autoRunning = false;
+  initWithoutAuto.io!.internal!.autoRunning = false;
+  analysis.observeProcess(initWithoutAuto);
+  const firstBatchId = analysis.snapshot().batchId;
+
+  const initWithAuto = {
+    ...initWithoutAuto,
+    timestamp: 2_000,
+    autoRunning: true,
+    io: {
+      ...initWithoutAuto.io!,
+      syncedAt: 2_000,
+      internal: { ...initWithoutAuto.io!.internal!, autoRunning: true },
+    },
+  };
+  analysis.observeProcess(initWithAuto);
+
+  assert.equal(analysis.snapshot().batchId, firstBatchId);
+});
+
 test('noise capture waits 10 seconds for signal stabilization before opening', () => {
   const analysis = new FieldWaveformAnalysis();
 

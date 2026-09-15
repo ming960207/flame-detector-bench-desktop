@@ -4,6 +4,7 @@ import {
   canMergeRelayEvidence,
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
+  relayFeedbackIsClear,
   startsNewRelayStatusSession,
 } from '../../components/detector-status-lights-model.ts';
 import {
@@ -75,6 +76,25 @@ test('a new relay batch resets latches before the active flag rises', () => {
     ),
     true,
   );
+  assert.equal(
+    startsNewRelayStatusSession(
+      { active: true, batchId: 'batch-old', processStage: 'RETURN_HOME' },
+      { active: true, batchId: 'batch-old', processStage: 'INIT' },
+    ),
+    true,
+  );
+});
+
+test('new relay sessions wait for one fully clear physical baseline before latching', () => {
+  assert.equal(relayFeedbackIsClear([
+    { relayObserved: true, alarmRelay: false, faultRelay: false },
+  ]), true);
+  assert.equal(relayFeedbackIsClear([
+    { relayObserved: true, alarmRelay: true, faultRelay: false },
+  ]), false);
+  assert.equal(relayFeedbackIsClear([
+    { relayObserved: false, alarmRelay: false, faultRelay: false },
+  ]), false);
 });
 
 test('cold-start idle state does not resurrect completed relay evidence', () => {

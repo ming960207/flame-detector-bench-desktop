@@ -145,6 +145,7 @@ export function startRelayStatusLightsService(
     res.json({
       active: summary.productSelectionLocked,
       batchId: summary.waveformAnalysis.batchId,
+      processStage: summary.process?.processStage ?? null,
       updatedAt: Date.now(),
       relayAvailable: inputs !== null,
       relayError,

@@ -13,6 +13,29 @@ export type WaveformAnalysisLogger = (message: string) => void;
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
 const NOISE_ROLLING_WINDOW_MS = 10_000;
+const PROCESS_RUN_BOUNDARY_STAGES = new Set<PLCProcessStatus['processStage']>([
+  'IDLE',
+  'COMPLETE',
+  'RETURN_HOME',
+  'UNKNOWN',
+]);
+
+function processStageStartsNewAutomaticRun(
+  previousStage: PLCProcessStatus['processStage'] | null,
+  nextStage: PLCProcessStatus['processStage'],
+): boolean {
+  const nextIsActive = !PROCESS_RUN_BOUNDARY_STAGES.has(nextStage);
+  if (!nextIsActive) return false;
+
+  // INIT is the authoritative start marker in the PLC workflow. It must create
+  // a new batch even when the PLC keeps M0.0 high across two consecutive cycles.
+  if (nextStage === 'INIT' && previousStage !== 'INIT') return true;
+
+  // If the 200 ms observer misses INIT, a transition from a terminal/return-home
+  // stage into any active stage still identifies the next automatic cycle.
+  return previousStage === null
+    || PROCESS_RUN_BOUNDARY_STAGES.has(previousStage);
+}
 
 export interface DetectionSNRRange {
   min: number;
@@ -797,6 +820,7 @@ export class FieldWaveformAnalysis {
   private noiseCompleted = false;
   private noiseNextTrendLogAt: number | null = null;
   private automaticRunActive = false;
+  private batchStartedForProcess = false;
 
   constructor(config?: Partial<WaveformAnalysisConfig>, logger?: WaveformAnalysisLogger) {
     this.config = normalizeConfig(config);
@@ -916,7 +940,16 @@ export class FieldWaveformAnalysis {
     const automaticRunStarted = automaticRunActive && !this.automaticRunActive;
     this.automaticRunActive = automaticRunActive;
     const canStartBatch = stage !== 'RETURN_HOME' && stage !== 'COMPLETE' && status.stage !== 'FAULT';
-    if (canStartBatch && (automaticRunStarted || (!this.batchId && explicitNoiseCapture))) this.startBatch(status.timestamp);
+    const processStageStarted = processStageStartsNewAutomaticRun(this.processStage, stage);
+    if (PROCESS_RUN_BOUNDARY_STAGES.has(stage)) this.batchStartedForProcess = false;
+    if (canStartBatch && (
+      processStageStarted
+      || (automaticRunStarted && !this.batchStartedForProcess)
+      || (!this.batchId && explicitNoiseCapture)
+    )) {
+      this.startBatch(status.timestamp);
+      this.batchStartedForProcess = true;
+    }
     this.noiseWindowOpenedAt = noiseWindowOpenedAt;
     if (noiseWindowJustOpened) this.logPLCNoiseWindowBoundary('开启', status.timestamp);
 
