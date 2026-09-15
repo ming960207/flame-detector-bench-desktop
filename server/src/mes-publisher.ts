@@ -71,11 +71,6 @@ const DEFAULT_OUTBOX_FILE = join(process.env.APP_DATA_DIR || process.cwd(), 'mes
 const MES_CONFIG_FILE = process.env.MES_CONFIG_FILE
   || join(dirname(fileURLToPath(import.meta.url)), '..', 'mes_config.json');
 const MES_RETRY_INTERVAL_MS = 30_000;
-let activeMESStatusProvider: (() => MESPublicStatus) | null = null;
-
-export function getActiveMESPublicStatus(): MESPublicStatus | null {
-  return activeMESStatusProvider?.() ?? null;
-}
 
 function localMESConfig(): { baseUrl?: string; apiKey?: string } {
   try {
@@ -170,7 +165,6 @@ export class MESPublisher {
     this.errorLog = options.error || ((message) => console.error(message));
     this.loadOutbox();
     this.updateRetryTimer();
-    activeMESStatusProvider = () => this.getPublicStatus();
   }
 
   getConfig(): MESConfig {

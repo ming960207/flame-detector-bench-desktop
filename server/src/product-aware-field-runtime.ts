@@ -167,7 +167,6 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     res.json({
       active: summary.productSelectionLocked,
       batchId: summary.waveformAnalysis.batchId,
-      processStage: summary.process?.processStage ?? null,
       updatedAt: flame.timestamp || Date.now(),
       units,
     });

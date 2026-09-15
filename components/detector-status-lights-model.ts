@@ -20,7 +20,6 @@ export const DETECTOR_STATUS_LIGHTS = [
 export interface RelayStatusSessionState {
   active: boolean;
   batchId: string | null;
-  processStage?: string | null;
 }
 
 export function startsNewRelayStatusSession(
@@ -28,37 +27,7 @@ export function startsNewRelayStatusSession(
   next: RelayStatusSessionState,
 ): boolean {
   const batchChanged = next.batchId !== null && next.batchId !== previous.batchId;
-  const activeRising = next.active && !previous.active;
-  const enteredInit = next.processStage === 'INIT' && previous.processStage !== 'INIT';
-  const resumedAfterBoundary = next.active
-    && (previous.processStage === 'IDLE'
-      || previous.processStage === 'COMPLETE'
-      || previous.processStage === 'RETURN_HOME'
-      || previous.processStage === 'UNKNOWN')
-    && next.processStage !== previous.processStage;
-  return batchChanged || activeRising || enteredInit || resumedAfterBoundary;
-}
-
-export function canMergeRelayEvidence(
-  payloadActive: boolean,
-  precheckPending: boolean,
-  sessionActive: boolean,
-): boolean {
-  return payloadActive || precheckPending || sessionActive;
-}
-
-export interface RelayFeedbackState {
-  relayObserved: boolean;
-  alarmRelay: boolean;
-  faultRelay: boolean;
-}
-
-export function relayFeedbackIsClear(units: readonly RelayFeedbackState[]): boolean {
-  return units.length > 0 && units.every((unit) => (
-    unit.relayObserved
-    && !unit.alarmRelay
-    && !unit.faultRelay
-  ));
+  return batchChanged || (next.active && !previous.active);
 }
 
 export function indicatorVisionState(verdict: IndicatorVisionLightVerdict | undefined): { active: boolean; known: boolean } {

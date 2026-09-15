@@ -1,10 +1,8 @@
 import './detector-status-lights.css';
 import type { IndicatorVisionLightVerdict } from '../server/src/indicator-vision';
 import {
-  canMergeRelayEvidence,
   DETECTOR_STATUS_LIGHTS,
   indicatorVisionState,
-  relayFeedbackIsClear,
   startsNewRelayStatusSession,
   type DetectorStatusLightKind,
   type IndicatorVisionField,
@@ -25,7 +23,6 @@ type StatusLightUnit = {
 type StatusLightPayload = {
   active: boolean;
   batchId: string | null;
-  processStage?: string | null;
   updatedAt: number;
   units: StatusLightUnit[];
 };
@@ -153,11 +150,8 @@ function applyUnit(unit: StatusLightUnit): void {
       continue;
     }
     const relayField = definition.field as RelayLightField;
-    const relayKnown = relaySessionInitialized && unit.relayObserved;
-    const latched = relayKnown
-      ? latchState(unit.index, definition.kind, Boolean(unit[relayField]), true)
-      : false;
-    setLight(group, definition, latched, relayKnown, latched);
+    const latched = latchState(unit.index, definition.kind, Boolean(unit[relayField]), unit.relayObserved);
+    setLight(group, definition, latched, unit.relayObserved, latched);
   }
 }
 
@@ -181,60 +175,32 @@ let requestBusy = false;
 let lastSuccessAt = 0;
 let relaySessionActive = false;
 let relaySessionBatchId: string | null = null;
-let relaySessionProcessStage: string | null = null;
 let cachedProductConfig: ProductConfigPayload | null = null;
 let lastProductConfigFetchAt = 0;
 let runtimeDisposed = false;
 let activeRequestController: AbortController | null = null;
 const latchedLightKinds = new Map<number, Set<LightKind>>();
-let relaySessionInitialized = true;
 
 function resetLatchedLights(): void {
   latchedLightKinds.clear();
 }
 
-function hasCurrentRelayEvidence(configPayload: ProductConfigPayload | null, batchId: string | null): boolean {
-  if (!batchId) return false;
-  const precheck = configPayload?.precheck;
-  const evidenceBatchId = precheck?.batchId ?? null;
-  return evidenceBatchId === batchId
-    && Array.isArray(precheck?.relayFunctionalTest?.units)
-    && precheck.relayFunctionalTest.units.length > 0;
-}
-
-function updateRelaySession(
-  active: boolean,
-  batchId: string | null,
-  processStage: string | null | undefined,
-  units: readonly StatusLightUnit[],
-  configPayload: ProductConfigPayload | null,
-): void {
+function updateRelaySession(active: boolean, batchId: string | null): void {
   // Keep completed relay evidence visible while idle. As soon as the next
   // production process becomes active, or its formal batch id changes, clear all
   // relay LED latches before applying evidence from the new run.
   const startsNewTest = startsNewRelayStatusSession(
-    { active: relaySessionActive, batchId: relaySessionBatchId, processStage: relaySessionProcessStage },
-    { active, batchId, processStage },
+    { active: relaySessionActive, batchId: relaySessionBatchId },
+    { active, batchId },
   );
   if (startsNewTest) {
     resetLatchedLights();
-    relaySessionInitialized = false;
     // Do not allow a 500 ms cached /api/product-config response from the previous
     // batch to immediately re-latch LEDs after the new-batch reset.
     cachedProductConfig = null;
     lastProductConfigFetchAt = 0;
   }
-  // A new process may still expose the previous batch's physical relay level
-  // until the detector reset completes. Do not re-latch that level; wait for a
-  // fully observed clear baseline or matching current-batch relay evidence.
-  if (!relaySessionInitialized && (
-    relayFeedbackIsClear(units)
-    || hasCurrentRelayEvidence(configPayload, batchId)
-  )) {
-    relaySessionInitialized = true;
-  }
   if (batchId !== null) relaySessionBatchId = batchId;
-  relaySessionProcessStage = processStage ?? null;
   relaySessionActive = active;
 }
 
@@ -266,7 +232,6 @@ function mergeRelayEvidence(payload: StatusLightPayload, configPayload: ProductC
   const precheck = configPayload?.precheck;
   const evidenceUnits = precheck?.relayFunctionalTest?.units;
   if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
-  if (!canMergeRelayEvidence(payload.active, precheck?.verdict === 'PENDING', relaySessionActive)) return payload;
 
   const evidenceBatchId = precheck?.batchId ?? null;
   // During a new active test, evidence is valid only when it belongs to the exact
@@ -352,15 +317,8 @@ async function refreshStatusLights(): Promise<void> {
     const rawPayload = await response.json() as StatusLightPayload;
     const configPayload = await productConfigEvidence(controller.signal);
     if (runtimeDisposed) return;
-    const rawUnits = Array.isArray(rawPayload.units) ? rawPayload.units : [];
     const payload = mergeIndicatorVisionEvidence(mergeRelayEvidence(rawPayload, configPayload), configPayload);
-    updateRelaySession(
-      Boolean(payload.active),
-      payload.batchId ?? null,
-      payload.processStage,
-      rawUnits,
-      configPayload,
-    );
+    updateRelaySession(Boolean(payload.active), payload.batchId ?? null);
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
     for (let index = 1; index <= 6; index += 1) {
       const unit = byIndex.get(index) ?? {
