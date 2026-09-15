@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { assertSupportedRuntimeMode } from './field-runtime-gate.js';
-import { getActiveMESPublicStatus } from './mes-publisher.js';
+import { checkActiveMESConnectivity, getActiveMESPublicStatus } from './mes-publisher.js';
 import {
   DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
   normalizeProductionInspectionRecordConfig,
@@ -39,6 +39,7 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
 
     fieldRuntime.app.get('/api/mes/status', async (_req, res) => {
       try {
+        await checkActiveMESConnectivity();
         const status = getActiveMESPublicStatus();
         if (!status) {
           return res.status(503).json({
@@ -47,6 +48,11 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
             operatorConfigured: false,
             operatorName: '',
             pendingJobs: 0,
+            connectivity: {
+              state: 'UNKNOWN',
+              checkedAt: null,
+              httpStatus: null,
+            },
             lastSuccessAt: null,
             lastError: 'MES_PUBLISHER_NOT_READY',
             connectionState: 'UNAVAILABLE',
@@ -63,17 +69,22 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
         const operatorConfigured = Boolean(effectiveOperator);
         const lastSuccessAt = status.lastUploadedAt ?? null;
         const lastError = status.lastError || null;
+        const connectivity = status.connectivity;
         const connectionState = !status.enabled
           ? 'DISABLED'
-          : !status.apiKeyConfigured || !operatorConfigured
-            ? 'MISCONFIGURED'
-            : lastError
-              ? 'ERROR'
-              : status.pendingJobs > 0
-                ? 'PENDING'
-                : lastSuccessAt
-                  ? 'HEALTHY'
-                  : 'READY';
+          : connectivity.state === 'UNREACHABLE'
+            ? 'UNREACHABLE'
+            : connectivity.state === 'UNKNOWN'
+              ? 'CHECKING'
+              : !status.apiKeyConfigured || !operatorConfigured
+                ? 'MISCONFIGURED'
+                : lastError
+                  ? 'ERROR'
+                  : status.pendingJobs > 0
+                    ? 'PENDING'
+                    : lastSuccessAt
+                      ? 'HEALTHY'
+                      : 'READY';
 
         return res.json({
           enabled: status.enabled,
@@ -81,6 +92,7 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
           operatorConfigured,
           operatorName: effectiveOperator,
           pendingJobs: status.pendingJobs,
+          connectivity,
           lastSuccessAt,
           lastError,
           connectionState,
@@ -89,6 +101,12 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
           timestamp: Date.now(),
           display: {
             enabled: status.enabled ? '已启用' : '未启用',
+            endpoint: status.baseUrl,
+            connectivity: connectivity.state === 'REACHABLE'
+              ? `可达${connectivity.httpStatus === null ? '' : `（HTTP ${connectivity.httpStatus}）`}`
+              : connectivity.state === 'UNREACHABLE'
+                ? `不可达${connectivity.error ? `：${connectivity.error}` : ''}`
+                : '检测中',
             apiKey: status.apiKeyConfigured ? '已配置' : '未配置',
             operator: operatorConfigured ? `已配置（${effectiveOperator}）` : '未配置',
             pendingJobs: String(status.pendingJobs),

@@ -1,6 +1,13 @@
 import './mes-status-live-runtime.css';
 
-type MESConnectionState = 'DISABLED' | 'MISCONFIGURED' | 'ERROR' | 'PENDING' | 'READY' | 'HEALTHY' | 'UNAVAILABLE';
+type MESConnectionState = 'DISABLED' | 'MISCONFIGURED' | 'ERROR' | 'PENDING' | 'READY' | 'HEALTHY' | 'UNAVAILABLE' | 'UNREACHABLE' | 'CHECKING';
+
+interface MESConnectivityStatus {
+  state: 'UNKNOWN' | 'REACHABLE' | 'UNREACHABLE';
+  checkedAt: number | null;
+  httpStatus: number | null;
+  error?: string;
+}
 
 interface MESStatusPayload {
   enabled: boolean;
@@ -11,6 +18,7 @@ interface MESStatusPayload {
   lastSuccessAt: number | null;
   lastError: string | null;
   connectionState: MESConnectionState;
+  connectivity?: MESConnectivityStatus;
   baseUrl?: string;
   timestamp: number;
 }
@@ -58,6 +66,8 @@ function ensureBadge(): HTMLElement | null {
     '<b class="wutos-mes-status__label">MES 检查中</b>',
     '<span class="wutos-mes-status__detail" aria-label="MES连接状态详情">',
     '  <strong>MES 自动上传状态</strong>',
+    '  <span data-mes-row="endpoint"><em>MES 地址</em><b>-</b></span>',
+    '  <span data-mes-row="connectivity"><em>IP 连接</em><b>-</b></span>',
     '  <span data-mes-row="enabled"><em>已启用</em><b>-</b></span>',
     '  <span data-mes-row="apiKey"><em>API Key</em><b>-</b></span>',
     '  <span data-mes-row="operator"><em>经办人</em><b>-</b></span>',
@@ -84,6 +94,8 @@ function renderUnavailable(message: string): void {
   badge.className = 'wutos-mes-status is-offline';
   const label = badge.querySelector<HTMLElement>('.wutos-mes-status__label');
   if (label) label.textContent = 'MES 状态不可用';
+  setRow(badge, 'endpoint', '-');
+  setRow(badge, 'connectivity', '未知');
   setRow(badge, 'enabled', '未知');
   setRow(badge, 'apiKey', '未知');
   setRow(badge, 'operator', '未知');
@@ -100,7 +112,7 @@ function renderStatus(status: MESStatusPayload): void {
   const state = status.connectionState;
   const className = state === 'HEALTHY' || state === 'READY'
     ? 'is-ready'
-    : state === 'PENDING'
+    : state === 'PENDING' || state === 'CHECKING'
       ? 'is-pending'
       : state === 'DISABLED'
         ? 'is-disabled'
@@ -111,16 +123,28 @@ function renderStatus(status: MESStatusPayload): void {
       ? 'MES 就绪'
       : state === 'PENDING'
         ? `MES 待上传 ${status.pendingJobs}`
-        : state === 'DISABLED'
-          ? 'MES 未启用'
-          : state === 'MISCONFIGURED'
-            ? 'MES 未配置'
-            : 'MES 异常';
+        : state === 'CHECKING'
+          ? 'MES IP 检测中'
+          : state === 'UNREACHABLE'
+            ? 'MES IP 不可达'
+            : state === 'DISABLED'
+              ? 'MES 未启用'
+              : state === 'MISCONFIGURED'
+                ? 'MES 未配置'
+                : 'MES 异常';
 
   badge.className = `wutos-mes-status ${className}`;
   const label = badge.querySelector<HTMLElement>('.wutos-mes-status__label');
   if (label) label.textContent = labelText;
 
+  const connectivity = status.connectivity;
+  const connectivityText = !connectivity || connectivity.state === 'UNKNOWN'
+    ? '检测中'
+    : connectivity.state === 'REACHABLE'
+      ? `可达${connectivity.httpStatus === null ? '' : `（HTTP ${connectivity.httpStatus}）`}`
+      : `不可达${connectivity.error ? `：${connectivity.error}` : ''}`;
+  setRow(badge, 'endpoint', status.baseUrl || '未配置');
+  setRow(badge, 'connectivity', connectivityText);
   setRow(badge, 'enabled', status.enabled ? '是' : '否');
   setRow(badge, 'apiKey', status.apiKeyConfigured ? '已配置' : '未配置');
   setRow(badge, 'operator', status.operatorConfigured ? `已配置 · ${status.operatorName || '自动检测'}` : '未配置');
@@ -130,6 +154,8 @@ function renderStatus(status: MESStatusPayload): void {
 
   badge.title = [
     `MES：${labelText}`,
+    `MES 地址：${status.baseUrl || '未配置'}`,
+    `IP 连接：${connectivityText}`,
     `已启用：${status.enabled ? '是' : '否'}`,
     `API Key：${status.apiKeyConfigured ? '已配置' : '未配置'}`,
     `经办人：${status.operatorConfigured ? status.operatorName || '自动检测' : '未配置'}`,

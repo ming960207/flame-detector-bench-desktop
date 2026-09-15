@@ -37,6 +37,48 @@ test('MES 无历史配置时默认启用自动上传', () => {
   }
 });
 
+test('MES connectivity probe marks an HTTP response reachable and caches it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'flame-mes-connectivity-ok-'));
+  let calls = 0;
+  const publisher = new MESPublisher(config, {
+    outboxFile: join(directory, 'outbox.json'),
+    fetchImpl: async (_input, init) => {
+      calls += 1;
+      assert.equal(init?.method, 'HEAD');
+      return new Response(null, { status: 204 });
+    },
+  });
+  try {
+    const first = await publisher.checkConnectivity(true);
+    const second = await publisher.checkConnectivity();
+    assert.equal(first.state, 'REACHABLE');
+    assert.equal(first.httpStatus, 204);
+    assert.equal(second.state, 'REACHABLE');
+    assert.equal(calls, 1);
+    assert.equal(publisher.getPublicStatus().connectivity.state, 'REACHABLE');
+  } finally {
+    publisher.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('MES connectivity probe reports network failures as unreachable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'flame-mes-connectivity-fail-'));
+  const publisher = new MESPublisher(config, {
+    outboxFile: join(directory, 'outbox.json'),
+    fetchImpl: async () => { throw new Error('connect ECONNREFUSED'); },
+  });
+  try {
+    const result = await publisher.checkConnectivity(true);
+    assert.equal(result.state, 'UNREACHABLE');
+    assert.match(result.error ?? '', /ECONNREFUSED/);
+    assert.equal(publisher.getPublicStatus().connectivity.state, 'UNREACHABLE');
+  } finally {
+    publisher.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('MES 产品录入载荷关联上传附件并区分合格状态', () => {
   const submission: MESProductSubmission = {
     productCode: '410205901010100001',

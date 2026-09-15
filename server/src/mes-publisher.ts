@@ -20,6 +20,15 @@ export interface MESFileReference {
   [key: string]: unknown;
 }
 
+export type MESConnectivityState = 'UNKNOWN' | 'REACHABLE' | 'UNREACHABLE';
+
+export interface MESConnectivityStatus {
+  state: MESConnectivityState;
+  checkedAt: number | null;
+  httpStatus: number | null;
+  error?: string;
+}
+
 export interface MESProductSubmission {
   productCode: string;
   inspectionStatus: 0 | 1;
@@ -55,6 +64,7 @@ export interface MESPublicStatus {
   operatorName: string;
   requestTimeoutMs: number;
   pendingJobs: number;
+  connectivity: MESConnectivityStatus;
   lastError?: string;
   lastUploadedAt?: number;
 }
@@ -71,10 +81,17 @@ const DEFAULT_OUTBOX_FILE = join(process.env.APP_DATA_DIR || process.cwd(), 'mes
 const MES_CONFIG_FILE = process.env.MES_CONFIG_FILE
   || join(dirname(fileURLToPath(import.meta.url)), '..', 'mes_config.json');
 const MES_RETRY_INTERVAL_MS = 30_000;
+const MES_CONNECTIVITY_CACHE_MS = 5_000;
+const MES_CONNECTIVITY_TIMEOUT_MS = 5_000;
 let activeMESStatusProvider: (() => MESPublicStatus) | null = null;
+let activeMESConnectivityProvider: ((force?: boolean) => Promise<MESConnectivityStatus>) | null = null;
 
 export function getActiveMESPublicStatus(): MESPublicStatus | null {
   return activeMESStatusProvider?.() ?? null;
+}
+
+export async function checkActiveMESConnectivity(force = false): Promise<MESConnectivityStatus | null> {
+  return activeMESConnectivityProvider ? activeMESConnectivityProvider(force) : null;
 }
 
 function localMESConfig(): { baseUrl?: string; apiKey?: string } {
@@ -159,8 +176,17 @@ export class MESPublisher {
   private retryTimer: NodeJS.Timeout | null = null;
   private lastError = '';
   private lastUploadedAt: number | undefined;
+  private connectivity: MESConnectivityStatus = {
+    state: 'UNKNOWN',
+    checkedAt: null,
+    httpStatus: null,
+  };
+  private connectivityPromise: Promise<MESConnectivityStatus> | null = null;
+  private connectivityGeneration = 0;
   private readonly log: (message: string) => void;
   private readonly errorLog: (message: string) => void;
+  private readonly statusProvider = () => this.getPublicStatus();
+  private readonly connectivityProvider = (force = false) => this.checkConnectivity(force);
 
   constructor(config: MESConfig, options: MESPublisherOptions = {}) {
     this.config = normalizeMESConfig(config);
@@ -170,7 +196,8 @@ export class MESPublisher {
     this.errorLog = options.error || ((message) => console.error(message));
     this.loadOutbox();
     this.updateRetryTimer();
-    activeMESStatusProvider = () => this.getPublicStatus();
+    activeMESStatusProvider = this.statusProvider;
+    activeMESConnectivityProvider = this.connectivityProvider;
   }
 
   getConfig(): MESConfig {
@@ -185,6 +212,7 @@ export class MESPublisher {
       operatorName: this.config.operatorName,
       requestTimeoutMs: this.config.requestTimeoutMs,
       pendingJobs: this.jobs.size,
+      connectivity: { ...this.connectivity },
       ...(this.lastError ? { lastError: this.lastError } : {}),
       ...(this.lastUploadedAt ? { lastUploadedAt: this.lastUploadedAt } : {}),
     };
@@ -192,15 +220,84 @@ export class MESPublisher {
 
   updateConfig(input: unknown): MESPublicStatus {
     this.config = normalizeMESConfig(input, this.config);
+    this.connectivityGeneration += 1;
+    this.connectivity = { state: 'UNKNOWN', checkedAt: null, httpStatus: null };
     this.updateRetryTimer();
     if (this.config.enabled) void this.flush();
     return this.getPublicStatus();
   }
 
+  private stopRetryTimer(): void {
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+      this.retryTimer = null;
+    }
+  }
+
   close(): void {
-    if (!this.retryTimer) return;
-    clearInterval(this.retryTimer);
-    this.retryTimer = null;
+    this.stopRetryTimer();
+    if (activeMESStatusProvider === this.statusProvider) activeMESStatusProvider = null;
+    if (activeMESConnectivityProvider === this.connectivityProvider) activeMESConnectivityProvider = null;
+  }
+
+  async checkConnectivity(force = false): Promise<MESConnectivityStatus> {
+    const now = Date.now();
+    if (!force && this.connectivity.checkedAt !== null && now - this.connectivity.checkedAt < MES_CONNECTIVITY_CACHE_MS) {
+      return { ...this.connectivity };
+    }
+    if (this.connectivityPromise) return this.connectivityPromise;
+
+    const endpoint = this.config.baseUrl.trim();
+    const generation = this.connectivityGeneration;
+    if (!endpoint) {
+      this.connectivity = {
+        state: 'UNREACHABLE',
+        checkedAt: now,
+        httpStatus: null,
+        error: 'MES_BASE_URL_MISSING',
+      };
+      return { ...this.connectivity };
+    }
+
+    const timeoutMs = Math.min(this.config.requestTimeoutMs, MES_CONNECTIVITY_TIMEOUT_MS);
+    const promise = (async (): Promise<MESConnectivityStatus> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        // HEAD is deliberately used against the configured base URL: any HTTP
+        // response proves the MES address is reachable without writing data.
+        const response = await this.fetchImpl(endpoint, {
+          method: 'HEAD',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const next: MESConnectivityStatus = {
+          state: 'REACHABLE',
+          checkedAt: Date.now(),
+          httpStatus: response.status,
+        };
+        if (generation === this.connectivityGeneration && endpoint === this.config.baseUrl) this.connectivity = next;
+      } catch (error) {
+        const next: MESConnectivityStatus = {
+          state: 'UNREACHABLE',
+          checkedAt: Date.now(),
+          httpStatus: null,
+          error: error instanceof Error && error.name === 'AbortError'
+            ? 'MES_CONNECTIVITY_TIMEOUT'
+            : `MES_CONNECTIVITY_FAILED:${errorText(error)}`,
+        };
+        if (generation === this.connectivityGeneration && endpoint === this.config.baseUrl) this.connectivity = next;
+      } finally {
+        clearTimeout(timer);
+      }
+      return { ...this.connectivity };
+    })();
+    this.connectivityPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this.connectivityPromise === promise) this.connectivityPromise = null;
+    }
   }
 
   async publishArchive(archive: ProductionRunArchive, recordStore: ProductionInspectionRecordStore): Promise<boolean> {
@@ -247,7 +344,7 @@ export class MESPublisher {
 
   private updateRetryTimer(): void {
     if (!this.config.enabled) {
-      this.close();
+      this.stopRetryTimer();
       return;
     }
     if (this.retryTimer) return;
