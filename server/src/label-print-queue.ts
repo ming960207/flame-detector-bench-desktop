@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict.js';
-import type { ProductionInspectionRecord } from './production-inspection-record.js';
+import type { ProductionInspectionRecord, ProductionInspectionProductResult } from './production-inspection-record.js';
 
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
 export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格';
@@ -22,6 +22,10 @@ export interface ProductLabelPrintJob {
   qrContent: string | null;
   verdict: LabelVerdict;
   isolation: boolean;
+  /** NG 时由最终检测记录归一化出的简短原因；旧队列任务可为空。 */
+  ngReasons?: string[];
+  /** 适合直接打印到 30x20 标签上的 1~2 项简短异常摘要。 */
+  labelReason?: string | null;
   productionDate: number;
   /** Legacy numeric array retained for persisted queue/API compatibility. */
   noiseValues: number[];
@@ -88,6 +92,46 @@ function labelVerdict(record: ProductionInspectionRecord, slot: number, detector
   if (detector?.grade === 'A_PASS') return 'A类合格';
   if (detector?.grade === 'B_PASS') return 'B类合格';
   return '不合格';
+}
+
+function detectorReasonLabel(reason: string | undefined): string | null {
+  const normalized = String(reason || '').toUpperCase();
+  if (!normalized) return null;
+  if (normalized.includes('SOFTWARE_VERSION')) return '软件版本异常';
+  if (normalized.includes('PROBE_COUNT') || normalized.includes('PRODUCT_INFO')) return '产品信息异常';
+  if (normalized.includes('NOISE') || normalized.includes('AMPLITUDE') || normalized.includes('SIGNAL_NO_DATA')) return '噪声/信号异常';
+  if (normalized.includes('HEAT') || normalized.includes('FLASH') || normalized.includes('EMC') || normalized.includes('INTERFERENCE')) return '抗干扰异常';
+  if (normalized.includes('DETECTOR_FAULT')) return '探测器故障';
+  if (normalized.includes('STARTUP') || normalized.includes('TEST_INVALID') || normalized.includes('MISSING')) return '检测数据异常';
+  return null;
+}
+
+function productNgReasons(
+  product: ProductionInspectionProductResult | undefined,
+  detectorVerdict: FieldDetectorBatchVerdict,
+  slot: number,
+): string[] {
+  if (!product) return ['检测结果异常'];
+  const reasons: string[] = [];
+  const push = (value: string) => { if (!reasons.includes(value)) reasons.push(value); };
+
+  // LED 正式检验仅包含运行绿灯和火警红灯。故障黄灯即使 FAIL 也不得进入 NG 原因。
+  if (product.indicatorVision?.runningGreen.status === '不合格') push('运行绿灯异常');
+  if (product.indicatorVision?.fireRed.status === '不合格') push('火警红灯异常');
+  if (product.fireAction.status === '不合格') push('火警动作异常');
+  if (product.faultAction.status === '不合格') push('故障动作异常');
+  if (product.amplitude.status === '不合格') push('噪声/幅值异常');
+  if (product.softwareVersion.status === '不合格') push('软件版本异常');
+  if (product.productInfo.status === '不合格') push('产品信息异常');
+  if (product.interferenceResistance.status === '不合格') push('抗干扰异常');
+
+  const detector = detectorVerdict.units.find((item) => item.index === slot);
+  if (detector?.verdict === 'FAIL') {
+    const mapped = detectorReasonLabel(detector.reason);
+    if (mapped) push(mapped);
+  }
+  if (product.verdict === '不合格' && reasons.length === 0) push('检测异常');
+  return reasons.slice(0, 2);
 }
 
 function summary(jobs: ProductLabelPrintJob[]): LabelPrintQueueSummary {
@@ -181,6 +225,11 @@ export class LabelPrintQueueStore {
         const verdict = labelVerdict(record, product.slot, detectorVerdict);
         const hasCode = Boolean(product.productCode);
         const noiseValues = [...product.amplitude.values];
+        const ngReasons = verdict === '不合格' ? productNgReasons(product, detectorVerdict, product.slot) : [];
+        const labelReason = ngReasons.length > 0 ? ngReasons.join(' / ') : null;
+        const printText = verdict === '不合格'
+          ? `NG${labelReason ? ` ${labelReason}` : ''}`
+          : verdict;
         const job: ProductLabelPrintJob = {
           id,
           batchId: record.batchId,
@@ -191,6 +240,8 @@ export class LabelPrintQueueStore {
           qrContent: product.productCode,
           verdict,
           isolation: verdict === '不合格',
+          ngReasons,
+          labelReason,
           productionDate: record.productionDate,
           noiseValues,
           noiseMetrics: labelNoiseMetricsFromValues(noiseValues),
@@ -204,6 +255,15 @@ export class LabelPrintQueueStore {
           updatedAt: now,
           printedAt: null,
         };
+        console.info('[标签打印/快照]', JSON.stringify({
+          slot: product.slot,
+          deviceId: product.productCode ?? `D${product.slot}`,
+          finalGrade: verdict,
+          finalPassed: verdict !== '不合格',
+          ngReasons,
+          labelReason,
+          printText,
+        }));
         this.state.jobs.push(job);
         created.push(safeClone(job));
       }
