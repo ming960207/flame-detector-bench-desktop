@@ -30,6 +30,7 @@ interface UnitWorkState {
 const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
 const RELAY_SIMULATION_BURST_COUNT = 3;
+export const RELAY_SIMULATION_BURST_INTERVAL_MS = 100;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
 
@@ -83,8 +84,9 @@ function sleep(ms: number): Promise<void> {
  * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
  *
  * 2026-09-09 同批重复实测发现模拟/复位命令存在偶发单次传输失败。模拟和复位命令
- * 均为幂等操作，因此模拟动作采用 3 次短时重复发送，复位保留有限重试；只有模拟
- * 发送全部失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位恢复判据保持原样。
+ * 均为幂等操作，因此模拟动作采用带 RTU 帧间隔的 3 次短时重复发送，复位保留有限
+ * 重试；只有模拟发送全部失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位
+ * 恢复判据保持原样。
  *
  * 2026-09-10 现场新版实测发现继电器基线状态读取也存在偶发单次传输失败。内部锁存读取
  * 和 DIO 反馈读取均为只读操作，因此增加同样的有限重试；只有连续 3 次读取失败才保留
@@ -123,10 +125,17 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async detectorSimulationBurst(operation: () => Promise<void>): Promise<boolean> {
-    const results = await Promise.allSettled(
-      Array.from({ length: RELAY_SIMULATION_BURST_COUNT }, () => Promise.resolve().then(operation)),
-    );
-    return results.some((result) => result.status === 'fulfilled');
+    let accepted = false;
+    for (let attempt = 1; attempt <= RELAY_SIMULATION_BURST_COUNT; attempt += 1) {
+      try {
+        await operation();
+        accepted = true;
+      } catch {
+        // Keep sending the remaining idempotent simulation frames.
+      }
+      if (attempt < RELAY_SIMULATION_BURST_COUNT) await sleep(RELAY_SIMULATION_BURST_INTERVAL_MS);
+    }
+    return accepted;
   }
 
   private async detectorReadWithRetry<T>(operation: () => Promise<T>): Promise<T> {

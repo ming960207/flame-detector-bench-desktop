@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  RELAY_SIMULATION_BURST_INTERVAL_MS,
   RelayFunctionalTestCoordinator,
   type RelayDetectorPort,
 } from '../src/relay-functional-test-coordinator.js';
@@ -11,6 +12,7 @@ test('alarm and fault simulation sends a short command burst without visual wait
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   const phaseAt = new Map<RelayFunctionalTestPhase, number>();
   const simulationCount = { alarm: 0, fault: 0 };
+  const simulationAt = { alarm: [] as number[], fault: [] as number[] };
   let alarmCommandAt = 0;
   let faultCommandAt = 0;
 
@@ -20,10 +22,12 @@ test('alarm and fault simulation sends a short command burst without visual wait
       const at = Date.now();
       if (state.fire && !state.fault) {
         simulationCount.alarm += 1;
+        simulationAt.alarm.push(at);
         alarmCommandAt ||= at;
       }
       if (state.fault && !state.fire) {
         simulationCount.fault += 1;
+        simulationAt.fault.push(at);
         faultCommandAt ||= at;
       }
       internal = { ...state };
@@ -73,6 +77,10 @@ test('alarm and fault simulation sends a short command burst without visual wait
   assert.ok(alarmVerify && alarmReset && faultVerify && faultReset);
   assert.equal(simulationCount.alarm, 3);
   assert.equal(simulationCount.fault, 3);
+  assert.ok(simulationAt.alarm[1]! - simulationAt.alarm[0]! >= RELAY_SIMULATION_BURST_INTERVAL_MS - 20);
+  assert.ok(simulationAt.alarm[2]! - simulationAt.alarm[1]! >= RELAY_SIMULATION_BURST_INTERVAL_MS - 20);
+  assert.ok(simulationAt.fault[1]! - simulationAt.fault[0]! >= RELAY_SIMULATION_BURST_INTERVAL_MS - 20);
+  assert.ok(simulationAt.fault[2]! - simulationAt.fault[1]! >= RELAY_SIMULATION_BURST_INTERVAL_MS - 20);
   assert.ok(alarmVerify - alarmCommandAt < 500, 'alarm simulation should enter verification promptly');
   assert.ok(faultVerify - faultCommandAt < 500, 'fault simulation should enter verification promptly');
   assert.ok(alarmReset - alarmVerify < 1000, 'alarm verification should not add a visual hold');
