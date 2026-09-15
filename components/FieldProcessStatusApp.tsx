@@ -48,6 +48,14 @@ interface FieldSummaryPayload {
   relayTest?: RelayFunctionalTestProgress;
 }
 
+interface ClearWaveformPayload {
+  success?: boolean;
+  state?: FlameDetectorState;
+  summary?: FieldSummaryPayload;
+  error?: string;
+  code?: string;
+}
+
 function processDisplayLabel(status: PLCProcessStatus | null | undefined) {
   const label = status?.processLabel ?? status?.label;
   if (!label) return '工序待同步';
@@ -90,6 +98,7 @@ export function FieldProcessStatusApp() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('device');
   const [softwareReleaseOpen, setSoftwareReleaseOpen] = useState(false);
+  const [waveformClearing, setWaveformClearing] = useState(false);
   const detectorStateRef = useRef<FlameDetectorState | null>(null);
   const detectorRenderSchedulerRef = useRef<LatestValueScheduler<FlameDetectorState> | null>(null);
 
@@ -191,6 +200,29 @@ export function FieldProcessStatusApp() {
   const handleRefresh = useCallback(() => {
     void refresh().catch(() => setNotice('PLC 未接入：工序监测处于待同步状态。'));
   }, [refresh]);
+
+  const clearWaveform = useCallback(async () => {
+    const response = await fetch(`${HTTP}/api/flame/waveform/clear`, { method: 'POST' });
+    const payload = await response.json() as ClearWaveformPayload;
+    if (!response.ok || !payload.success || !payload.state) {
+      throw new Error(payload.error || payload.code || '实时波形缓存清除失败');
+    }
+    publishDetectorState(payload.state);
+    if (payload.summary) applySummary(payload.summary);
+    setNotice('已清除所有探测器实时波形缓存，等待新数据重新计算探头数值和比值。');
+  }, [applySummary, publishDetectorState]);
+
+  const handleClearWaveform = useCallback(async () => {
+    if (waveformClearing) return;
+    setWaveformClearing(true);
+    try {
+      await clearWaveform();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWaveformClearing(false);
+    }
+  }, [clearWaveform, waveformClearing]);
 
   const openDetails = useCallback((tab: DetailTab = 'device') => {
     setDetailTab(tab);
@@ -299,7 +331,8 @@ export function FieldProcessStatusApp() {
       onSubmitIndicatorVision={submitIndicatorVision}
       onSendSimulationCommand={sendSimulationCommand}
       resultTitleMeta={<ProductModelSelector config={productConfig} locked={productLocked} busy={productPrecheckBusy} onUpdate={updateProductConfig} />}
-      onRefresh={handleRefresh}
+      onClearWaveform={handleClearWaveform}
+      waveformClearing={waveformClearing}
       onOpenDetails={() => openDetails('device')}
     />
 

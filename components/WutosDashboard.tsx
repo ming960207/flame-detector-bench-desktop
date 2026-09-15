@@ -810,7 +810,8 @@ export interface WutosDashboardProps {
   channelOnline: boolean;
   notice: string;
   resultTitleMeta?: ReactNode;
-  onRefresh: () => void;
+  onClearWaveform: () => void | Promise<void>;
+  waveformClearing?: boolean;
   onOpenDetails?: () => void;
   waveformDisplayMode?: WaveformDisplayMode;
   waveformMaxSamples?: number;
@@ -830,7 +831,8 @@ export function WutosDashboard({
   channelOnline,
   notice,
   resultTitleMeta,
-  onRefresh,
+  onClearWaveform,
+  waveformClearing = false,
   onOpenDetails,
   waveformDisplayMode = 'normalized',
   waveformMaxSamples = DEFAULT_WAVEFORM_MAX_SAMPLES,
@@ -896,7 +898,7 @@ export function WutosDashboard({
             </span>
             <span><CalendarDays />{formatDate(clock)}</span>
             <span><Clock3 />{formatTime(clock)}</span>
-            <button type="button" className="wutos-icon-button" onClick={onRefresh} title="刷新状态" aria-label="刷新状态"><RefreshCw /></button>
+            <button type="button" className={`wutos-icon-button ${waveformClearing ? 'is-clearing' : ''}`} onClick={() => void onClearWaveform()} disabled={waveformClearing} title="清除实时波形缓存" aria-label="清除实时波形缓存" aria-busy={waveformClearing}><RefreshCw /></button>
             <button type="button" className="wutos-command-button" onClick={() => setSimulationOpen(true)}><Send />模拟指令</button>
             {onOpenDetails && <button type="button" className="wutos-detail-button" onClick={onOpenDetails}><Settings2 />详情</button>}
           </div>

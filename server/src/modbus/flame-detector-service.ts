@@ -321,6 +321,10 @@ export class FlameDetectorService extends EventEmitter {
       state.historySamples = [];
       state.rawHistorySamples = [];
       state.historySampleTotal = 0;
+      state.probe1 = 0;
+      state.probe2 = 0;
+      state.probe3 = 0;
+      state.probe4 = state.probeCount === 4 ? 0 : undefined;
       state.probe1Fluctuation = 0;
       state.probe2Fluctuation = 0;
       state.probe3Fluctuation = 0;
@@ -329,6 +333,10 @@ export class FlameDetectorService extends EventEmitter {
       state.probe2Absolute = 0;
       state.probe3Absolute = 0;
       state.probe4Absolute = state.probeCount === 4 ? 0 : undefined;
+      state.snr21 = 0;
+      state.snr23 = 0;
+      state.snr31 = 0;
+      state.features = [];
       this.baselines.delete(state.index);
     }
     this.emit('flame_state', this.getCurrentState());

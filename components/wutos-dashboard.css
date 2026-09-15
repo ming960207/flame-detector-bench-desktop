@@ -197,6 +197,15 @@
   box-shadow: 0 0 8px rgba(0, 227, 255, .42);
 }
 
+.wutos-icon-button:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+.wutos-icon-button.is-clearing svg {
+  animation: wutos-refresh-spin .8s linear infinite;
+}
+
 .wutos-icon-button svg,
 .wutos-detail-button svg {
   width: 1.15em;
@@ -1178,6 +1187,10 @@
 @keyframes wutos-live-pulse {
   0%, 100% { opacity: .52; transform: scale(.82); }
   50% { opacity: 1; transform: scale(1.16); }
+}
+
+@keyframes wutos-refresh-spin {
+  to { transform: rotate(360deg); }
 }
 
 .wutos-detail-overlay {

@@ -573,6 +573,16 @@ export function createFieldStatusRuntime(
     }
   });
   app.get('/api/flame/devices', (_req, res) => res.json(detectors.getCurrentState()));
+  app.post('/api/flame/waveform/clear', requireDesktopMutation, (_req, res) => {
+    if (!detectors.clearWaveformHistory) return res.status(501).json({ code: 'FLAME_WAVEFORM_CLEAR_UNSUPPORTED' });
+    detectors.clearWaveformHistory();
+    return res.json({
+      success: true,
+      state: detectors.getCurrentState(),
+      summary: summary(),
+      timestamp: Date.now(),
+    });
+  });
   app.get('/api/flame/startup', (_req, res) => res.json(detectors.getReadyReport?.() ?? {
     ready: false,
     timeoutMs: 15_000,
