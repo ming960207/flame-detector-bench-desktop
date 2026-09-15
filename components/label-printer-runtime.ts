@@ -102,6 +102,20 @@ export const LABEL_TEMPLATE = {
   canvasHeight: 20,
 } as const;
 
+const LABEL_QR_LAYOUT = {
+  x: 2.4,
+  y: 5.4,
+  width: 10.4,
+  height: 10.4,
+} as const;
+
+export function labelQrBox(column: number): { x: number; y: number; width: number; height: number } {
+  return {
+    ...LABEL_QR_LAYOUT,
+    x: column * LABEL_TEMPLATE.labelWidth + LABEL_QR_LAYOUT.x,
+  };
+}
+
 const STORAGE_KEY = 'flame-detector-label-printer-config-v1';
 const DEFAULT_CONFIG: LocalLabelPrinterConfig = {
   autoPrint: false,
@@ -769,7 +783,7 @@ class LabelPrinterRuntime {
                   { x: offset + 24, y: 0.9, width: 4.5, height: 3.3, fontSize: 2.1 }, { bold: true, align: 1 });
                 await this.transport.text(`型号 ${job.productModel}`,
                   { x: margin, y: 3.8, width: 27.4, height: 1.6, fontSize: 1.1 }, { bold: true });
-                await this.transport.qr(job.qrContent!, { x: margin, y: 5.4, width: 10.4, height: 10.4 });
+                await this.transport.qr(job.qrContent!, labelQrBox(index));
                 await this.transport.text('检测结果',
                   { x: detailX, y: 5.4, width: 13.8, height: 1.5, fontSize: 1.0 }, { bold: true });
                 await this.transport.text(job.isolation ? 'NG' : job.verdict,

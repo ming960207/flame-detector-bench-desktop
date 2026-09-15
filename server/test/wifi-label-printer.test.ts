@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LABEL_TEMPLATE, normalizeWifiPrinterDevices } from '../../components/label-printer-runtime.ts';
+import { LABEL_TEMPLATE, labelQrBox, normalizeWifiPrinterDevices } from '../../components/label-printer-runtime.ts';
 
 test('default label template matches the 30x20mm two-up media', () => {
   assert.deepEqual(LABEL_TEMPLATE, {
@@ -11,6 +11,12 @@ test('default label template matches the 30x20mm two-up media', () => {
     canvasWidth: 60,
     canvasHeight: 20,
   });
+});
+
+test('二维码在每张标签内使用右移后的安全横坐标', () => {
+  assert.deepEqual(labelQrBox(0), { x: 2.4, y: 5.4, width: 10.4, height: 10.4 });
+  assert.deepEqual(labelQrBox(1), { x: 32.4, y: 5.4, width: 10.4, height: 10.4 });
+  assert.ok(labelQrBox(1).x + labelQrBox(1).width < LABEL_TEMPLATE.canvasWidth);
 });
 
 test('WiFi 扫描响应按 SDK 契约解析 deviceName、IP 和 tcpPort', () => {
