@@ -85,11 +85,17 @@ test('FAST_BATCH runs alarm/reset/fault/reset while keeping each stage parallel'
   assert.equal(report.units.length, 2);
   assert.ok(report.units.every((unit) => unit.alarm.verdict === 'PASS' && unit.fault.verdict === 'PASS'));
 
-  assert.deepEqual(events.slice(0, 2).sort(), ['simulate:1:alarm', 'simulate:2:alarm']);
-  assert.deepEqual(events.slice(2, 4).sort(), ['reset:1', 'reset:2']);
-  assert.deepEqual(events.slice(4, 6).sort(), ['simulate:1:fault', 'simulate:2:fault']);
+  assert.deepEqual(events.slice(0, 6).sort(), [
+    'simulate:1:alarm', 'simulate:1:alarm', 'simulate:1:alarm',
+    'simulate:2:alarm', 'simulate:2:alarm', 'simulate:2:alarm',
+  ]);
   assert.deepEqual(events.slice(6, 8).sort(), ['reset:1', 'reset:2']);
-  assert.deepEqual(events.slice(8).sort(), ['reset:1', 'reset:2']);
+  assert.deepEqual(events.slice(8, 14).sort(), [
+    'simulate:1:fault', 'simulate:1:fault', 'simulate:1:fault',
+    'simulate:2:fault', 'simulate:2:fault', 'simulate:2:fault',
+  ]);
+  assert.deepEqual(events.slice(14, 16).sort(), ['reset:1', 'reset:2']);
+  assert.deepEqual(events.slice(16).sort(), ['reset:1', 'reset:2']);
   assert.equal(events.some((event) => event.includes('alarm+fault')), false);
   assert.deepEqual(phases, [
     'BASELINE',
@@ -135,11 +141,15 @@ test('DIAGNOSTIC completes one detector before activating the next detector', as
   const report = await coordinator.run('diagnostic-1');
 
   assert.equal(report.verdict, 'PASS');
-  assert.deepEqual(events.slice(0, 8), [
-    'D1:alarm', 'D1:reset', 'D1:fault', 'D1:reset',
-    'D2:alarm', 'D2:reset', 'D2:fault', 'D2:reset',
+  assert.deepEqual(events.slice(0, 10), [
+    'D1:alarm', 'D1:alarm', 'D1:alarm', 'D1:reset',
+    'D1:fault', 'D1:fault', 'D1:fault', 'D1:reset',
+    'D2:alarm', 'D2:alarm',
   ]);
-  assert.deepEqual(events.slice(8).sort(), ['D1:reset', 'D2:reset']);
+  assert.deepEqual(events.slice(10, 16), [
+    'D2:alarm', 'D2:reset', 'D2:fault', 'D2:fault', 'D2:fault', 'D2:reset',
+  ]);
+  assert.deepEqual(events.slice(16).sort(), ['D1:reset', 'D2:reset']);
 });
 
 test('FAST_BATCH reports alarm contact failure without invalidating a passing fault phase', async () => {

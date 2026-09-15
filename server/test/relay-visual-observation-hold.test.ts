@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS,
-  RELAY_VISUAL_OBSERVATION_HOLD_MS,
   RelayFunctionalTestCoordinator,
   type RelayDetectorPort,
 } from '../src/relay-functional-test-coordinator.js';
 import { normalizeRelayFunctionalTestConfig, type RelayFunctionalTestPhase } from '../src/relay-functional-test.js';
 
-test('alarm and fault verify phases remain observable before reset', async () => {
+test('alarm and fault simulation sends a short command burst without visual wait', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   const phaseAt = new Map<RelayFunctionalTestPhase, number>();
-  const stateSwitches: Array<{ kind: 'simulate' | 'reset'; at: number }> = [];
+  const simulationCount = { alarm: 0, fault: 0 };
   let alarmCommandAt = 0;
   let faultCommandAt = 0;
 
@@ -20,15 +18,19 @@ test('alarm and fault verify phases remain observable before reset', async () =>
     enabledDetectorIndexes: () => [1],
     async simulate(_index, state) {
       const at = Date.now();
-      stateSwitches.push({ kind: 'simulate', at });
-      if (state.fire && !state.fault) alarmCommandAt = at;
-      if (state.fault && !state.fire) faultCommandAt = at;
+      if (state.fire && !state.fault) {
+        simulationCount.alarm += 1;
+        alarmCommandAt ||= at;
+      }
+      if (state.fault && !state.fire) {
+        simulationCount.fault += 1;
+        faultCommandAt ||= at;
+      }
       internal = { ...state };
       inputs.X1 = state.fire;
       inputs.X2 = state.fault;
     },
     async reset() {
-      stateSwitches.push({ kind: 'reset', at: Date.now() });
       internal = { fire: false, fault: false };
       inputs.X1 = false;
       inputs.X2 = false;
@@ -69,20 +71,10 @@ test('alarm and fault verify phases remain observable before reset', async () =>
   const faultVerify = phaseAt.get('FAULT_VERIFY');
   const faultReset = phaseAt.get('FAULT_RESET');
   assert.ok(alarmVerify && alarmReset && faultVerify && faultReset);
-  assert.ok(alarmVerify - alarmCommandAt >= RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS - 100);
-  assert.equal(
-    stateSwitches.some(({ at }) => at > alarmCommandAt && at < alarmVerify),
-    false,
-    'alarm settle window must not send another state-switch command',
-  );
-  assert.ok(faultVerify - faultCommandAt >= RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS - 100);
-  assert.equal(
-    stateSwitches.some(({ at }) => at > faultCommandAt && at < faultVerify),
-    false,
-    'fault settle window must not send another state-switch command',
-  );
-
-  // Allow a small scheduler tolerance while still proving a real observation window exists.
-  assert.ok(alarmReset - alarmVerify >= RELAY_VISUAL_OBSERVATION_HOLD_MS - 100);
-  assert.ok(faultReset - faultVerify >= RELAY_VISUAL_OBSERVATION_HOLD_MS - 100);
+  assert.equal(simulationCount.alarm, 3);
+  assert.equal(simulationCount.fault, 3);
+  assert.ok(alarmVerify - alarmCommandAt < 500, 'alarm simulation should enter verification promptly');
+  assert.ok(faultVerify - faultCommandAt < 500, 'fault simulation should enter verification promptly');
+  assert.ok(alarmReset - alarmVerify < 1000, 'alarm verification should not add a visual hold');
+  assert.ok(faultReset - faultVerify < 1000, 'fault verification should not add a visual hold');
 });

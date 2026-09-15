@@ -29,10 +29,9 @@ interface UnitWorkState {
 
 const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
+const RELAY_SIMULATION_BURST_COUNT = 3;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
-export const RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS = 1200;
-export const RELAY_VISUAL_OBSERVATION_HOLD_MS = 1600;
 
 function emptyAction(): RelayActionResult {
   return {
@@ -84,18 +83,12 @@ function sleep(ms: number): Promise<void> {
  * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
  *
  * 2026-09-09 同批重复实测发现模拟/复位命令存在偶发单次传输失败。模拟和复位命令
- * 均为幂等操作，因此在不改变实体继电器判据的前提下，发送层允许有限重试；只有连续
- * 3 次均失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位恢复判据保持原样。
+ * 均为幂等操作，因此模拟动作采用 3 次短时重复发送，复位保留有限重试；只有模拟
+ * 发送全部失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位恢复判据保持原样。
  *
  * 2026-09-10 现场新版实测发现继电器基线状态读取也存在偶发单次传输失败。内部锁存读取
  * 和 DIO 反馈读取均为只读操作，因此增加同样的有限重试；只有连续 3 次读取失败才保留
  * 链路异常原因并进入“需复测”，不改变任何实体继电器功能判据。
- *
- * 2026-09-14 指示灯视觉取证实机反馈表明：模拟动作后物理红/黄灯需要时间点亮，且
- * 实时相机可能在动作验证阶段刚开始时先抓到未点亮画面。只要存在阶段监听器（正式
- * FieldRuntime 会提供），模拟动作成功后先稳定等待 1.2 s，动作验证结束后再保持 1.6 s
- * 才进入复位。该等待不改变继电器 PASS/FAIL 判据，只为物理红/黄指示灯提供确定的
- * 可观测窗口。
  *
  * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
  * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
@@ -127,6 +120,13 @@ export class RelayFunctionalTestCoordinator {
       }
     }
     return false;
+  }
+
+  private async detectorSimulationBurst(operation: () => Promise<void>): Promise<boolean> {
+    const results = await Promise.allSettled(
+      Array.from({ length: RELAY_SIMULATION_BURST_COUNT }, () => Promise.resolve().then(operation)),
+    );
+    return results.some((result) => result.status === 'fulfilled');
   }
 
   private async detectorReadWithRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -194,7 +194,7 @@ export class RelayFunctionalTestCoordinator {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
       state.commandStartedAt = Date.now();
-      const accepted = await this.detectorCommandWithRetry(() => this.detectors.simulate(index, kind === 'alarm'
+      const accepted = await this.detectorSimulationBurst(() => this.detectors.simulate(index, kind === 'alarm'
         ? { fire: true, fault: false }
         : { fire: false, fault: true }));
       if (accepted) action.commandAccepted = true;
@@ -285,20 +285,6 @@ export class RelayFunctionalTestCoordinator {
     }
   }
 
-  private async holdForVisualObservation(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
-    if (!this.onPhase) return;
-    const commandWasAccepted = [...work.values()].some((state) => state.result[kind].commandAccepted);
-    if (!commandWasAccepted) return;
-    await sleep(RELAY_VISUAL_OBSERVATION_HOLD_MS);
-  }
-
-  private async settleBeforeVisualVerification(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
-    if (!this.onPhase) return;
-    const commandWasAccepted = [...work.values()].some((state) => state.result[kind].commandAccepted);
-    if (!commandWasAccepted) return;
-    await sleep(RELAY_VISUAL_SETTLE_BEFORE_VERIFY_MS);
-  }
-
   private async resetBatch(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
@@ -366,10 +352,8 @@ export class RelayFunctionalTestCoordinator {
   private async runActionCycle(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     this.emitPhase(kind === 'alarm' ? 'ALARM_COMMAND' : 'FAULT_COMMAND', work);
     await this.sendCommand(work, kind);
-    await this.settleBeforeVisualVerification(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_VERIFY' : 'FAULT_VERIFY', work);
     await this.waitForAction(work, kind);
-    await this.holdForVisualObservation(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET' : 'FAULT_RESET', work);
     await this.resetBatch(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET_VERIFY' : 'FAULT_RESET_VERIFY', work);
