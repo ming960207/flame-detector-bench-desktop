@@ -17,6 +17,8 @@ export interface ProductLabelPrintJob {
   qrContent: string | null;
   verdict: 'A类合格' | 'B类合格' | '不合格';
   isolation: boolean;
+  ngReasons?: string[];
+  labelReason?: string | null;
   productionDate: number;
   noiseValues: number[];
   noiseMetrics?: LabelNoiseMetric[];
@@ -172,6 +174,14 @@ export function labelNoiseText(job: Pick<ProductLabelPrintJob, 'noiseMetrics' | 
     : [];
   const metrics = explicit.length > 0 ? explicit : legacyNoiseMetrics(job.noiseValues);
   return metrics.map((metric) => `${metric.channel} ${Number(metric.fluctuation)}`).join('  ');
+}
+
+function primaryNgReason(job: Pick<ProductLabelPrintJob, 'ngReasons' | 'labelReason'>): string {
+  const explicit = Array.isArray(job.ngReasons)
+    ? job.ngReasons.find((reason) => typeof reason === 'string' && reason.trim())
+    : undefined;
+  const fallback = typeof job.labelReason === 'string' ? job.labelReason.trim().split(/\s*[/、]\s*/)[0] : '';
+  return String(explicit || fallback || '检测异常').trim().slice(0, 16);
 }
 
 function unpackAckPayload(response: JcAck): unknown {
@@ -721,6 +731,15 @@ class LabelPrinterRuntime {
   private async drawAndPrint(jobs: ProductLabelPrintJob[]): Promise<void> {
     if (jobs.length === 0 || jobs.length > LABEL_TEMPLATE.columns) throw new Error('双列标签打印行没有有效任务');
     if (jobs.some((job) => !job.productCode || !job.qrContent)) throw new Error('产品编号未生成，无法打印二维码标签');
+    console.info('[标签打印/送打]', JSON.stringify(jobs.map((job) => ({
+      slot: job.slot,
+      productCode: job.productCode,
+      verdict: job.verdict,
+      isolation: job.isolation,
+      ngReasons: job.ngReasons ?? [],
+      labelReason: job.labelReason ?? null,
+      printResult: job.isolation ? `NG ${primaryNgReason(job)}` : job.verdict,
+    }))));
     let submitted = false;
     return new Promise<void>((resolve, reject) => {
       let finished = false;
@@ -743,6 +762,7 @@ class LabelPrinterRuntime {
                 const offset = index * LABEL_TEMPLATE.labelWidth;
                 const margin = offset + 1.2;
                 const detailX = offset + 14.2;
+                const ngReason = primaryNgReason(job);
                 await this.transport.text('火焰探测器',
                   { x: margin, y: 1.1, width: 20, height: 2.7, fontSize: 1.9 }, { bold: true });
                 await this.transport.text(`D${job.slot}`,
@@ -752,12 +772,12 @@ class LabelPrinterRuntime {
                 await this.transport.qr(job.qrContent!, { x: margin, y: 5.4, width: 10.4, height: 10.4 });
                 await this.transport.text('检测结果',
                   { x: detailX, y: 5.4, width: 13.8, height: 1.5, fontSize: 1.0 }, { bold: true });
-                await this.transport.text(job.isolation ? 'NG 隔离' : job.verdict,
-                  { x: detailX, y: 7.0, width: 13.8, height: 3.0, fontSize: 1.8 }, { bold: true });
+                await this.transport.text(job.isolation ? 'NG' : job.verdict,
+                  { x: detailX, y: 7.0, width: 13.8, height: 3.0, fontSize: job.isolation ? 2.2 : 1.8 }, { bold: true });
                 await this.transport.text(`日期 ${localDate(job.productionDate)}`,
-                  { x: detailX, y: 10.6, width: 13.8, height: 1.6, fontSize: 1.0 });
-                await this.transport.text(job.isolation ? '请隔离处理' : '扫码追溯',
-                  { x: detailX, y: 12.6, width: 13.8, height: 1.6, fontSize: 1.05 }, { bold: true });
+                  { x: detailX, y: 10.3, width: 13.8, height: 1.5, fontSize: 0.95 });
+                await this.transport.text(job.isolation ? ngReason : '扫码追溯',
+                  { x: detailX, y: 12.0, width: 13.8, height: 2.7, fontSize: job.isolation ? 1.15 : 1.05 }, { bold: true });
                 await this.transport.line(offset + 1.2, 16.0, 27.6);
                 await this.transport.text(`编号 ${job.productCode!}`,
                   { x: margin, y: 16.25, width: 27.4, height: 1.45, fontSize: 0.95 }, { bold: true });
