@@ -13,10 +13,10 @@ test('default label template matches the 30x20mm two-up media', () => {
   });
 });
 
-test('二维码在每张标签内使用右移后的安全横坐标', () => {
-  assert.deepEqual(labelQrBox(0), { x: 2.4, y: 5.4, width: 10.4, height: 10.4 });
-  assert.deepEqual(labelQrBox(1), { x: 32.4, y: 5.4, width: 10.4, height: 10.4 });
-  assert.ok(labelQrBox(1).x + labelQrBox(1).width < LABEL_TEMPLATE.canvasWidth);
+test('二维码在每张标签内进一步避开分界和边缘', () => {
+  assert.deepEqual(labelQrBox(0), { x: 4, y: 5.2, width: 10.4, height: 10.4 });
+  assert.deepEqual(labelQrBox(1), { x: 34, y: 5.2, width: 10.4, height: 10.4 });
+  assert.ok(labelQrBox(1).x + labelQrBox(1).width <= LABEL_TEMPLATE.canvasWidth - 4);
 });
 
 test('WiFi 扫描响应按 SDK 契约解析 deviceName、IP 和 tcpPort', () => {

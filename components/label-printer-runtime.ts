@@ -103,8 +103,10 @@ export const LABEL_TEMPLATE = {
 } as const;
 
 const LABEL_QR_LAYOUT = {
-  x: 2.4,
-  y: 5.4,
+  // Keep the QR away from the inner edge of both columns. The printer's
+  // printable origin can drift slightly at the column boundary.
+  x: 4,
+  y: 5.2,
   width: 10.4,
   height: 10.4,
 } as const;
@@ -774,29 +776,29 @@ class LabelPrinterRuntime {
               await this.transport.initBoard();
               for (const [index, job] of jobs.entries()) {
                 const offset = index * LABEL_TEMPLATE.labelWidth;
-                const margin = offset + 1.2;
-                const detailX = offset + 14.2;
+                const margin = offset + 2.4;
+                const detailX = offset + 15;
                 const ngReason = primaryNgReason(job);
                 await this.transport.text('火焰探测器',
-                  { x: margin, y: 1.1, width: 20, height: 2.7, fontSize: 1.9 }, { bold: true });
+                  { x: margin, y: 1.4, width: 18.4, height: 2.5, fontSize: 1.9 }, { bold: true });
                 await this.transport.text(`D${job.slot}`,
-                  { x: offset + 24, y: 0.9, width: 4.5, height: 3.3, fontSize: 2.1 }, { bold: true, align: 1 });
+                  { x: offset + 22.4, y: 1.2, width: 4.8, height: 2.9, fontSize: 2.1 }, { bold: true, align: 1 });
                 await this.transport.text(`型号 ${job.productModel}`,
-                  { x: margin, y: 3.8, width: 27.4, height: 1.6, fontSize: 1.1 }, { bold: true });
+                  { x: margin, y: 4.1, width: 25.2, height: 1.5, fontSize: 1.1 }, { bold: true });
                 await this.transport.qr(job.qrContent!, labelQrBox(index));
                 await this.transport.text('检测结果',
-                  { x: detailX, y: 5.4, width: 13.8, height: 1.5, fontSize: 1.0 }, { bold: true });
+                  { x: detailX, y: 5.2, width: 12, height: 1.5, fontSize: 1.0 }, { bold: true });
                 await this.transport.text(job.isolation ? 'NG' : job.verdict,
-                  { x: detailX, y: 7.0, width: 13.8, height: 3.0, fontSize: job.isolation ? 2.2 : 1.8 }, { bold: true });
+                  { x: detailX, y: 6.8, width: 12, height: 2.8, fontSize: job.isolation ? 2.2 : 1.8 }, { bold: true });
                 await this.transport.text(`日期 ${localDate(job.productionDate)}`,
-                  { x: detailX, y: 10.3, width: 13.8, height: 1.5, fontSize: 0.95 });
+                  { x: detailX, y: 10, width: 12, height: 1.4, fontSize: 0.9 });
                 await this.transport.text(job.isolation ? ngReason : '扫码追溯',
-                  { x: detailX, y: 12.0, width: 13.8, height: 2.7, fontSize: job.isolation ? 1.15 : 1.05 }, { bold: true });
-                await this.transport.line(offset + 1.2, 16.0, 27.6);
+                  { x: detailX, y: 11.7, width: 12, height: 2.5, fontSize: job.isolation ? 1.15 : 1.05 }, { bold: true });
+                await this.transport.line(offset + 2.4, 15.8, 25.2);
                 await this.transport.text(`编号 ${job.productCode!}`,
-                  { x: margin, y: 16.25, width: 27.4, height: 1.45, fontSize: 0.95 }, { bold: true });
+                  { x: margin, y: 16.1, width: 25.2, height: 1.35, fontSize: 0.95 }, { bold: true });
                 await this.transport.text(labelNoiseText(job),
-                  { x: margin, y: 18.0, width: 27.4, height: 1.15, fontSize: 0.85 });
+                  { x: margin, y: 17.8, width: 25.2, height: 1, fontSize: 0.85 });
               }
               await this.transport.commit();
             } catch (error) { await fail(error); }
