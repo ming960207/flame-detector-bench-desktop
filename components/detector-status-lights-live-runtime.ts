@@ -41,7 +41,7 @@ if (
   (window as Window & { __wutosStatusLightFetchPatched?: boolean }).__wutosStatusLightFetchPatched = true;
 }
 
-// Load the existing status-light runtime after the compatibility redirect is in
-// place. This keeps all current batch-latch and indicator-vision behaviour while
-// switching only relay state acquisition to the new physical DIO endpoint.
+// Relay lamps use the live physical-DIO endpoint and are not latched. The companion
+// display runtime keeps user-facing failure reasons concise and Chinese-only.
 void import('./detector-status-lights-runtime');
+void import('./detection-reason-cn-runtime');
