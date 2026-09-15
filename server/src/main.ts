@@ -1,5 +1,11 @@
 import { config } from './config.js';
 import { assertSupportedRuntimeMode } from './field-runtime-gate.js';
+import { getActiveMESPublicStatus } from './mes-publisher.js';
+import {
+  DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+  normalizeProductionInspectionRecordConfig,
+} from './production-inspection-record.js';
+import { loadSystemConfig } from './system-config-store.js';
 
 export interface ConfiguredServerRuntime {
   close(): Promise<void>;
@@ -30,6 +36,75 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
     ]);
 
     const fieldRuntime = await startProductAwareFieldStatusServer();
+
+    fieldRuntime.app.get('/api/mes/status', async (_req, res) => {
+      try {
+        const status = getActiveMESPublicStatus();
+        if (!status) {
+          return res.status(503).json({
+            enabled: false,
+            apiKeyConfigured: false,
+            operatorConfigured: false,
+            operatorName: '',
+            pendingJobs: 0,
+            lastSuccessAt: null,
+            lastError: 'MES_PUBLISHER_NOT_READY',
+            connectionState: 'UNAVAILABLE',
+            timestamp: Date.now(),
+          });
+        }
+
+        const store = await loadSystemConfig();
+        const recordConfig = normalizeProductionInspectionRecordConfig(
+          store?.productionInspectionRecordConfig,
+          DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+        );
+        const effectiveOperator = recordConfig.inspector.trim() || status.operatorName.trim();
+        const operatorConfigured = Boolean(effectiveOperator);
+        const lastSuccessAt = status.lastUploadedAt ?? null;
+        const lastError = status.lastError || null;
+        const connectionState = !status.enabled
+          ? 'DISABLED'
+          : !status.apiKeyConfigured || !operatorConfigured
+            ? 'MISCONFIGURED'
+            : lastError
+              ? 'ERROR'
+              : status.pendingJobs > 0
+                ? 'PENDING'
+                : lastSuccessAt
+                  ? 'HEALTHY'
+                  : 'READY';
+
+        return res.json({
+          enabled: status.enabled,
+          apiKeyConfigured: status.apiKeyConfigured,
+          operatorConfigured,
+          operatorName: effectiveOperator,
+          pendingJobs: status.pendingJobs,
+          lastSuccessAt,
+          lastError,
+          connectionState,
+          baseUrl: status.baseUrl,
+          requestTimeoutMs: status.requestTimeoutMs,
+          timestamp: Date.now(),
+          display: {
+            enabled: status.enabled ? '已启用' : '未启用',
+            apiKey: status.apiKeyConfigured ? '已配置' : '未配置',
+            operator: operatorConfigured ? `已配置（${effectiveOperator}）` : '未配置',
+            pendingJobs: String(status.pendingJobs),
+            lastSuccessAt: lastSuccessAt ? new Date(lastSuccessAt).toISOString() : '暂无',
+            lastError: lastError || '无',
+          },
+        });
+      } catch (error) {
+        return res.status(500).json({
+          code: 'MES_STATUS_READ_FAILED',
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: Date.now(),
+        });
+      }
+    });
+
     let auxiliaryRuntime: Awaited<ReturnType<typeof startUnifiedAuxiliaryServices>> | undefined;
     try {
       auxiliaryRuntime = await startUnifiedAuxiliaryServices(fieldRuntime);

@@ -19,17 +19,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function containMediaGeometry(
+function mediaGeometry(
   containerWidth: number,
   containerHeight: number,
   mediaWidth: number,
   mediaHeight: number,
+  fit: 'contain' | 'cover',
 ): ContainMediaGeometry {
   const safeContainerWidth = Math.max(1, containerWidth);
   const safeContainerHeight = Math.max(1, containerHeight);
   const safeMediaWidth = Math.max(1, mediaWidth);
   const safeMediaHeight = Math.max(1, mediaHeight);
-  const scale = Math.min(safeContainerWidth / safeMediaWidth, safeContainerHeight / safeMediaHeight);
+  const widthScale = safeContainerWidth / safeMediaWidth;
+  const heightScale = safeContainerHeight / safeMediaHeight;
+  const scale = fit === 'cover' ? Math.max(widthScale, heightScale) : Math.min(widthScale, heightScale);
   const renderedWidth = safeMediaWidth * scale;
   const renderedHeight = safeMediaHeight * scale;
   return {
@@ -40,6 +43,36 @@ export function containMediaGeometry(
     offsetX: (safeContainerWidth - renderedWidth) / 2,
     offsetY: (safeContainerHeight - renderedHeight) / 2,
   };
+}
+
+export function containMediaGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  mediaWidth: number,
+  mediaHeight: number,
+): ContainMediaGeometry {
+  return mediaGeometry(containerWidth, containerHeight, mediaWidth, mediaHeight, 'contain');
+}
+
+/**
+ * Compatibility entry point used by the indicator-camera workbench.
+ *
+ * The visible live preview and evidence image are rendered with
+ * `object-fit: contain` in expanded mode. The overlay must therefore use
+ * the same geometry as the pixels the operator actually sees; otherwise
+ * a correct source-space ROI is drawn at a different screen position.
+ *
+ * Keep this alias until indicator-camera.tsx is renamed to the neutral
+ * display-geometry helper. Do not switch this back to cover while the
+ * expanded preview/photo CSS remains contain.
+ */
+export function coverMediaGeometry(
+  containerWidth: number,
+  containerHeight: number,
+  mediaWidth: number,
+  mediaHeight: number,
+): ContainMediaGeometry {
+  return mediaGeometry(containerWidth, containerHeight, mediaWidth, mediaHeight, 'contain');
 }
 
 export function viewportRoiToSourceRoi(
