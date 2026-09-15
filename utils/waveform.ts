@@ -12,6 +12,56 @@ export const DEFAULT_WAVEFORM_MAX_SAMPLES = 1000;
 
 const CHANNEL_KEYS: Array<keyof FlameSample> = ['probe1', 'probe2', 'probe3', 'probe4'];
 
+export interface LatestValueScheduler<T> {
+  push(value: T): void;
+  cancel(): void;
+}
+
+/**
+ * Keep a high-frequency producer from queuing one UI update per message.
+ * The scheduled callback always publishes the newest value available when it
+ * runs, so slow rendering cannot retain an unbounded backlog of old payloads.
+ */
+export function createLatestValueScheduler<T>(
+  schedule: (callback: () => void) => number,
+  cancelScheduled: (handle: number) => void,
+  publish: (value: T) => void,
+): LatestValueScheduler<T> {
+  let latest: T | undefined;
+  let hasLatest = false;
+  let scheduledHandle: number | null = null;
+  let disposed = false;
+
+  const scheduleFlush = () => {
+    scheduledHandle = schedule(() => {
+      scheduledHandle = null;
+      if (disposed || !hasLatest) return;
+      const value = latest!;
+      latest = undefined;
+      hasLatest = false;
+      publish(value);
+      if (!disposed && hasLatest && scheduledHandle === null) scheduleFlush();
+    });
+  };
+
+  return {
+    push(value: T) {
+      if (disposed) return;
+      latest = value;
+      hasLatest = true;
+      if (scheduledHandle === null) scheduleFlush();
+    },
+    cancel() {
+      if (disposed) return;
+      disposed = true;
+      if (scheduledHandle !== null) cancelScheduled(scheduledHandle);
+      scheduledHandle = null;
+      latest = undefined;
+      hasLatest = false;
+    },
+  };
+}
+
 function boundedSampleCount(value: number | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 1

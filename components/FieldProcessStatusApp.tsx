@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Info, X } from 'lucide-react';
 import { hasActivePLCProcessAlarm, type PLCProcessStatus } from '../server/src/process-status';
 import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdict';
@@ -11,7 +11,7 @@ import type { RelayFunctionalTestProgress } from '../server/src/product-aware-fl
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
 import type { FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
-import { mergeFlameWaveformDelta } from '../utils/waveform';
+import { createLatestValueScheduler, mergeFlameWaveformDelta, type LatestValueScheduler } from '../utils/waveform';
 import { FlameDetectorWorkbench } from './FlameDetectorWorkbench';
 import { ProductModelSelector, ProductTypeControl } from './ProductTypeControl';
 import { ProductionConfigurationPanel } from './ProductionConfigurationPanel';
@@ -31,6 +31,7 @@ const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP
 const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
 const WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS = 1000;
+const WAVEFORM_UI_DIAGNOSTICS_ENABLED = import.meta.env.VITE_WAVEFORM_UI_DIAGNOSTICS === '1';
 let lastWaveformUiDiagnosticAt = 0;
 
 type DetailTab = 'device' | 'product' | 'production' | 'observer';
@@ -58,6 +59,7 @@ function logWaveformUiDiagnostic(
   payload: FlameDetectorState | FlameDetectorWaveformDelta,
   sentAt?: number,
 ) {
+  if (!WAVEFORM_UI_DIAGNOSTICS_ENABLED) return;
   const now = Date.now();
   if (now - lastWaveformUiDiagnosticAt < WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS) return;
   lastWaveformUiDiagnosticAt = now;
@@ -88,6 +90,13 @@ export function FieldProcessStatusApp() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<DetailTab>('device');
   const [softwareReleaseOpen, setSoftwareReleaseOpen] = useState(false);
+  const detectorStateRef = useRef<FlameDetectorState | null>(null);
+  const detectorRenderSchedulerRef = useRef<LatestValueScheduler<FlameDetectorState> | null>(null);
+
+  const publishDetectorState = useCallback((next: FlameDetectorState) => {
+    detectorStateRef.current = next;
+    detectorRenderSchedulerRef.current?.push(next);
+  }, []);
 
   const applySummary = useCallback((summary: FieldSummaryPayload) => {
     setStatus(summary.process ?? null);
@@ -120,7 +129,7 @@ export function FieldProcessStatusApp() {
     }
 
     const deviceResponse = await fetch(HTTP + '/api/flame/devices');
-    if (deviceResponse.ok) setDetectors(await deviceResponse.json() as FlameDetectorState);
+    if (deviceResponse.ok) publishDetectorState(await deviceResponse.json() as FlameDetectorState);
 
     const configResponse = await fetch(HTTP + '/api/flame/config');
     if (configResponse.ok) {
@@ -131,7 +140,7 @@ export function FieldProcessStatusApp() {
     setNotice(summary.process?.valid
       ? 'PLC 工序已同步：' + processDisplayLabel(summary.process)
       : 'PLC 未接入：工序监测处于待同步状态。');
-  }, [applySummary]);
+  }, [applySummary, publishDetectorState]);
 
   const updateProductConfig = useCallback(async (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => {
     const response = await fetch(`${HTTP}/api/product-config`, {
@@ -189,6 +198,19 @@ export function FieldProcessStatusApp() {
   }, []);
 
   useEffect(() => {
+    const scheduler = createLatestValueScheduler<FlameDetectorState>(
+      (callback) => window.requestAnimationFrame(callback),
+      (handle) => window.cancelAnimationFrame(handle),
+      (next) => setDetectors(next),
+    );
+    detectorRenderSchedulerRef.current = scheduler;
+    return () => {
+      if (detectorRenderSchedulerRef.current === scheduler) detectorRenderSchedulerRef.current = null;
+      scheduler.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
     // Printing is a background production function. It starts with the field UI,
     // not with the details panel, so a completed batch can print while the
     // operator remains on the main dashboard.
@@ -231,14 +253,13 @@ export function FieldProcessStatusApp() {
           if (message.type === 'flame_state') {
             const state = message.payload as FlameDetectorState;
             logWaveformUiDiagnostic('snapshot', state, message.timestamp);
-            setDetectors(state);
+            publishDetectorState(state);
           }
           if (message.type === 'flame_waveform_delta') {
             const delta = message.payload as FlameDetectorWaveformDelta;
             logWaveformUiDiagnostic('delta', delta, message.timestamp);
-            setDetectors((previous) => previous
-              ? mergeFlameWaveformDelta(previous, delta)
-              : previous);
+            const previous = detectorStateRef.current;
+            if (previous) publishDetectorState(mergeFlameWaveformDelta(previous, delta));
           }
           if (message.type === 'field_summary') applySummary(message.payload as FieldSummaryPayload);
         } catch (error) {
@@ -259,7 +280,7 @@ export function FieldProcessStatusApp() {
       if (timer) clearTimeout(timer);
       socket?.close();
     };
-  }, [applySummary, refresh]);
+  }, [applySummary, publishDetectorState, refresh]);
 
   return <>
     <WutosDashboard
