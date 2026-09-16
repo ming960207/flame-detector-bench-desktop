@@ -82,6 +82,9 @@ const DECISION_TEXT: Record<string, string> = {
   SNR31_ABOVE_LIMIT: 'P3/P1 信噪比高于上限',
   DETECTOR_OFFLINE: '探测器离线',
   DETECTOR_FAULT: '探测器故障',
+  DETECTOR_STARTUP_FAILED: '探测器启动失败',
+  DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
+  MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
   SIGNAL_NOT_READY: '光源未就绪',
   SYNC_NOT_OK: '同步异常',
   FLASH_SAMPLES_MISSING: '爆闪干扰样本不足',
@@ -117,8 +120,17 @@ function decisionText(value: unknown): string {
   return text.replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, '未映射的判定条件');
 }
 
-function cell(value: unknown): string {
-  return String(value ?? '-').replaceAll('|', '\\|').replaceAll('\n', ' ');
+function escapeHtml(value: unknown): string {
+  return String(value ?? '-')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function htmlText(value: unknown): string {
+  return escapeHtml(value).replaceAll('\n', '<br>');
 }
 
 function safeRunId(runId: string): string {
@@ -199,7 +211,12 @@ function stageDetectorRangeRows(run: TestProgramRun): string[][] {
   ]));
 }
 
-export function renderTestProgramReport(run: TestProgramRun): string {
+function htmlTable(headers: string[], rows: string[][], className = ''): string {
+  const bodyRows = rows.length ? rows : [headers.map(() => '-')];
+  return `<div class="table-scroll"><table class="${className}"><thead><tr>${headers.map((header) => `<th>${htmlText(header)}</th>`).join('')}</tr></thead><tbody>${bodyRows.map((row) => `<tr>${headers.map((_, index) => `<td>${htmlText(row[index])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+export function renderTestProgramReportHtml(run: TestProgramRun, generatedAt = Date.now()): string {
   const summary = summarizeTestProgramRun(run);
   const stageRows = run.stages.map((stage) => [
     String(stage.sequence),
@@ -230,66 +247,64 @@ export function renderTestProgramReport(run: TestProgramRun): string {
     ['判定原因', run.decision.reasons.map(decisionText).join('；') || '-'],
     ['依据摘要', run.decision.basis.map(decisionText).join('；') || '-'],
   ];
-  const lines = [
-    '# 测试程序归档报告',
-    '',
-    `- 测试批次：${cell(run.runId)}`,
-    `- 状态：${run.status}`,
-    `- 开始：${localDateTime(run.startedAt)}`,
-    `- 结束：${localDateTime(run.endedAt)}`,
-    `- 总耗时：${durationText(run.durationMs)}`,
-    `- 阶段数：${summary.stageCount}（完成 ${summary.completedStageCount}）`,
-    `- 继电器事件：${summary.relayEventCount}，波形样本：${summary.waveformSampleCount}，探测器观测：${summary.detectorObservationCount}`,
-    '',
-    '## 阶段时序与判断',
-    '',
-    '| 序号 | 阶段 | 开始 | 结束 | 实际时长 | 规划时长 | 偏差 | 计划判断 | 继电器事件 | 波形样本 | 判断依据 |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- |',
-    ...stageRows.map((row) => `| ${row.map(cell).join(' | ')} |`),
-    '',
-    '## 继电器输出变化',
-    '',
-    '| 时间 | 所属阶段 | 地址 | 信号 | 变化前 | 变化后 |',
-    '| --- | --- | --- | --- | --- | --- |',
-    ...(relayRows.length ? relayRows.map((row) => `| ${row.map(cell).join(' | ')} |`) : ['| - | - | - | - | - | - |']),
-    '',
-    '## 波形采样摘要',
-    '',
-    '| 阶段 | 设备 | 处理样本 | 原始样本 | P2/P1均值通道 | RMS | 峰峰值 | 采样时间范围 |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
-    ...(waveformRows.length ? waveformRows.map((row) => `| ${row.map(cell).join(' | ')} |`) : ['| - | - | 0 | 0 | - | - | - | - |']),
-    '',
-    '## 分阶段探测器数值',
-    '',
-    '每行对应一个工序阶段和一台探测器；“观测/保留”同时保留完整计数与 JSON 中的有界明细，最新值用于现场回看，统计范围用于判断稳定性和阈值依据。',
-    '',
-    '### 最新值与状态',
-    '',
-    '| 阶段 | 设备/地址 | 观测/保留 | 最后采样 | P1 | P2 | P3 | P4 | 绝对P1 | 绝对P2 | 绝对P3 | 绝对P4 | 波动P1 | 波动P2 | 波动P3 | 波动P4 | SNR21 | SNR23 | SNR31 | 灵敏度 | 在线 | 故障 | 光源 | 同步 |',
-    '| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |',
-    ...(stageDetectorLatestRows(run).length
-      ? stageDetectorLatestRows(run).map((row) => `| ${row.map(cell).join(' | ')} |`)
-      : ['| - | - | 0 / 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |']),
-    '',
-    '### 数值统计范围（最小值 ~ 最大值）',
-    '',
-    '| 阶段 | 设备 | 采样时间范围 | P1 | P2 | P3 | P4 | 绝对P1 | 绝对P2 | 绝对P3 | 绝对P4 | 波动P1 | 波动P2 | 波动P3 | 波动P4 | SNR21 | SNR23 | SNR31 | 灵敏度 |',
-    '| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...(stageDetectorRangeRows(run).length
-      ? stageDetectorRangeRows(run).map((row) => `| ${row.map(cell).join(' | ')} |`)
-      : ['| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |']),
-    '',
-    '## 判定依据',
-    '',
-    '| 项目 | 内容 |',
-    '| --- | --- |',
-    ...decisionRows.map((row) => `| ${row.map(cell).join(' | ')} |`),
-    '',
-    '原始波形、正式程序分析快照、阈值配置和探测器判定保存在同目录 JSON 文件中，可供后续算法离线回放。',
-    '',
+  const latestDetectorRows = stageDetectorLatestRows(run);
+  const rangeDetectorRows = stageDetectorRangeRows(run);
+  const verdictTone = run.decision.verdict === 'PASS' ? 'pass' : run.decision.verdict === 'FAIL' ? 'fail' : 'pending';
+  const verdictLabel = decisionText(run.decision.verdict);
+  const statusLabel = run.status === 'COMPLETED' ? '已完成' : run.status === 'ABORTED' ? '已中止' : '进行中';
+  const stageTable = htmlTable(
+    ['序号', '阶段', '开始', '结束', '实际时长', '规划时长', '偏差', '计划判断', '继电器事件', '波形样本', '判断依据'],
+    stageRows,
+    'stage-table',
+  );
+  const relayTable = htmlTable(['时间', '所属阶段', '地址', '信号', '变化前', '变化后'], relayRows, 'relay-table');
+  const waveformTable = htmlTable(
+    ['阶段', '设备', '处理样本', '原始样本', 'P2/P1 均值通道', 'RMS', '峰峰值', '采样时间范围'],
+    waveformRows,
+    'waveform-table',
+  );
+  const detectorLatestTable = htmlTable(
+    ['阶段', '设备/地址', '观测/保留', '最后采样', 'P1', 'P2', 'P3', 'P4', '绝对 P1', '绝对 P2', '绝对 P3', '绝对 P4', '波动 P1', '波动 P2', '波动 P3', '波动 P4', 'SNR21', 'SNR23', 'SNR31', '灵敏度', '在线', '故障', '光源', '同步'],
+    latestDetectorRows,
+    'detector-table',
+  );
+  const detectorRangeTable = htmlTable(
+    ['阶段', '设备', '采样时间范围', 'P1', 'P2', 'P3', 'P4', '绝对 P1', '绝对 P2', '绝对 P3', '绝对 P4', '波动 P1', '波动 P2', '波动 P3', '波动 P4', 'SNR21', 'SNR23', 'SNR31', '灵敏度'],
+    rangeDetectorRows,
+    'detector-table',
+  );
+  const decisionTable = htmlTable(['项目', '内容'], decisionRows, 'decision-table');
+  const summaryCards = [
+    ['测试批次', run.runId],
+    ['状态', statusLabel],
+    ['开始时间', localDateTime(run.startedAt)],
+    ['结束时间', localDateTime(run.endedAt)],
+    ['总耗时', durationText(run.durationMs)],
+    ['阶段完成', `${summary.completedStageCount} / ${summary.stageCount}`],
+    ['继电器事件', summary.relayEventCount],
+    ['波形样本', summary.waveformSampleCount],
+    ['探测器观测', summary.detectorObservationCount],
   ];
-  return lines.join('\n');
+
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(run.runId)} · 火焰探测器测试报告</title>
+<style>
+:root{color-scheme:light;--ink:#1b2522;--muted:#65736e;--line:#cfd8d3;--panel:#f5f8f6;--accent:#176b57;--pass:#0d704e;--fail:#a32626;--pending:#8a6510}
+*{box-sizing:border-box}body{margin:0;background:#e9efec;color:var(--ink);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:12px;line-height:1.5}.page{max-width:1600px;margin:24px auto;padding:30px;background:#fff;box-shadow:0 8px 30px rgba(22,45,37,.12)}.report-header{border-bottom:2px solid var(--ink);padding-bottom:18px}.eyebrow{color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.16em}.report-header h1{margin:5px 0 2px;font-size:26px}.subtitle{color:var(--muted)}.report-status{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:20px 0 14px;padding:15px 18px;border:1px solid var(--line);background:var(--panel)}.report-status strong{font-size:22px}.report-status small{display:block;color:var(--muted)}.report-status.pass{border-color:#9bd3ba;background:#effaf4;color:var(--pass)}.report-status.fail{border-color:#e4adad;background:#fff3f3;color:var(--fail)}.report-status.pending{border-color:#e5d09b;background:#fffaf0;color:var(--pending)}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:26px}.summary-card{padding:10px 12px;border:1px solid var(--line);background:#fff}.summary-card span{display:block;color:var(--muted);font-size:11px}.summary-card b{display:block;margin-top:3px;overflow-wrap:anywhere;font-size:14px}.section{margin-top:26px}.section h2{margin:0 0 4px;font-size:17px}.section-note{margin:0 0 10px;color:var(--muted)}.table-scroll{width:100%;overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:720px;font-size:11px}th,td{border:1px solid var(--line);padding:7px 6px;text-align:left;vertical-align:top}th{background:#edf3f0;color:#33433d;font-weight:700;white-space:nowrap}td{white-space:normal;overflow-wrap:anywhere}.stage-table th:first-child,.stage-table td:first-child{width:42px;text-align:center}.relay-table td:nth-child(1),.waveform-table td:nth-child(1){white-space:nowrap}.detector-table{min-width:1900px}.decision-table{min-width:0}.decision-table th:first-child,.decision-table td:first-child{width:120px;white-space:nowrap}.footnote{margin-top:28px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}@media (max-width:900px){.page{margin:0;padding:18px}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.report-status{align-items:flex-start;flex-direction:column}}@media print{@page{size:A4 landscape;margin:10mm}body{background:#fff}.page{max-width:none;margin:0;padding:0;box-shadow:none}.report-status{break-inside:avoid}.section{break-inside:avoid}.table-scroll{overflow:visible}table{font-size:8px}.detector-table{min-width:0}th,td{padding:3px}.footnote{margin-top:12px}}
+</style></head><body><main class="page">
+<header class="report-header"><div class="eyebrow">FLAME DETECTOR TEST PROGRAM / LOCAL ARCHIVE</div><h1>火焰探测器工序测试报告</h1><div class="subtitle">完整测试数据本地归档 · 原始波形、探测器观测和正式判定依据随批次保存</div></header>
+<section class="report-status ${verdictTone}"><div><small>最终判定</small><strong>${htmlText(verdictLabel)}</strong></div><div><small>归档状态</small><span>${htmlText(statusLabel)} · 生成时间 ${htmlText(localDateTime(generatedAt))}</span></div></section>
+<section class="summary-grid">${summaryCards.map(([label, value]) => `<div class="summary-card"><span>${htmlText(label)}</span><b>${htmlText(value)}</b></div>`).join('')}</section>
+<section class="section"><h2>一、阶段时序与判断</h2><p class="section-note">阶段划分以正式 PLC 状态为准；规划时长未配置的阶段只统计，不参与超时判断。</p>${stageTable}</section>
+<section class="section"><h2>二、继电器输出变化</h2><p class="section-note">记录本轮测试中正式状态源观察到的继电器输出变化。</p>${relayTable}</section>
+<section class="section"><h2>三、波形采样摘要</h2><p class="section-note">处理样本和原始样本均按阶段、设备归档；完整样本保存在同目录 JSON 文件。</p>${waveformTable}</section>
+<section class="section"><h2>四、分阶段探测器数值</h2><p class="section-note">最新值用于现场回看，统计范围用于判断稳定性和阈值依据；“观测/保留”同时保留完整计数与 JSON 中的有界明细。</p><h3>4.1 最新值与状态</h3>${detectorLatestTable}<h3>4.2 数值统计范围（最小值 ~ 最大值）</h3>${detectorRangeTable}</section>
+<section class="section"><h2>五、判定依据</h2>${decisionTable}</section>
+<p class="footnote">本报告由上位机在测试归档完成时自动生成并保存在本地。原始波形、正式程序分析快照、阈值配置和探测器判定保存在同目录 JSON 文件中，可供后续算法离线回放。</p>
+</main></body></html>`;
 }
+
+export const renderTestProgramReport = renderTestProgramReportHtml;
 
 function defaultDirectory(): string {
   return process.env.TEST_PROGRAM_DATA_DIR
@@ -322,7 +337,7 @@ export class TestProgramArchiveStore {
     mkdirSync(dateDirectory, { recursive: true });
     const safeId = safeRunId(run.runId);
     const detailFile = join(dateDirectory, `${safeId}.json`);
-    const reportFile = join(dateDirectory, `${safeId}.md`);
+    const reportFile = join(dateDirectory, `${safeId}.html`);
     const relativeDetailFile = relative(this.directory, detailFile).replaceAll('\\', '/');
     const relativeReportFile = relative(this.directory, reportFile).replaceAll('\\', '/');
     const archive: TestProgramArchive = {
@@ -331,7 +346,7 @@ export class TestProgramArchiveStore {
       reportFile: relativeReportFile,
     };
     writeAtomic(detailFile, `${JSON.stringify(archive, null, 2)}\n`);
-    writeAtomic(reportFile, renderTestProgramReport(run));
+    writeAtomic(reportFile, renderTestProgramReportHtml(run, archivedAt));
 
     const item: TestProgramArchiveListItem = {
       ...summarizeTestProgramRun(run),
@@ -369,6 +384,12 @@ export class TestProgramArchiveStore {
     const file = this.safeFile(entry.reportFile);
     if (!existsSync(file)) return null;
     return readFileSync(file, 'utf8');
+  }
+
+  reportContentType(runId: string): 'html' | 'markdown' | null {
+    const entry = this.readIndex().find((item) => item.runId === runId);
+    if (!entry) return null;
+    return entry.reportFile.toLowerCase().endsWith('.html') ? 'html' : 'markdown';
   }
 
   private readIndex(): TestProgramArchiveListItem[] {

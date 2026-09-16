@@ -1,0 +1,122 @@
+.software-release-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(1, 8, 15, .78);
+  backdrop-filter: blur(5px);
+}
+
+.software-release-panel {
+  width: min(820px, 100%);
+  max-height: min(760px, 92vh);
+  overflow: auto;
+  border: 1px solid rgba(67, 220, 237, .8);
+  background: linear-gradient(145deg, #092a3b, #04131f 78%);
+  box-shadow: 0 0 38px rgba(26, 205, 229, .2), inset 0 0 24px rgba(32, 204, 229, .08);
+  color: #dff8ff;
+}
+
+.software-release-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid rgba(43, 114, 130, .6);
+}
+
+.software-release-panel__header .section-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.software-release-panel__header .section-kicker svg { width: 13px; height: 13px; }
+.software-release-panel__header h2 { margin: 0; color: #effcff; font-size: 22px; letter-spacing: .08em; }
+.software-release-panel__header p { margin: 8px 0 0; color: #7faeb8; font-size: 11px; line-height: 1.6; }
+
+.software-release-panel__close {
+  display: grid;
+  place-items: center;
+  padding: 7px;
+  color: #a8d5de;
+  border: 1px solid rgba(67, 220, 237, .6);
+  background: #061a26;
+  cursor: pointer;
+}
+
+.software-release-panel__close:hover { color: #fff; border-color: #55e6f2; }
+.software-release-panel__close svg { width: 18px; height: 18px; }
+
+.software-release-panel__body { display: grid; gap: 11px; padding: 16px 22px; }
+.software-release-version-card,
+.software-release-latest-card,
+.software-release-actions-card,
+.software-release-logs-card { padding: 13px; border: 1px solid rgba(43, 114, 130, .6); background: rgba(3, 20, 31, .78); }
+.software-release-latest-card.is-update { border-color: rgba(255, 199, 82, .72); background: rgba(65, 48, 17, .4); }
+
+.software-release-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.software-release-card-title > div { display: grid; gap: 4px; min-width: 0; }
+.software-release-card-title span { color: #7daab5; font-size: 10px; }
+.software-release-card-title strong { color: #effcff; font: 800 14px Consolas, monospace; }
+.software-release-card-title > svg { color: #43dced; width: 20px; height: 20px; }
+.software-release-card-title button { display: grid; place-items: center; padding: 5px; color: #87bec8; border: 1px solid #2b7282; background: #061722; cursor: pointer; }
+.software-release-card-title button:hover { color: #effcff; border-color: #43dced; }
+.software-release-card-title button:disabled { cursor: wait; opacity: .6; }
+.software-release-card-title button svg { width: 14px; height: 14px; }
+.software-release-badge { padding: 4px 7px; color: #63e8b1 !important; border: 1px solid rgba(70, 218, 167, .45); background: rgba(23, 102, 78, .26); font: 700 9px Consolas, monospace !important; }
+
+.software-release-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+.software-release-facts span { min-width: 0; padding: 8px; border: 1px solid rgba(43, 114, 130, .42); background: rgba(2, 17, 27, .72); }
+.software-release-facts b { display: block; color: #719da8; font-size: 9px; font-weight: 600; }
+.software-release-facts em { display: block; margin-top: 5px; overflow: hidden; color: #dff8ff; font: 700 10px Consolas, monospace; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+.software-release-latest-card p { margin: 10px 0 0; overflow: hidden; color: #88b2bc; font: 10px Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.software-release-latest-state { display: flex; align-items: center; gap: 6px; margin-top: 9px; color: #5be4ad; font-size: 11px; }
+.software-release-latest-card.is-update .software-release-latest-state { color: #ffd36c; }
+.software-release-latest-state svg { width: 15px; height: 15px; }
+
+.software-release-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.software-release-actions button,
+.software-release-actions a,
+.software-release-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 11px; color: #b9eff7; border: 1px solid #38d7e575; background: #0b3446; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+.software-release-actions button:hover,
+.software-release-actions a:hover,
+.software-release-submit:hover { color: #fff; border-color: #43dced; }
+.software-release-actions button.is-primary,
+.software-release-submit.is-primary { color: #06202b; border-color: #42e6d2; background: #42e6d2; font-weight: 800; }
+.software-release-actions button:disabled,
+.software-release-submit:disabled { cursor: not-allowed; opacity: .45; }
+.software-release-actions svg,
+.software-release-submit svg { width: 14px; height: 14px; }
+.software-release-actions-card > small,
+.software-release-logs-card > small { display: block; margin-top: 9px; color: #6e98a3; font-size: 10px; line-height: 1.5; }
+
+.software-release-log-form { display: grid; grid-template-columns: 1fr 1.6fr; gap: 8px; margin-top: 11px; }
+.software-release-log-form label { display: grid; gap: 5px; color: #7faeb8; font-size: 10px; }
+.software-release-log-form input,
+.software-release-log-form textarea { min-width: 0; padding: 7px 8px; resize: vertical; color: #dff8ff; border: 1px solid #2b7282; outline: 0; background: #061722; font: 10px "Microsoft YaHei UI", sans-serif; }
+.software-release-log-form input:focus,
+.software-release-log-form textarea:focus { border-color: #43dced; box-shadow: 0 0 0 2px rgba(67, 220, 237, .12); }
+.software-release-submit { margin-top: 9px; }
+
+.software-release-panel__footer { display: flex; justify-content: space-between; gap: 12px; padding: 11px 22px 15px; color: #78a7b1; border-top: 1px solid rgba(43, 114, 130, .5); font-size: 10px; white-space: pre-line; }
+.software-release-panel__footer > span:first-child { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.software-release-panel__footer .is-busy { color: #ffd36c; }
+.software-release-panel__footer > span:last-child { text-align: right; }
+.software-release-panel svg.is-spinning { animation: software-release-spin 1s linear infinite; }
+@keyframes software-release-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 720px) {
+  .software-release-backdrop { padding: 10px; }
+  .software-release-panel__header,
+  .software-release-panel__body,
+  .software-release-panel__footer { padding-left: 13px; padding-right: 13px; }
+  .software-release-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .software-release-log-form { grid-template-columns: 1fr; }
+  .software-release-panel__footer { display: grid; }
+  .software-release-panel__footer > span:last-child { text-align: left; }
+}

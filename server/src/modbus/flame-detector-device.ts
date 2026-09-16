@@ -41,7 +41,7 @@ export const SEND_MODE_BROADCAST_RETRY_DELAY_MS = 100;
 export const SEND_MODE_BROADCAST_RESPONSE_TIMEOUT_MS = 700;
 export const SEND_MODE_BROADCAST_ADDRESS = 0xFF;
 
-/** Build the raw RTU mode frame; known devices must use their actual address. */
+/** Build the raw RTU mode frame; continuous waveform startup uses FF broadcast. */
 export function buildSendModeFrame(address = SEND_MODE_BROADCAST_ADDRESS, mode = SEND_MODE_BROADCAST_VALUE): Buffer {
   const targetAddress = Number.isInteger(address) && address >= 1 && address <= 247
     ? address
@@ -246,6 +246,28 @@ export class FlameDetectorDevice {
     await client.writeRegisters(startAddress, values.map((value) => Number(value) & 0xFFFF));
   }
 
+  async sendRawFrame(frame: Buffer): Promise<void> {
+    if (!Buffer.isBuffer(frame) || frame.length < 3) throw new Error('探测器原始帧无效');
+    if (isRawTcpClient(this.client)) {
+      await this.client.sendRawFrame(frame);
+      return;
+    }
+    const port = (this.client as any)._port as {
+      destroyed?: boolean;
+      write?: (data: Buffer, callback?: (error?: Error | null) => void) => boolean;
+    } | undefined;
+    if (!port || typeof port.write !== 'function' || port.destroyed) {
+      throw new Error('探测器串口连接不可写');
+    }
+    await new Promise<void>((resolve, reject) => {
+      try {
+        port.write!(Buffer.from(frame), (error?: Error | null) => error ? reject(error) : resolve());
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
   /**
    * 原样发送现场要求的发送模式 RTU 帧。
    *
@@ -268,11 +290,15 @@ export class FlameDetectorDevice {
     const retryDelayMs = Number.isFinite(options.retryDelayMs) && Number(options.retryDelayMs) >= 0
       ? Number(options.retryDelayMs)
       : SEND_MODE_BROADCAST_RETRY_DELAY_MS;
-    const waitForResponse = options.waitForResponse === true;
     const responseTimeoutMs = Number.isFinite(options.responseTimeoutMs) && Number(options.responseTimeoutMs) > 0
       ? Number(options.responseTimeoutMs)
       : SEND_MODE_BROADCAST_RESPONSE_TIMEOUT_MS;
     const request = buildSendModeFrame(options.address, options.mode ?? SEND_MODE_BROADCAST_VALUE);
+    // Modbus RTU broadcast address 0xFF is intentionally one-way in the field setup:
+    // the detector starts continuous waveform streaming but does not return a write ACK.
+    // Waiting for an ACK here caused a false MODE_SWITCHING loop even while valid waveform
+    // frames were already arriving. Addressed writes may still request and validate an ACK.
+    const waitForResponse = options.waitForResponse === true && request[0] !== SEND_MODE_BROADCAST_ADDRESS;
     let lastError: unknown = new Error('探测器 TCP 发送模式帧发送失败');
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
