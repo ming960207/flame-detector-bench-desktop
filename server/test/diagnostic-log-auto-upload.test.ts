@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { extractLatestCompletedBatchId, startDiagnosticLogAutoUpload } from '../src/diagnostic-log-auto-upload.js';
+import { buildGiteeCommitRequest, extractLatestCompletedBatchId, startDiagnosticLogAutoUpload } from '../src/diagnostic-log-auto-upload.js';
 
 function waitFor<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T> {
   return Promise.race([
@@ -11,6 +11,24 @@ function waitFor<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T> {
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)),
   ]);
 }
+
+test('builds a Gitee multi-file commit request with base64 actions', () => {
+  const request = buildGiteeCommitRequest({
+    branch: 'refactor/unified-backend',
+    message: 'logs: auto upload completed batch demo',
+    files: [
+      { path: 'diagnostic-logs/demo/latest.log', content: Buffer.from('日志') },
+      { path: 'diagnostic-logs/demo/manifest.txt', content: Buffer.from('manifest') },
+    ],
+  });
+
+  assert.equal(request.branch, 'refactor/unified-backend');
+  assert.equal(request.message, 'logs: auto upload completed batch demo');
+  assert.deepEqual(request.actions, [
+    { action: 'create', path: 'diagnostic-logs/demo/latest.log', content: Buffer.from('日志').toString('base64'), encoding: 'base64' },
+    { action: 'create', path: 'diagnostic-logs/demo/manifest.txt', content: Buffer.from('manifest').toString('base64'), encoding: 'base64' },
+  ]);
+});
 
 test('extractLatestCompletedBatchId returns the most recent completed batch marker', () => {
   const text = [

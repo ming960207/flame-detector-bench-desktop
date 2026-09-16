@@ -3,11 +3,10 @@ import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { loadSoftwareReleaseConfig, type SoftwareReleaseConfig } from './software-release-config.js';
 
 const execFile = promisify(execFileCallback);
 
-const REPOSITORY_URL = 'https://github.com/ming960207/flame-detector-bench-desktop';
-const DEFAULT_BRANCH = 'refactor/unified-backend';
 const COMMAND_TIMEOUT_MS = 15_000;
 const LOG_UPLOAD_TIMEOUT_MS = 120_000;
 
@@ -39,6 +38,8 @@ interface RollbackState {
 
 export interface SoftwareVersionSnapshot {
   available: boolean;
+  source: SoftwareReleaseConfig['source'];
+  provider: string;
   repository: string;
   branch: string;
   packageVersion: string;
@@ -133,7 +134,8 @@ function outputTail(stdout: string, stderr: string): string {
 
 export class SoftwareReleaseService {
   private readonly repoRoot = resolveSoftwareRepositoryRoot();
-  private readonly branch = process.env.FLAME_BENCH_UPDATE_BRANCH || DEFAULT_BRANCH;
+  private readonly releaseConfig = loadSoftwareReleaseConfig(this.repoRoot);
+  private readonly branch = this.releaseConfig.branch;
   private busy = false;
 
   private path(relativePath: string): string {
@@ -182,10 +184,10 @@ export class SoftwareReleaseService {
   }
 
   private async latestCommit(): Promise<string | null> {
-    const remoteRef = `refs/remotes/origin/${this.branch}`;
+    const remoteRef = `refs/remotes/flame-release/${this.branch}`;
     const fetchResult = await this.git([
       '-c', 'http.version=HTTP/1.1',
-      'fetch', '--no-tags', REPOSITORY_URL,
+      'fetch', '--no-tags', this.releaseConfig.remoteUrl,
       `+refs/heads/${this.branch}:${remoteRef}`,
     ]);
     if (fetchResult === null) return null;
@@ -207,8 +209,10 @@ export class SoftwareReleaseService {
 
     return {
       available: Boolean(currentCommit),
-      repository: REPOSITORY_URL,
-      branch: safeText(marker?.branch, 128) || this.branch,
+      source: this.releaseConfig.source,
+      provider: this.releaseConfig.label,
+      repository: this.releaseConfig.repository,
+      branch: safeText(marker?.branch, 128) || this.releaseConfig.branch,
       packageVersion: await this.packageVersion(),
       current: {
         commit: currentCommit,
@@ -325,7 +329,7 @@ export class SoftwareReleaseService {
       return {
         accepted: true,
         action: 'logs',
-        message: '诊断日志已提交到 GitHub；日志提交不计入软件版本。',
+        message: `诊断日志已提交到 ${this.releaseConfig.label}；日志提交不计入软件版本。`,
         output: outputTail(String(result.stdout ?? ''), String(result.stderr ?? '')),
       };
     } finally {

@@ -12,16 +12,16 @@ function Fail([string]$Message) {
     exit 1
 }
 
-function Read-TokenSecurely {
+function Read-TokenSecurely([object]$Config) {
     Write-Host ''
     Write-Host 'First-time upload setup'
-    Write-Host 'No GitHub upload token is configured on this Windows account.'
-    Write-Host 'Paste the fine-grained GitHub token for this repository and press Enter.'
+    Write-Host "No $($Config.Label) upload token is configured on this Windows account."
+    Write-Host "Paste the $($Config.Label) token for this repository and press Enter."
     Write-Host 'The token will be saved as the current Windows user environment variable:'
-    Write-Host 'FLAME_BENCH_GITHUB_TOKEN'
+    Write-Host ([string]$Config.TokenEnvironmentNames[0])
     Write-Host 'The token will not be written into this repository.'
     Write-Host ''
-    $secure = Read-Host 'GitHub token' -AsSecureString
+    $secure = Read-Host "$($Config.Label) token" -AsSecureString
     $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
@@ -29,6 +29,9 @@ function Read-TokenSecurely {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
+. (Join-Path $repoRoot 'scripts\release-source.ps1')
+$releaseConfig = Get-ReleaseSourceConfig -RepoRoot $repoRoot
+Ensure-ReleaseRemote $releaseConfig
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail 'Git is not installed or is not available in PATH.' }
 try { $insideRepo = (& git rev-parse --is-inside-work-tree 2>$null).Trim() }
 catch { Fail 'This script must be run from a Git working tree.' }
@@ -38,31 +41,27 @@ $branch = (& git rev-parse --abbrev-ref HEAD).Trim()
 if (-not $branch -or $branch -eq 'HEAD') { Fail 'Detached HEAD is not supported. Check out a branch first.' }
 $softwareHead = (& git rev-parse HEAD).Trim()
 
-$publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
-$remoteRef = "refs/remotes/origin/$branch"
+$publicRemote = $releaseConfig.RemoteUrl
+$remoteName = $releaseConfig.RemoteName
+$remoteRef = "refs/remotes/$remoteName/$branch"
 $fetchRefspec = "+refs/heads/${branch}:${remoteRef}"
-& git remote set-url origin $publicRemote
-if ($LASTEXITCODE -ne 0) { Fail 'Unable to configure the GitHub remote.' }
-
-$token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'Machine')
-$tokenSource = 'machine environment'
-if (-not $token) { $token = [Environment]::GetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', 'User'); $tokenSource = 'user environment' }
-if (-not $token) { $token = $env:FLAME_BENCH_GITHUB_TOKEN; $tokenSource = 'current process environment' }
+$tokenInfo = Get-ReleaseToken $releaseConfig
+$token = $tokenInfo.Value
+$tokenSource = $tokenInfo.Source
 if (-not $token) {
     if ($Automatic) {
-        Fail 'Automatic log upload requires FLAME_BENCH_GITHUB_TOKEN. Run upload-current-logs.cmd once to complete the one-time token setup.'
+        Fail "Automatic log upload requires $($releaseConfig.Label) token. Run upload-current-logs.cmd once to complete the one-time token setup."
     }
-    $token = Read-TokenSecurely
-    if (-not $token -or [string]::IsNullOrWhiteSpace($token)) { Fail 'No GitHub token was entered.' }
+    $token = Read-TokenSecurely $releaseConfig
+    if (-not $token -or [string]::IsNullOrWhiteSpace($token)) { Fail "No $($releaseConfig.Label) token was entered." }
     $token = $token.Trim()
     try {
-        [Environment]::SetEnvironmentVariable('FLAME_BENCH_GITHUB_TOKEN', $token, 'User')
-        $env:FLAME_BENCH_GITHUB_TOKEN = $token
+        Save-ReleaseToken $releaseConfig $token
         $tokenSource = 'new user environment deployment'
         Write-Host ''
-        Write-Host 'SUCCESS: GitHub token was saved for the current Windows user.'
+        Write-Host "SUCCESS: $($releaseConfig.Label) token was saved for the current Windows user."
         Write-Host 'Future log uploads will use it automatically.'
-    } catch { Fail "Unable to save FLAME_BENCH_GITHUB_TOKEN for the current Windows user: $($_.Exception.Message)" }
+    } catch { Fail "Unable to save $($releaseConfig.Label) token for the current Windows user: $($_.Exception.Message)" }
 }
 $token = $token.Trim()
 
@@ -124,6 +123,7 @@ $manifest = @(
     'Flame detector bench diagnostic log package',
     "Captured: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     "Mode: $modeText",
+    "Release source: $($releaseConfig.Label)",
     "Batch: $batchText",
     "Branch: $branch",
     "Source software commit: $head",
@@ -151,32 +151,14 @@ $commitMessage = if ($Automatic -and $BatchId) {
     "logs: upload diagnostic logs $stamp"
 }
 
-$askPass = Join-Path $env:TEMP "flame-bench-git-askpass-$PID.cmd"
-$askPassContent = @(
-    '@echo off',
-    'set "PROMPT=%~1"',
-    'echo %PROMPT% | findstr /I "username" >nul',
-    'if not errorlevel 1 (',
-    '  echo x-access-token',
-    '  exit /b 0',
-    ')',
-    'echo %FLAME_BENCH_GITHUB_ASKPASS_VALUE%'
-)
-Set-Content -LiteralPath $askPass -Value $askPassContent -Encoding ASCII
-$oldAskPass = $env:GIT_ASKPASS
-$oldPrompt = $env:GIT_TERMINAL_PROMPT
-$oldAskPassValue = $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE
+$gitAuth = New-ReleaseGitAuthentication $releaseConfig $token
 $oldIndexFile = $env:GIT_INDEX_FILE
 $tempIndex = Join-Path $env:TEMP "flame-bench-log-index-$PID"
 $newCommit = ''
 try {
-    $env:GIT_ASKPASS = $askPass
-    $env:GIT_TERMINAL_PROMPT = '0'
-    $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $token
-
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         Write-Host "Synchronizing remote log base (attempt $attempt/2)..."
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
         if ($LASTEXITCODE -ne 0) {
             if ($attempt -lt 2) { Start-Sleep -Seconds 2; continue }
             Fail 'Unable to fetch the remote branch before log upload.'
@@ -195,8 +177,8 @@ try {
         $newCommit = (& git commit-tree $tree -p $remoteTip -m $commitMessage).Trim()
         if ($LASTEXITCODE -ne 0 -or -not $newCommit) { Fail 'Unable to create the diagnostic-only commit.' }
 
-        Write-Host 'Uploading diagnostic-only commit to GitHub...'
-        & git -c credential.helper= -c http.version=HTTP/1.1 push origin "${newCommit}:refs/heads/$branch"
+    Write-Host "Uploading diagnostic-only commit to $($releaseConfig.Label)..."
+    & git -c credential.helper= -c http.version=HTTP/1.1 push $remoteName "${newCommit}:refs/heads/$branch"
         if ($LASTEXITCODE -eq 0) { break }
         if ($attempt -lt 2) {
             Write-Host 'WARN: Remote advanced during log upload. Rebuilding the diagnostic commit on the newest remote tip...' -ForegroundColor Yellow
@@ -210,12 +192,9 @@ try {
         exit 1
     }
 } finally {
-    $env:GIT_ASKPASS = $oldAskPass
-    $env:GIT_TERMINAL_PROMPT = $oldPrompt
-    $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $oldAskPassValue
+    Remove-ReleaseGitAuthentication $gitAuth
     $env:GIT_INDEX_FILE = $oldIndexFile
     Remove-Item -LiteralPath $tempIndex -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $askPass -Force -ErrorAction SilentlyContinue
 }
 
 $afterSoftwareHead = (& git rev-parse HEAD).Trim()
@@ -223,7 +202,7 @@ if ($afterSoftwareHead -ne $softwareHead) {
     Fail 'Diagnostic upload unexpectedly changed the local software checkout.'
 }
 Write-Host ''
-Write-Host 'SUCCESS: Diagnostic logs were uploaded to GitHub without changing the software version.'
+Write-Host "SUCCESS: Diagnostic logs were uploaded to $($releaseConfig.Label) without changing the software version."
 Write-Host "Log commit: $($newCommit.Substring(0, [Math]::Min(12, $newCommit.Length)))"
 Write-Host "Software checkout: $($softwareHead.Substring(0, [Math]::Min(12, $softwareHead.Length))) (unchanged)"
 Write-Host "Path: $archiveRelative"

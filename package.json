@@ -52,7 +52,8 @@
       "server/product-profiles.json",
       "server/system-config.json",
       "server/plc-configs.json",
-      "server/mes_config.json"
+      "server/mes_config.json",
+      "config/release-source.json"
     ],
     "asarUnpack": [
       "server/**/*"

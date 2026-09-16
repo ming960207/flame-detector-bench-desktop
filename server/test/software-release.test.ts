@@ -7,9 +7,54 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { buildSoftwareReleaseLaunch, resolveSoftwareRepositoryRoot } from '../src/software-release.js';
+import { parseSoftwareReleaseConfig } from '../src/software-release-config.js';
 
 const execFile = promisify(execFileCallback);
 const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+test('release source configuration keeps GitHub as the default and supports the Gitee switch', () => {
+  const git = parseSoftwareReleaseConfig({});
+  assert.equal(git.source, 'git');
+  assert.equal(git.label, 'GitHub');
+  assert.equal(git.repository, 'https://github.com/ming960207/flame-detector-bench-desktop');
+  assert.equal(git.remoteUrl, 'https://github.com/ming960207/flame-detector-bench-desktop.git');
+  assert.equal(git.remoteName, 'origin');
+
+  const gitee = parseSoftwareReleaseConfig({ source: 'gitee', branch: 'refactor/unified-backend' });
+  assert.equal(gitee.source, 'gitee');
+  assert.equal(gitee.label, 'Gitee');
+  assert.equal(gitee.repository, 'https://gitee.com/mingchangpeng/flame-detector-bench-desktop');
+  assert.equal(gitee.remoteUrl, 'https://gitee.com/mingchangpeng/flame-detector-bench-desktop.git');
+  assert.equal(gitee.remoteName, 'gitee');
+  assert.deepEqual(gitee.repositorySlug, { owner: 'mingchangpeng', repo: 'flame-detector-bench-desktop' });
+});
+
+test('release source helper creates a missing selected remote without crashing', async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'flame-release-source-remote-'));
+  try {
+    await mkdir(join(temporaryRoot, 'scripts'), { recursive: true });
+    await mkdir(join(temporaryRoot, 'config'), { recursive: true });
+    await writeFile(
+      join(temporaryRoot, 'scripts', 'release-source.ps1'),
+      await readFile(join(projectRoot, 'scripts', 'release-source.ps1'), 'utf8'),
+      'utf8',
+    );
+    await writeFile(join(temporaryRoot, 'config', 'release-source.json'), JSON.stringify({ source: 'gitee' }), 'utf8');
+    await execFile('git', ['init'], { cwd: temporaryRoot });
+
+    const command = [
+      '$root = (Get-Location).Path',
+      '. (Join-Path $root \'scripts\\release-source.ps1\')',
+      '$config = Get-ReleaseSourceConfig -RepoRoot $root',
+      'Ensure-ReleaseRemote $config',
+      '& git remote get-url gitee',
+    ].join('; ');
+    const result = await execFile('powershell.exe', ['-NoProfile', '-Command', command], { cwd: temporaryRoot });
+    assert.equal(String(result.stdout).trim(), 'https://gitee.com/mingchangpeng/flame-detector-bench-desktop.git');
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
 
 test('resolves the project root when the backend starts from its server directory', async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'flame-software-release-root-'));
@@ -32,7 +77,7 @@ test('software release PowerShell scripts pass parser validation', async () => {
     return `[scriptblock]::Create([System.IO.File]::ReadAllText('${escapedPath}')) | Out-Null`;
   };
 
-  for (const scriptName of ['update-current-branch.ps1', 'rollback-last-update.ps1']) {
+  for (const scriptName of ['release-source.ps1', 'update-current-branch.ps1', 'rollback-last-update.ps1', 'upload-current-logs.ps1']) {
     await execFile('powershell.exe', [
       '-NoProfile',
       '-Command',
@@ -101,6 +146,8 @@ test('cmd update entrypoint explicitly loads the PowerShell utility module', asy
 
   assert.match(entrypoint, /where powershell\.exe/);
   assert.match(entrypoint, /powershell\.exe -NoProfile/);
+  assert.match(updateScript, /release-source\.ps1/);
+  assert.match(rollbackScript, /release-source\.ps1/);
   assert.match(updateScript, /Import-Module Microsoft\.PowerShell\.Utility/);
   assert.match(rollbackScript, /Import-Module Microsoft\.PowerShell\.Utility/);
 });

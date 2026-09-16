@@ -69,6 +69,12 @@ npm run build:server
 npm run build:web
 ```
 
+## 更新源切换
+
+版本查询、程序更新、版本回退和诊断日志上传统一读取 [`config/release-source.json`](config/release-source.json)。默认配置为 `"source": "git"`，保持现有 GitHub 流程；需要切换到 Gitee 时，将其改为 `"source": "gitee"`，保存后重新启动程序即可。
+
+切换到 Gitee 前，请先在现场电脑配置 Gitee 的 Git HTTPS 凭据或 SSH 密钥。配置文件只保存仓库地址和来源选择，不保存 Token；自动日志上传使用本机用户环境变量 `GITEE_ACCESS_TOKEN` 或 `FLAME_BENCH_GITEE_TOKEN`。
+
 ## PLC / HMI 静态发布门禁
 
 在不连接现场设备的情况下，以下命令读取最新 PLC/HMI 资产，输出 SHA-256 与阻断项；不会下载、写入或连接任何设备：

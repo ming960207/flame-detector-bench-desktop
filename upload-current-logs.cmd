@@ -9,7 +9,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Uploading current diagnostic logs to GitHub...
+echo Uploading current diagnostic logs to the configured release source...
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\upload-current-logs.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"

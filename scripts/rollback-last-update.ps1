@@ -51,10 +51,16 @@ function Write-JsonFile([string]$PathValue, $Value) {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
+. (Join-Path $repoRoot 'scripts\release-source.ps1')
+$releaseConfig = Get-ReleaseSourceConfig -RepoRoot $repoRoot
+Ensure-ReleaseRemote $releaseConfig
+$releaseSourceBackup = Backup-ReleaseSourceConfig -RepoRoot $repoRoot
+$releaseGitAuth = $null
 
-$targetBranch = 'refactor/unified-backend'
-$publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
-$remoteRef = "refs/remotes/origin/$targetBranch"
+$targetBranch = $releaseConfig.Branch
+$publicRemote = $releaseConfig.RemoteUrl
+$remoteName = $releaseConfig.RemoteName
+$remoteRef = "refs/remotes/$remoteName/$targetBranch"
 $fetchRefspec = "+refs/heads/${targetBranch}:${remoteRef}"
 $runtimeMarker = Join-Path $repoRoot 'logs\runtime-build.json'
 $rollbackStatePath = Join-Path $repoRoot 'logs\rollback-state.json'
@@ -72,12 +78,12 @@ function Test-GitCommit([string]$Value) {
 
 function Fetch-TargetBranch {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Write-Host "Fetching rollback history from GitHub (attempt $attempt/3)..."
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
+        Write-Host "Fetching rollback history from $($releaseConfig.Label) (attempt $attempt/3)..."
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
         if ($LASTEXITCODE -eq 0) { return }
         if ($attempt -lt 3) { Start-Sleep -Seconds ($attempt * 3) }
     }
-    throw 'Unable to fetch target branch from GitHub after 3 attempts.'
+    throw "Unable to fetch target branch from $($releaseConfig.Label) after 3 attempts."
 }
 
 function Ensure-RollbackCommitAvailable([string]$TargetCommit) {
@@ -85,11 +91,11 @@ function Ensure-RollbackCommitAvailable([string]$TargetCommit) {
     $gitShallow = Join-Path $repoRoot '.git\shallow'
     if (Test-Path -LiteralPath $gitShallow) {
         Write-Host '[ROLLBACK] Local clone is shallow. Fetching full branch history...' -ForegroundColor Yellow
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --unshallow --no-tags origin $fetchRefspec
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --unshallow --no-tags $remoteName $fetchRefspec
         if ($LASTEXITCODE -ne 0) { throw 'Unable to unshallow repository history.' }
     } else {
         Write-Host '[ROLLBACK] Target commit is not local. Fetching branch history again...' -ForegroundColor Yellow
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
         if ($LASTEXITCODE -ne 0) { throw 'Unable to fetch rollback commit history.' }
     }
     if (-not (Test-GitCommit $TargetCommit)) { throw "Rollback commit is not available from the configured branch: $TargetCommit" }
@@ -97,7 +103,7 @@ function Ensure-RollbackCommitAvailable([string]$TargetCommit) {
 
 function Assert-CommitBelongsToBranch([string]$TargetCommit) {
     & git merge-base --is-ancestor $TargetCommit $remoteRef 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Refusing rollback because target commit is not an ancestor of origin/${targetBranch}: $TargetCommit" }
+    if ($LASTEXITCODE -ne 0) { throw "Refusing rollback because target commit is not an ancestor of $($remoteName)/${targetBranch}: $TargetCommit" }
 }
 
 function Stop-ProjectRuntimeProcesses {
@@ -201,12 +207,11 @@ if (-not $Commit) {
     $Commit = [string]$state.previousSoftwareCommit
 }
 
-& git remote set-url origin $publicRemote
-if ($LASTEXITCODE -ne 0) { Fail 'Unable to configure the public GitHub remote.' }
-
 $oldPrompt = $env:GIT_TERMINAL_PROMPT
 $env:GIT_TERMINAL_PROMPT = '0'
 try {
+    $releaseTokenInfo = Get-ReleaseToken $releaseConfig
+    $releaseGitAuth = New-ReleaseGitAuthentication $releaseConfig $releaseTokenInfo.Value
     $rollbackFrom = (& git rev-parse HEAD).Trim()
     $runtimeBefore = Read-JsonFile $runtimeMarker
     if ($runtimeBefore -and $runtimeBefore.softwareCommit) { $rollbackFrom = [string]$runtimeBefore.softwareCommit }
@@ -231,10 +236,12 @@ try {
     Write-Host "[ROLLBACK] Switching source to $Commit..." -ForegroundColor Cyan
     & git checkout -f -B $targetBranch $Commit
     if ($LASTEXITCODE -ne 0) { throw "Unable to checkout rollback commit $Commit." }
-    & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+    & git branch --set-upstream-to="$remoteName/$targetBranch" $targetBranch *> $null
+    Restore-ReleaseSourceConfig $releaseSourceBackup
 
     & git clean -fd
     if ($LASTEXITCODE -ne 0) { throw 'git clean -fd failed.' }
+    Restore-ReleaseSourceConfig $releaseSourceBackup
 
     Invoke-Checked 'Validate Electron main process syntax' 'node.exe' @('--check', 'desktop\main.cjs')
     Ensure-Dependencies
@@ -282,5 +289,8 @@ try {
     Write-Host 'The rollback record remains in logs\rollback-state.json. Fix the reported error and run the rollback script again.' -ForegroundColor Yellow
     exit 1
 } finally {
+    Remove-ReleaseGitAuthentication $releaseGitAuth
     $env:GIT_TERMINAL_PROMPT = $oldPrompt
+    Restore-ReleaseSourceConfig $releaseSourceBackup
+    Remove-ReleaseSourceConfigBackup $releaseSourceBackup
 }

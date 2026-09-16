@@ -61,6 +61,8 @@ test('updater targets latest software commit instead of remote repository tip', 
   assert.match(script, /\$repositoryTipCommit = \(& git rev-parse \$remoteRef\)\.Trim\(\)/);
   assert.match(script, /\$remoteCommit = Get-LatestSoftwareCommit \$repositoryTipCommit/);
   assert.match(script, /git checkout -f -B \$targetBranch \$remoteCommit/);
+  assert.match(script, /Backup-ReleaseSourceConfig/);
+  assert.match(script, /Restore-ReleaseSourceConfig/);
   assert.doesNotMatch(script, /fast-forward local branch to latest log-only commit/i);
 });
 
@@ -71,7 +73,9 @@ test('diagnostic uploader commits on remote tip without moving local software HE
   assert.match(script, /\$env:GIT_INDEX_FILE = \$tempIndex/);
   assert.match(script, /git read-tree \$remoteTip/);
   assert.match(script, /git commit-tree \$tree -p \$remoteTip -m \$commitMessage/);
-  assert.match(script, /push origin "\$\{newCommit\}:refs\/heads\/\$branch"/);
+  assert.match(script, /push \$remoteName "\$\{newCommit\}:refs\/heads\/\$branch"/);
+  assert.match(script, /Get-ReleaseSourceConfig/);
+  assert.match(script, /Ensure-ReleaseRemote/);
   assert.match(script, /if \(\$afterSoftwareHead -ne \$softwareHead\)/);
   assert.doesNotMatch(script, /git commit --only/);
 });

@@ -9,7 +9,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Updating the current Git branch from GitHub...
+echo Updating the current Git branch from the configured release source...
 echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\update-current-branch.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"

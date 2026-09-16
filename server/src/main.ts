@@ -142,7 +142,7 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
 
     // A completed field test is persisted by FileFieldTestResultLogger as one
     // append to test-results-*.log. Watching that durable completion artifact
-    // keeps automatic GitHub upload inside the unified backend process and avoids
+    // keeps automatic release-source upload inside the unified backend process and avoids
     // coupling upload/network failures back into the inspection verdict path.
     const diagnosticUploadRuntime = startDiagnosticLogAutoUpload();
 

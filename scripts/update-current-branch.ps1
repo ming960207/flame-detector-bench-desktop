@@ -50,10 +50,16 @@ function Write-JsonFile([string]$PathValue, $Value) {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
+. (Join-Path $repoRoot 'scripts\release-source.ps1')
+$releaseConfig = Get-ReleaseSourceConfig -RepoRoot $repoRoot
+Ensure-ReleaseRemote $releaseConfig
+$releaseSourceBackup = Backup-ReleaseSourceConfig -RepoRoot $repoRoot
+$releaseGitAuth = $null
 
-$targetBranch = 'refactor/unified-backend'
-$publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
-$remoteRef = "refs/remotes/origin/$targetBranch"
+$targetBranch = $releaseConfig.Branch
+$publicRemote = $releaseConfig.RemoteUrl
+$remoteName = $releaseConfig.RemoteName
+$remoteRef = "refs/remotes/$remoteName/$targetBranch"
 $fetchRefspec = "+refs/heads/${targetBranch}:${remoteRef}"
 $runtimeMarker = Join-Path $repoRoot 'logs\runtime-build.json'
 $rollbackStatePath = Join-Path $repoRoot 'logs\rollback-state.json'
@@ -161,17 +167,17 @@ function Complete-RollbackState([string]$SoftwareCommit, [string]$RepositoryComm
     Write-JsonFile $rollbackStatePath $state
 }
 
-function Test-GitHubAccess([int]$Attempts = 3) {
+function Test-ReleaseAccess([int]$Attempts = 3) {
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        Write-Host "Checking GitHub repository access (attempt $attempt/$Attempts)..."
+        Write-Host "Checking $($releaseConfig.Label) repository access (attempt $attempt/$Attempts)..."
         & git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" *> $null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host 'GitHub access: OK' -ForegroundColor Green
+            Write-Host "$($releaseConfig.Label) access: OK" -ForegroundColor Green
             return $true
         }
         if ($attempt -lt $Attempts) {
             $delay = $attempt * 3
-            Write-Host "WARN: GitHub access check failed. Retrying in $delay seconds..." -ForegroundColor Yellow
+            Write-Host "WARN: $($releaseConfig.Label) access check failed. Retrying in $delay seconds..." -ForegroundColor Yellow
             Start-Sleep -Seconds $delay
         }
     }
@@ -180,8 +186,8 @@ function Test-GitHubAccess([int]$Attempts = 3) {
 
 function Fetch-TargetBranch([switch]$BestEffort) {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Write-Host "Fetching target branch (attempt $attempt/3)..."
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
+        Write-Host "Fetching target branch from $($releaseConfig.Label) (attempt $attempt/3)..."
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
         if ($LASTEXITCODE -eq 0) {
             & git rev-parse --verify $remoteRef *> $null
             if ($LASTEXITCODE -eq 0) { return $true }
@@ -193,7 +199,7 @@ function Fetch-TargetBranch([switch]$BestEffort) {
         }
     }
     if ($BestEffort) {
-        Write-Host 'WARN: GitHub became unavailable after source synchronization; the freshly rebuilt pinned runtime remains valid.' -ForegroundColor Yellow
+        Write-Host "WARN: $($releaseConfig.Label) became unavailable after source synchronization; the freshly rebuilt pinned runtime remains valid." -ForegroundColor Yellow
         return $false
     }
     throw 'git fetch failed after 3 attempts. Retry after checking network stability.'
@@ -307,12 +313,11 @@ if (-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) { Fail 'Win
 try { $insideRepo = (& git rev-parse --is-inside-work-tree 2>$null).Trim() } catch { Fail 'This script must be run from a Git working tree.' }
 if ($insideRepo -ne 'true') { Fail 'This script must be run from a Git working tree.' }
 
-& git remote set-url origin $publicRemote
-if ($LASTEXITCODE -ne 0) { Fail 'Unable to configure the public GitHub remote.' }
-
 $oldPrompt = $env:GIT_TERMINAL_PROMPT
 $env:GIT_TERMINAL_PROMPT = '0'
 try {
+    $releaseTokenInfo = Get-ReleaseToken $releaseConfig
+    $releaseGitAuth = New-ReleaseGitAuthentication $releaseConfig $releaseTokenInfo.Value
     $beforeFull = (& git rev-parse HEAD).Trim()
     $before = (& git rev-parse --short HEAD).Trim()
     Write-Host "Repository: $repoRoot"
@@ -332,7 +337,7 @@ try {
         Prepare-RollbackState $pinnedCommit
         Write-Host "[UPDATE] Resuming at synchronized software commit $((& git rev-parse --short HEAD).Trim())." -ForegroundColor Green
     } else {
-        if (-not (Test-GitHubAccess 3)) { Fail 'GitHub repository is not reachable after 3 attempts or the target branch does not exist.' }
+        if (-not (Test-ReleaseAccess 3)) { Fail "$($releaseConfig.Label) repository is not reachable after 3 attempts or the target branch does not exist." }
     }
 
     Stop-ProjectRuntimeProcesses
@@ -356,13 +361,15 @@ try {
             }
             & git checkout -f -B $targetBranch $remoteCommit
             if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to software commit $remoteCommit." }
-            & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+            & git branch --set-upstream-to="$remoteName/$targetBranch" $targetBranch *> $null
+            Restore-ReleaseSourceConfig $releaseSourceBackup
             Restart-WithUpdatedUpdaterIfNeeded $remoteCommit
         }
 
         Write-Host 'Removing non-ignored untracked files and directories...'
         & git clean -fd
         if ($LASTEXITCODE -ne 0) { throw 'git clean -fd failed.' }
+        Restore-ReleaseSourceConfig $releaseSourceBackup
 
         $softwareCommit = (& git rev-parse HEAD).Trim()
         if ($softwareCommit -ne $remoteCommit) { throw 'Local source commit does not match pinned software commit.' }
@@ -439,5 +446,8 @@ try {
     }
     exit 1
 } finally {
+    Remove-ReleaseGitAuthentication $releaseGitAuth
     $env:GIT_TERMINAL_PROMPT = $oldPrompt
+    Restore-ReleaseSourceConfig $releaseSourceBackup
+    Remove-ReleaseSourceConfigBackup $releaseSourceBackup
 }

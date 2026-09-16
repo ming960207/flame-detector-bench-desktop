@@ -10,6 +10,7 @@ import {
   type FSWatcher,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { loadSoftwareReleaseConfig, type SoftwareReleaseConfig } from './software-release-config.js';
 
 export interface DiagnosticLogAutoUploadRuntime {
   close(): Promise<void>;
@@ -50,11 +51,31 @@ interface GitHubObjectResponse {
   sha?: string;
 }
 
+interface GiteeCommitResponse {
+  sha?: string;
+  id?: string | number;
+}
+
+interface GiteeCommitFile {
+  path: string;
+  content: Buffer;
+}
+
 class GitHubApiError extends Error {
   constructor(
     readonly status: number,
     readonly body: string,
     message = `GITHUB_API_${status}`,
+  ) {
+    super(`${message}: ${body.slice(0, 600)}`);
+  }
+}
+
+class GiteeApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+    message = `GITEE_API_${status}`,
   ) {
     super(`${message}: ${body.slice(0, 600)}`);
   }
@@ -186,6 +207,42 @@ export function extractLatestCompletedBatchId(text: string): string | null {
   const matches = Array.from(text.matchAll(/批次：([^|\r\n]+)/g));
   const latest = matches.at(-1)?.[1]?.trim();
   return latest || null;
+}
+
+export interface GiteeCommitRequest {
+  branch: string;
+  message: string;
+  actions: Array<{
+    action: 'create';
+    path: string;
+    content: string;
+    encoding: 'base64';
+  }>;
+  author: {
+    name: string;
+    email: string;
+  };
+}
+
+export function buildGiteeCommitRequest(input: {
+  branch: string;
+  message: string;
+  files: GiteeCommitFile[];
+}): GiteeCommitRequest {
+  return {
+    branch: input.branch,
+    message: input.message,
+    actions: input.files.map((file) => ({
+      action: 'create' as const,
+      path: file.path,
+      content: file.content.toString('base64'),
+      encoding: 'base64' as const,
+    })),
+    author: {
+      name: 'Flame Detector Bench',
+      email: 'flame-detector-bench@local.invalid',
+    },
+  };
 }
 
 class GitHubDiagnosticUploader {
@@ -376,6 +433,147 @@ class GitHubDiagnosticUploader {
   }
 }
 
+class GiteeDiagnosticUploader {
+  private readonly offsets = new Map<string, number>();
+  private readonly resultDirectory: string;
+  private readonly desktopLogDirectory: string;
+  private readonly maxDeltaBytes: number;
+  private readonly token: string;
+  private readonly owner: string;
+  private readonly repo: string;
+  private readonly branch: string;
+
+  constructor(resultDirectory: string, private readonly config: SoftwareReleaseConfig) {
+    this.resultDirectory = resultDirectory;
+    this.desktopLogDirectory = defaultDesktopLogDirectory(resultDirectory);
+    this.maxDeltaBytes = positiveIntegerEnv('FLAME_BENCH_AUTO_UPLOAD_MAX_FILE_BYTES', DEFAULT_MAX_DELTA_BYTES);
+    this.token = String(process.env.GITEE_ACCESS_TOKEN || process.env.FLAME_BENCH_GITEE_TOKEN || '').trim();
+    this.owner = config.repositorySlug?.owner || '';
+    this.repo = config.repositorySlug?.repo || '';
+    this.branch = config.branch;
+    this.seedOffsets();
+  }
+
+  private seedOffsets(): void {
+    for (const file of diagnosticSourceFiles(this.resultDirectory, this.desktopLogDirectory)) {
+      try { this.offsets.set(file, statSync(file).size); } catch { /* best effort */ }
+    }
+  }
+
+  private collectDeltas(): DiagnosticSourceSnapshot[] {
+    const snapshots: DiagnosticSourceSnapshot[] = [];
+    for (const file of diagnosticSourceFiles(this.resultDirectory, this.desktopLogDirectory)) {
+      try {
+        const size = statSync(file).size;
+        const previous = this.offsets.get(file) ?? 0;
+        let start = size < previous ? 0 : previous;
+        let truncated = false;
+        if (size - start > this.maxDeltaBytes) {
+          start = Math.max(0, size - this.maxDeltaBytes);
+          truncated = true;
+        }
+        if (size <= start) continue;
+        const content = readRange(file, start, size);
+        if (content.length === 0) continue;
+        snapshots.push({
+          sourcePath: file,
+          archivePath: archiveRelativePath(file, this.resultDirectory, this.desktopLogDirectory),
+          start,
+          end: size,
+          truncated,
+          content,
+        });
+      } catch {
+        // Logs can rotate while a test is completing. Continue with the remaining files.
+      }
+    }
+    return snapshots;
+  }
+
+  private markUploaded(snapshots: DiagnosticSourceSnapshot[]): void {
+    for (const snapshot of snapshots) this.offsets.set(snapshot.sourcePath, snapshot.end);
+  }
+
+  private async api<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const url = new URL(`https://gitee.com/api/v5${path}`);
+    url.searchParams.set('access_token', this.token);
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'flame-detector-bench-auto-log-uploader',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new GiteeApiError(response.status, text);
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
+  }
+
+  private repoPath(path: string): string {
+    return `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}${path}`;
+  }
+
+  private async commitFiles(files: GiteeCommitFile[], message: string): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const commit = await this.api<GiteeCommitResponse>('POST', this.repoPath('/commits'), buildGiteeCommitRequest({
+          branch: this.branch,
+          message,
+          files,
+        }));
+        const sha = String(commit.sha ?? commit.id ?? '').trim();
+        if (!sha) throw new Error('GITEE_COMMIT_SHA_MISSING');
+        return sha;
+      } catch (error) {
+        lastError = error;
+        const retryable = error instanceof GiteeApiError && (error.status === 409 || error.status === 422);
+        if (!retryable || attempt >= 3) throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  async upload(batchId: string | null): Promise<void> {
+    if (!this.token) {
+      throw new Error('GITEE_TOKEN_MISSING: configure GITEE_ACCESS_TOKEN or FLAME_BENCH_GITEE_TOKEN; automatic uploads never prompt interactively');
+    }
+    if (!this.owner || !this.repo || !this.branch) throw new Error('GITEE_AUTO_UPLOAD_CONFIGURATION_INVALID');
+
+    const snapshots = this.collectDeltas();
+    if (snapshots.length === 0) throw new Error('NO_NEW_DIAGNOSTIC_LOG_DATA');
+
+    const stamp = compactStamp();
+    const archiveRoot = `diagnostic-logs/${stamp}-${safeBatchSlug(batchId)}`;
+    const manifest = Buffer.from([
+      'Flame detector bench automatic diagnostic upload',
+      `Captured: ${new Date().toISOString()}`,
+      `Batch: ${batchId ?? '-'}`,
+      `Repository: ${this.owner}/${this.repo}`,
+      `Branch: ${this.branch}`,
+      `Provider: ${this.config.label}`,
+      `Result directory: ${this.resultDirectory}`,
+      `Desktop log directory: ${this.desktopLogDirectory}`,
+      `File count: ${snapshots.length}`,
+      ...snapshots.map((item) => (
+        `${item.archivePath}: source=${item.sourcePath}; bytes=${item.start}-${item.end}; truncated=${item.truncated ? 'yes' : 'no'}`
+      )),
+      '',
+    ].join('\n'), 'utf8');
+    const files = [
+      ...snapshots.map((item) => ({ path: `${archiveRoot}/${item.archivePath}`, content: item.content })),
+      { path: `${archiveRoot}/manifest.txt`, content: manifest },
+    ];
+    const commitSha = await this.commitFiles(files, `logs: auto upload completed batch ${batchId ?? 'unknown'} ${stamp}`);
+    this.markUploaded(snapshots);
+    console.log(`[日志自动上传] Gitee commit=${commitSha} path=${archiveRoot}`);
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
@@ -391,7 +589,14 @@ export function startDiagnosticLogAutoUpload(options: DiagnosticLogAutoUploadOpt
 
   const directory = options.directory ?? defaultResultLogDirectory();
   const debounceMs = Math.max(50, options.debounceMs ?? DEFAULT_DEBOUNCE_MS);
-  const nativeUploader = options.upload ? null : new GitHubDiagnosticUploader(directory);
+  const nativeUploader = options.upload
+    ? null
+    : (() => {
+      const releaseConfig = loadSoftwareReleaseConfig();
+      return releaseConfig.source === 'gitee'
+        ? new GiteeDiagnosticUploader(directory, releaseConfig)
+        : new GitHubDiagnosticUploader(directory);
+    })();
   const upload = options.upload ?? ((batchId: string | null) => nativeUploader!.upload(batchId));
   const knownSizes = new Map<string, number>();
   const queuedKeys = new Set<string>();

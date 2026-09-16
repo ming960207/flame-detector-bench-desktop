@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, Github, Info, LoaderCircle, RefreshCw, RotateCcw, UploadCloud, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, GitBranch, Info, LoaderCircle, RefreshCw, RotateCcw, UploadCloud, X } from 'lucide-react';
 import './software-release.css';
 
 interface SoftwareVersionSnapshot {
   available: boolean;
+  source: 'git' | 'gitee';
+  provider: string;
   repository: string;
   branch: string;
   packageVersion: string;
@@ -56,6 +58,7 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
   const [notice, setNotice] = useState('正在读取版本信息…');
   const [issueReference, setIssueReference] = useState('');
   const [issueNote, setIssueNote] = useState('');
+  const providerName = snapshot?.provider ?? 'GitHub';
 
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
@@ -64,7 +67,7 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
       const payload = await response.json() as SoftwareVersionSnapshot & { error?: string };
       if (!response.ok) throw new Error(payload.error || `版本信息读取失败 (${response.status})`);
       setSnapshot(payload);
-      setNotice(payload.latest ? '版本信息已同步 GitHub' : '当前无法读取 GitHub 最新版本');
+      setNotice(payload.latest ? `版本信息已同步 ${payload.provider || 'GitHub'}` : `当前无法读取 ${payload.provider || 'GitHub'} 最新版本`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '版本信息读取失败');
     } finally {
@@ -97,7 +100,7 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
 
   const update = () => {
     if (!snapshot?.updateAvailable) return;
-    if (!window.confirm(`确认更新到 GitHub 最新版本 ${snapshot.latest?.shortCommit ?? ''}？更新会停止当前运行服务并重新构建程序。`)) return;
+    if (!window.confirm(`确认更新到 ${providerName} 最新版本 ${snapshot.latest?.shortCommit ?? ''}？更新会停止当前运行服务并重新构建程序。`)) return;
     void runAction('/api/software/update');
   };
 
@@ -108,7 +111,7 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
   };
 
   const submitLogs = () => {
-    if (!window.confirm('确认提交当前诊断日志？问题编号和描述会写入本次 GitHub 日志包清单。')) return;
+    if (!window.confirm(`确认提交当前诊断日志？问题编号和描述会写入本次 ${providerName} 日志包清单。`)) return;
     void runAction('/api/software/logs/submit', { issueReference, issueNote });
   };
 
@@ -119,7 +122,7 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
           <div>
             <span className="section-kicker"><Info /> SOFTWARE / RELEASE CONTROL</span>
             <h2 id="software-release-title">关于与版本管理</h2>
-            <p>查询 GitHub 唯一提交版本、构建时间，并在确认后执行更新、日志提交或版本回退。</p>
+            <p>查询 {providerName} 唯一提交版本、构建时间，并在确认后执行更新、日志提交或版本回退。</p>
           </div>
           <button type="button" className="software-release-panel__close" onClick={onClose} aria-label="关闭版本管理"><X /></button>
         </header>
@@ -129,36 +132,36 @@ export function SoftwareReleasePanel({ backendHttpUrl, onClose }: SoftwareReleas
             <div className="software-release-card-title"><div><span>当前安装版本</span><strong>{snapshot?.current.shortCommit ?? '读取中…'}</strong></div><span className="software-release-badge">{snapshot?.branch ?? 'branch'}</span></div>
             <div className="software-release-facts">
               <span><b>程序版本</b><em>v{snapshot?.packageVersion ?? '—'}</em></span>
-              <span><b>GitHub 唯一值</b><em>{snapshot?.current.commit ?? '—'}</em></span>
+              <span><b>{providerName} 唯一值</b><em>{snapshot?.current.commit ?? '—'}</em></span>
               <span><b>提交时间</b><em>{formatTime(snapshot?.current.commitDate)}</em></span>
               <span><b>构建时间</b><em>{snapshot?.current.builtAt ? formatTime(snapshot.current.builtAt) : '开发运行时'}</em></span>
             </div>
           </section>
 
           <section className={`software-release-latest-card ${snapshot?.updateAvailable ? 'is-update' : ''}`}>
-            <div className="software-release-card-title"><div><span>GitHub 最新程序</span><strong>{snapshot?.latest?.shortCommit ?? '未获取'}</strong></div><button type="button" onClick={() => void loadSnapshot()} disabled={loading || busy} aria-label="刷新版本信息"><RefreshCw className={loading ? 'is-spinning' : ''} /></button></div>
-            <p>{snapshot?.latest ? `远端提交：${snapshot.latest.commit}` : '请检查网络连接或 GitHub 访问权限。'}</p>
-            <div className="software-release-latest-state">{snapshot?.updateAvailable ? <><AlertTriangle />发现新版本，可执行更新</> : snapshot?.latest ? <><CheckCircle2 />当前已是 GitHub 最新版本</> : <><AlertTriangle />暂时无法比较版本</>}</div>
+            <div className="software-release-card-title"><div><span>{providerName} 最新程序</span><strong>{snapshot?.latest?.shortCommit ?? '未获取'}</strong></div><button type="button" onClick={() => void loadSnapshot()} disabled={loading || busy} aria-label="刷新版本信息"><RefreshCw className={loading ? 'is-spinning' : ''} /></button></div>
+            <p>{snapshot?.latest ? `远端提交：${snapshot.latest.commit}` : `请检查网络连接或 ${providerName} 访问权限。`}</p>
+            <div className="software-release-latest-state">{snapshot?.updateAvailable ? <><AlertTriangle />发现新版本，可执行更新</> : snapshot?.latest ? <><CheckCircle2 />当前已是 {providerName} 最新版本</> : <><AlertTriangle />暂时无法比较版本</>}</div>
           </section>
 
           <section className="software-release-actions-card">
-            <div className="software-release-card-title"><div><span>程序操作</span><strong>需确认后执行</strong></div><Github /></div>
+            <div className="software-release-card-title"><div><span>程序操作</span><strong>需确认后执行</strong></div><GitBranch /></div>
             <div className="software-release-actions">
               <button type="button" className="is-primary" onClick={update} disabled={busy || loading || !snapshot?.capabilities.update || !snapshot?.updateAvailable}><RefreshCw />一键更新程序</button>
               <button type="button" onClick={rollback} disabled={busy || loading || !snapshot?.rollback.available}><RotateCcw />版本回退</button>
-              <a href={`${snapshot?.repository ?? 'https://github.com/ming960207/flame-detector-bench-desktop'}/commits/${snapshot?.branch ?? 'refactor/unified-backend'}`} target="_blank" rel="noreferrer"><ExternalLink />查看 GitHub 提交</a>
+              <a href={`${snapshot?.repository ?? 'https://github.com/ming960207/flame-detector-bench-desktop'}/commits/${snapshot?.branch ?? 'refactor/unified-backend'}`} target="_blank" rel="noreferrer"><ExternalLink />查看 {providerName} 提交</a>
             </div>
             <small>更新/回退完成后，浏览器开发模式请重新运行 `start-all.bat`；桌面模式按脚本提示自动重启。</small>
           </section>
 
           <section className="software-release-logs-card">
-            <div className="software-release-card-title"><div><span>诊断日志</span><strong>可关联 GitHub 问题</strong></div><UploadCloud /></div>
+            <div className="software-release-card-title"><div><span>诊断日志</span><strong>可关联 {providerName} 问题</strong></div><UploadCloud /></div>
             <div className="software-release-log-form">
-              <label>问题编号或链接<input value={issueReference} onChange={(event) => setIssueReference(event.target.value)} placeholder="如 #123 或 GitHub Issue URL" maxLength={200} /></label>
+              <label>问题编号或链接<input value={issueReference} onChange={(event) => setIssueReference(event.target.value)} placeholder={`如 #123 或 ${providerName} Issue URL`} maxLength={200} /></label>
               <label>问题说明<textarea value={issueNote} onChange={(event) => setIssueNote(event.target.value)} placeholder="填写现场现象、复现步骤或关联说明" maxLength={1000} rows={3} /></label>
             </div>
             <button type="button" className="is-primary software-release-submit" onClick={submitLogs} disabled={busy || !snapshot?.capabilities.logSubmit}><UploadCloud />提交当前诊断日志</button>
-            <small>日志包会提交到 GitHub 的 `diagnostic-logs/`，并把关联问题写入 manifest。</small>
+            <small>日志包会提交到 {providerName} 的 `diagnostic-logs/`，并把关联问题写入 manifest。</small>
           </section>
         </div>
 
