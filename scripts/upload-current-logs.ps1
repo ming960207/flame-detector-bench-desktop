@@ -36,8 +36,11 @@ if ($insideRepo -ne 'true') { Fail 'This script must be run from a Git working t
 
 $branch = (& git rev-parse --abbrev-ref HEAD).Trim()
 if (-not $branch -or $branch -eq 'HEAD') { Fail 'Detached HEAD is not supported. Check out a branch first.' }
+$softwareHead = (& git rev-parse HEAD).Trim()
 
 $publicRemote = 'https://github.com/ming960207/flame-detector-bench-desktop.git'
+$remoteRef = "refs/remotes/origin/$branch"
+$fetchRefspec = "+refs/heads/${branch}:${remoteRef}"
 & git remote set-url origin $publicRemote
 if ($LASTEXITCODE -ne 0) { Fail 'Unable to configure the GitHub remote.' }
 
@@ -72,6 +75,7 @@ if ($LASTEXITCODE -ne 0) { Fail 'Failed to configure repository-local Git user.e
 Write-Host "Git identity: $deviceGitName <$deviceGitEmail>"
 Write-Host 'Git identity scope: repository only'
 Write-Host "Authentication: $tokenSource, no local Git login"
+Write-Host "Software checkout remains pinned at: $($softwareHead.Substring(0, [Math]::Min(12, $softwareHead.Length)))"
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $batchSlug = ($BatchId -replace '[^A-Za-z0-9._-]', '_').Trim('_')
@@ -122,7 +126,8 @@ $manifest = @(
     "Mode: $modeText",
     "Batch: $batchText",
     "Branch: $branch",
-    "Source commit: $head",
+    "Source software commit: $head",
+    'Version impact: none (diagnostic-only commit)',
     "Git author: $deviceGitName <$deviceGitEmail>",
     "File count: $copied",
     "Issue reference: $(if ($IssueReference) { $IssueReference } else { '-' })",
@@ -135,10 +140,9 @@ Write-Host "Files: $copied"
 Write-Host "Batch: $batchText"
 Write-Host "Branch: $branch"
 Write-Host "Remote: $publicRemote"
+Write-Host 'Version impact: none'
 Write-Host ''
 
-& git -c core.autocrlf=false add -f -- $archiveRelative
-if ($LASTEXITCODE -ne 0) { Fail 'git add failed.' }
 $commitMessage = if ($Automatic -and $BatchId) {
     "logs: auto upload completed batch $BatchId $stamp"
 } elseif ($Automatic) {
@@ -146,8 +150,6 @@ $commitMessage = if ($Automatic -and $BatchId) {
 } else {
     "logs: upload diagnostic logs $stamp"
 }
-& git commit --only -m $commitMessage -- $archiveRelative
-if ($LASTEXITCODE -ne 0) { Fail 'git commit failed.' }
 
 $askPass = Join-Path $env:TEMP "flame-bench-git-askpass-$PID.cmd"
 $askPassContent = @(
@@ -164,16 +166,46 @@ Set-Content -LiteralPath $askPass -Value $askPassContent -Encoding ASCII
 $oldAskPass = $env:GIT_ASKPASS
 $oldPrompt = $env:GIT_TERMINAL_PROMPT
 $oldAskPassValue = $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE
+$oldIndexFile = $env:GIT_INDEX_FILE
+$tempIndex = Join-Path $env:TEMP "flame-bench-log-index-$PID"
+$newCommit = ''
 try {
     $env:GIT_ASKPASS = $askPass
     $env:GIT_TERMINAL_PROMPT = '0'
     $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $token
-    Write-Host 'Uploading diagnostic commit to GitHub...'
-    & git -c credential.helper= -c http.version=HTTP/1.1 push origin $branch
-    if ($LASTEXITCODE -ne 0) {
+
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Write-Host "Synchronizing remote log base (attempt $attempt/2)..."
+        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags origin $fetchRefspec
+        if ($LASTEXITCODE -ne 0) {
+            if ($attempt -lt 2) { Start-Sleep -Seconds 2; continue }
+            Fail 'Unable to fetch the remote branch before log upload.'
+        }
+        $remoteTip = (& git rev-parse $remoteRef).Trim()
+        if (-not $remoteTip) { Fail 'Unable to resolve the remote branch tip before log upload.' }
+
+        Remove-Item -LiteralPath $tempIndex -Force -ErrorAction SilentlyContinue
+        $env:GIT_INDEX_FILE = $tempIndex
+        & git read-tree $remoteTip
+        if ($LASTEXITCODE -ne 0) { Fail 'Unable to prepare the isolated diagnostic-log index.' }
+        & git -c core.autocrlf=false add -f -- $archiveRelative
+        if ($LASTEXITCODE -ne 0) { Fail 'Unable to stage the diagnostic package in the isolated index.' }
+        $tree = (& git write-tree).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $tree) { Fail 'Unable to create the diagnostic-log tree.' }
+        $newCommit = (& git commit-tree $tree -p $remoteTip -m $commitMessage).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $newCommit) { Fail 'Unable to create the diagnostic-only commit.' }
+
+        Write-Host 'Uploading diagnostic-only commit to GitHub...'
+        & git -c credential.helper= -c http.version=HTTP/1.1 push origin "${newCommit}:refs/heads/$branch"
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($attempt -lt 2) {
+            Write-Host 'WARN: Remote advanced during log upload. Rebuilding the diagnostic commit on the newest remote tip...' -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+            continue
+        }
         Write-Host ''
-        Write-Host 'The local log commit was created, but authenticated push failed.'
-        Write-Host 'The inspection result remains valid and the next automatic upload may retry the pending local commit.'
+        Write-Host 'The diagnostic package was created locally, but authenticated push failed.'
+        Write-Host 'The software checkout and inspection result remain unchanged.'
         Write-Host 'Required token access: this repository, Contents = Read and write.'
         exit 1
     }
@@ -181,11 +213,18 @@ try {
     $env:GIT_ASKPASS = $oldAskPass
     $env:GIT_TERMINAL_PROMPT = $oldPrompt
     $env:FLAME_BENCH_GITHUB_ASKPASS_VALUE = $oldAskPassValue
+    $env:GIT_INDEX_FILE = $oldIndexFile
+    Remove-Item -LiteralPath $tempIndex -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $askPass -Force -ErrorAction SilentlyContinue
 }
-$newHead = (& git rev-parse --short HEAD).Trim()
+
+$afterSoftwareHead = (& git rev-parse HEAD).Trim()
+if ($afterSoftwareHead -ne $softwareHead) {
+    Fail 'Diagnostic upload unexpectedly changed the local software checkout.'
+}
 Write-Host ''
-Write-Host 'SUCCESS: Diagnostic logs were uploaded to GitHub.'
-Write-Host "Commit: $newHead"
+Write-Host 'SUCCESS: Diagnostic logs were uploaded to GitHub without changing the software version.'
+Write-Host "Log commit: $($newCommit.Substring(0, [Math]::Min(12, $newCommit.Length)))"
+Write-Host "Software checkout: $($softwareHead.Substring(0, [Math]::Min(12, $softwareHead.Length))) (unchanged)"
 Write-Host "Path: $archiveRelative"
 exit 0

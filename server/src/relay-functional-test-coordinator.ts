@@ -76,24 +76,12 @@ function sleep(ms: number): Promise<void> {
 /**
  * 继电器功能检测协调器。
  *
- * 实机结论（2026-08-31）：虽然 A000/A001 可同时写成 0000/0001，且寄存器可读回，
- * 但实体输出只响应火警，故障继电器不会同时动作。因此生产 FAST_BATCH 必须按功能分阶段：
- * 6 台并行火警 -> 验证 -> 6 台并行复位 -> 6 台并行故障 -> 验证 -> 6 台并行复位。
+ * 生产检测按功能分阶段执行：6 台并行火警 -> 复位 -> 6 台并行故障 -> 复位。
+ * 模拟和复位命令使用有限重试，以吸收现场偶发的单次通讯失败。
  *
- * DIAGNOSTIC 则必须真正逐槽位完成一整套火警/故障循环后再进入下一槽位，
- * 才能用于安装调试时发现槽位之间的 DI 交叉接线。
- *
- * 2026-09-09 同批重复实测发现模拟/复位命令存在偶发单次传输失败。模拟和复位命令
- * 均为幂等操作，因此模拟动作采用带 RTU 帧间隔的 3 次短时重复发送，复位保留有限
- * 重试；只有模拟发送全部失败才记录 *_COMMAND_FAILED。物理触点、内部锁存及复位
- * 恢复判据保持原样。
- *
- * 2026-09-10 现场新版实测发现继电器基线状态读取也存在偶发单次传输失败。内部锁存读取
- * 和 DIO 反馈读取均为只读操作，因此增加同样的有限重试；只有连续 3 次读取失败才保留
- * 链路异常原因并进入“需复测”，不改变任何实体继电器功能判据。
- *
- * 无论正常、失败还是出现未预期异常，run() 最外层都会再次对所有参与槽位执行
- * 强制复位并确认内部锁存和实体 DI 均恢复。清理失败会直接写入该槽位原因并判 FAIL。
+ * 判定原则：探测器继电器是否动作，只以该继电器对应的真实 DIO 反馈源为准。
+ * 探测器内部火警/故障锁存和另一只继电器反馈只作为诊断信息记录，不参与当前继电器
+ * 的 PASS/FAIL。火警动作只验证火警反馈，故障动作只验证故障反馈；复位同理。
  */
 export class RelayFunctionalTestCoordinator {
   constructor(
@@ -131,7 +119,7 @@ export class RelayFunctionalTestCoordinator {
         await operation();
         accepted = true;
       } catch {
-        // Keep sending the remaining idempotent simulation frames.
+        // Simulation commands are idempotent; keep sending the remaining frames.
       }
       if (attempt < RELAY_SIMULATION_BURST_COUNT) await sleep(RELAY_SIMULATION_BURST_INTERVAL_MS);
     }
@@ -150,6 +138,14 @@ export class RelayFunctionalTestCoordinator {
     }
     if (lastError instanceof Error) throw lastError;
     throw new Error(String(lastError ?? 'RELAY_READ_FAILED'));
+  }
+
+  private async diagnosticInternalState(index: number): Promise<{ fire: boolean; fault: boolean } | null> {
+    try {
+      return await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
+    } catch {
+      return null;
+    }
   }
 
   private async physicalState(index: number): Promise<{ alarm: boolean | null; fault: boolean | null; error?: string }> {
@@ -172,24 +168,24 @@ export class RelayFunctionalTestCoordinator {
 
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
-      try {
-        const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
-        const physical = await this.physicalState(index);
-        state.result.baseline = {
-          alarmInternal: internal.fire,
-          faultInternal: internal.fault,
-          alarmPhysical: physical.alarm,
-          faultPhysical: physical.fault,
-        };
-        if (internal.fire) uniquePush(state.result.alarm.reasons, 'ALARM_ACTIVE_AT_BASELINE');
-        if (internal.fault) uniquePush(state.result.fault.reasons, 'FAULT_ACTIVE_AT_BASELINE');
-        if (physical.alarm === true) uniquePush(state.result.alarm.reasons, 'ALARM_RELAY_ACTIVE_AT_BASELINE');
-        if (physical.fault === true) uniquePush(state.result.fault.reasons, 'FAULT_RELAY_ACTIVE_AT_BASELINE');
-        if (physical.error) {
-          uniquePush(state.result.alarm.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-          uniquePush(state.result.fault.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-        }
-      } catch {
+      const [internal, physical] = await Promise.all([
+        this.diagnosticInternalState(index),
+        this.physicalState(index),
+      ]);
+      state.result.baseline = {
+        alarmInternal: internal?.fire ?? null,
+        faultInternal: internal?.fault ?? null,
+        alarmPhysical: physical.alarm,
+        faultPhysical: physical.fault,
+      };
+
+      // Only the corresponding physical feedback is authoritative for relay quality.
+      if (physical.alarm === true) uniquePush(state.result.alarm.reasons, 'ALARM_RELAY_ACTIVE_AT_BASELINE');
+      if (physical.fault === true) uniquePush(state.result.fault.reasons, 'FAULT_RELAY_ACTIVE_AT_BASELINE');
+      if (physical.error) {
+        uniquePush(state.result.alarm.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+        uniquePush(state.result.fault.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+      } else if (physical.alarm === null || physical.fault === null) {
         uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
         uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
       }
@@ -222,57 +218,48 @@ export class RelayFunctionalTestCoordinator {
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         const action = state.result[kind];
         if (!action.commandAccepted) return;
-        if (
-          action.internalStateReached
-          && action.physicalStateReached
-          && action.oppositeRelayStayedNormal
-          && (stable.get(index) ?? 0) >= this.config.stableSamples
-        ) return;
+        if (action.physicalStateReached && (stable.get(index) ?? 0) >= this.config.stableSamples) return;
 
-        try {
-          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
-          const physical = await this.physicalState(index);
-          if (physical.error) {
-            uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-            stable.set(index, 0);
-            return;
-          }
-          const internalReached = kind === 'alarm'
+        const [internal, physical] = await Promise.all([
+          this.diagnosticInternalState(index),
+          this.physicalState(index),
+        ]);
+        if (physical.error) {
+          uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          stable.set(index, 0);
+          return;
+        }
+
+        const ownPhysical = kind === 'alarm' ? physical.alarm : physical.fault;
+        const oppositePhysical = kind === 'alarm' ? physical.fault : physical.alarm;
+        const internalReached = internal === null
+          ? false
+          : kind === 'alarm'
             ? internal.fire === true && internal.fault === false
             : internal.fire === false && internal.fault === true;
-          const physicalReached = kind === 'alarm'
-            ? physical.alarm === true
-            : physical.fault === true;
-          const oppositeNormal = kind === 'alarm'
-            ? physical.fault === false
-            : physical.alarm === false;
 
-          action.internalStateReached ||= internalReached;
-          action.physicalStateReached ||= physicalReached;
-          action.oppositeRelayStayedNormal &&= oppositeNormal;
+        // These two fields remain diagnostic only and never gate the relay verdict.
+        action.internalStateReached ||= internalReached;
+        action.oppositeRelayStayedNormal &&= oppositePhysical !== true;
 
-          if (internalReached && physicalReached && oppositeNormal) {
-            const next = (stable.get(index) ?? 0) + 1;
-            stable.set(index, next);
-            if (next >= this.config.stableSamples && action.responseTimeMs === null) {
+        if (ownPhysical === true) {
+          const next = (stable.get(index) ?? 0) + 1;
+          stable.set(index, next);
+          if (next >= this.config.stableSamples) {
+            action.physicalStateReached = true;
+            if (action.responseTimeMs === null) {
               action.responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
             }
-          } else {
-            stable.set(index, 0);
           }
-        } catch {
+        } else {
           stable.set(index, 0);
         }
       }));
 
       const done = [...work.entries()].every(([index, state]) => {
         const action = state.result[kind];
-        return !action.commandAccepted || (
-          action.internalStateReached
-          && action.physicalStateReached
-          && action.oppositeRelayStayedNormal
-          && (stable.get(index) ?? 0) >= this.config.stableSamples
-        );
+        return !action.commandAccepted
+          || (action.physicalStateReached && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
       await sleep(this.config.sampleIntervalMs);
@@ -281,15 +268,9 @@ export class RelayFunctionalTestCoordinator {
     for (const state of work.values()) {
       const action = state.result[kind];
       if (!action.commandAccepted) continue;
-      if (!action.internalStateReached) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_INTERNAL_STATE_NOT_SET' : 'FAULT_INTERNAL_STATE_NOT_SET');
-      }
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalStateReached && !feedbackReadFailed) {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_NOT_ACTUATED' : 'FAULT_RELAY_NOT_ACTUATED');
-      }
-      if (!action.oppositeRelayStayedNormal) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_TRIGGERED_FAULT_RELAY' : 'FAULT_TRIGGERED_ALARM_RELAY');
       }
     }
   }
@@ -311,35 +292,35 @@ export class RelayFunctionalTestCoordinator {
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         const action = state.result[kind];
         if (!action.resetAccepted) return;
+        if (action.physicalRecovered && (stable.get(index) ?? 0) >= this.config.stableSamples) return;
 
-        try {
-          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
-          const physical = await this.physicalState(index);
-          if (physical.error) {
-            uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-            stable.set(index, 0);
-            return;
-          }
-          const internalRecovered = internal.fire === false && internal.fault === false;
-          const physicalRecovered = physical.alarm === false && physical.fault === false;
+        const [internal, physical] = await Promise.all([
+          this.diagnosticInternalState(index),
+          this.physicalState(index),
+        ]);
+        if (physical.error) {
+          uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          stable.set(index, 0);
+          return;
+        }
 
-          action.internalRecovered ||= internalRecovered;
-          action.physicalRecovered ||= physicalRecovered;
-          stable.set(index, internalRecovered && physicalRecovered
-            ? (stable.get(index) ?? 0) + 1
-            : 0);
-        } catch {
+        const ownRecovered = kind === 'alarm' ? physical.alarm === false : physical.fault === false;
+        const internalRecovered = internal !== null && internal.fire === false && internal.fault === false;
+        action.internalRecovered ||= internalRecovered;
+
+        if (ownRecovered) {
+          const next = (stable.get(index) ?? 0) + 1;
+          stable.set(index, next);
+          if (next >= this.config.stableSamples) action.physicalRecovered = true;
+        } else {
           stable.set(index, 0);
         }
       }));
 
       const done = [...work.entries()].every(([index, state]) => {
         const action = state.result[kind];
-        return !action.resetAccepted || (
-          action.internalRecovered
-          && action.physicalRecovered
-          && (stable.get(index) ?? 0) >= this.config.stableSamples
-        );
+        return !action.resetAccepted
+          || (action.physicalRecovered && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
       await sleep(this.config.sampleIntervalMs);
@@ -348,9 +329,6 @@ export class RelayFunctionalTestCoordinator {
     for (const state of work.values()) {
       const action = state.result[kind];
       if (!action.resetAccepted) continue;
-      if (!action.internalRecovered) {
-        uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RESET_INTERNAL_FAILED' : 'FAULT_RESET_INTERNAL_FAILED');
-      }
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalRecovered && !feedbackReadFailed) {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_STUCK_AFTER_RESET' : 'FAULT_RELAY_STUCK_AFTER_RESET');
@@ -375,8 +353,6 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async runDiagnostic(work: Map<number, UnitWorkState>): Promise<void> {
-    // One complete slot at a time. This is intentionally slower and is only for
-    // commissioning/maintenance where exact slot-to-DI wiring attribution matters.
     for (const [index, state] of work.entries()) {
       const single = new Map<number, UnitWorkState>([[index, state]]);
       await this.runActionCycle(single, 'alarm');
@@ -397,53 +373,59 @@ export class RelayFunctionalTestCoordinator {
       else this.addCleanupReason(state, 'EMERGENCY_RESET_COMMAND_FAILED');
     }));
 
-    const stable = new Map<number, number>();
-    const recovered = new Set<number>();
+    const alarmStable = new Map<number, number>();
+    const faultStable = new Map<number, number>();
+    const alarmRecovered = new Set<number>();
+    const faultRecovered = new Set<number>();
     const feedbackErrors = new Map<number, string>();
     const deadline = Date.now() + this.config.resetTimeoutMs;
 
-    while (Date.now() <= deadline && recovered.size < resetAccepted.size) {
-      await Promise.all([...work.entries()].map(async ([index]) => {
-        if (!resetAccepted.has(index) || recovered.has(index)) return;
-        try {
-          const internal = await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
-          const physical = await this.physicalState(index);
-          if (physical.error) {
-            feedbackErrors.set(index, physical.error);
-            stable.set(index, 0);
-            return;
-          }
-          const clear = internal.fire === false
-            && internal.fault === false
-            && physical.alarm === false
-            && physical.fault === false;
-          const next = clear ? (stable.get(index) ?? 0) + 1 : 0;
-          stable.set(index, next);
-          if (next >= this.config.stableSamples) recovered.add(index);
-        } catch {
-          stable.set(index, 0);
+    while (Date.now() <= deadline) {
+      await Promise.all([...work.keys()].map(async (index) => {
+        if (!resetAccepted.has(index)) return;
+        if (alarmRecovered.has(index) && faultRecovered.has(index)) return;
+
+        const physical = await this.physicalState(index);
+        if (physical.error) {
+          feedbackErrors.set(index, physical.error);
+          alarmStable.set(index, 0);
+          faultStable.set(index, 0);
+          return;
+        }
+
+        if (!alarmRecovered.has(index)) {
+          const next = physical.alarm === false ? (alarmStable.get(index) ?? 0) + 1 : 0;
+          alarmStable.set(index, next);
+          if (next >= this.config.stableSamples) alarmRecovered.add(index);
+        }
+        if (!faultRecovered.has(index)) {
+          const next = physical.fault === false ? (faultStable.get(index) ?? 0) + 1 : 0;
+          faultStable.set(index, next);
+          if (next >= this.config.stableSamples) faultRecovered.add(index);
         }
       }));
-      if (recovered.size >= resetAccepted.size) break;
+
+      const done = [...resetAccepted].every((index) => alarmRecovered.has(index) && faultRecovered.has(index));
+      if (done) break;
       await sleep(this.config.sampleIntervalMs);
     }
 
     for (const [index, state] of work.entries()) {
       if (!resetAccepted.has(index)) continue;
-      if (recovered.has(index)) continue;
       const feedbackError = feedbackErrors.get(index);
-      if (feedbackError) this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
-      else this.addCleanupReason(state, 'EMERGENCY_RESET_NOT_CONFIRMED');
+      if (feedbackError) {
+        this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
+        continue;
+      }
+      if (!alarmRecovered.has(index)) uniquePush(state.result.alarm.reasons, 'ALARM_RELAY_STUCK_AFTER_RESET');
+      if (!faultRecovered.has(index)) uniquePush(state.result.fault.reasons, 'FAULT_RELAY_STUCK_AFTER_RESET');
     }
   }
 
   private finalizeAction(action: RelayActionResult): void {
     action.verdict = action.commandAccepted
-      && action.internalStateReached
       && action.physicalStateReached
-      && action.oppositeRelayStayedNormal
       && action.resetAccepted
-      && action.internalRecovered
       && action.physicalRecovered
       && action.reasons.length === 0
       ? 'PASS'

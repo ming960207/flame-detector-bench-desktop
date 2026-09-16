@@ -1,0 +1,17 @@
+/* Rendering-performance safeguards for the live production dashboard. */
+
+/* Keep six continuously changing SVG previews from invalidating paint outside each chart. */
+.wutos-sensor-wave {
+  contain: paint;
+}
+
+/* Backdrop blur forces expensive Chromium compositor work while live data is repainting. */
+.wutos-live-waveform {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* The collapsed live panel stays inside its own paint boundary during normal production. */
+.wutos-live-waveform.is-collapsed {
+  contain: paint;
+}

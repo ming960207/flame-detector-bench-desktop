@@ -30,6 +30,7 @@ const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
 const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
 const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
+const WAVEFORM_UI_RENDER_INTERVAL_MS = 80;
 const WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS = 1000;
 const WAVEFORM_UI_DIAGNOSTICS_ENABLED = import.meta.env.VITE_WAVEFORM_UI_DIAGNOSTICS === '1';
 let lastWaveformUiDiagnosticAt = 0;
@@ -103,6 +104,8 @@ export function FieldProcessStatusApp() {
   const detectorRenderSchedulerRef = useRef<LatestValueScheduler<FlameDetectorState> | null>(null);
 
   const publishDetectorState = useCallback((next: FlameDetectorState) => {
+    // Keep the full-rate latest state for delta merging and test evidence.
+    // Only the React presentation state below is rate-limited.
     detectorStateRef.current = next;
     detectorRenderSchedulerRef.current?.push(next);
   }, []);
@@ -231,8 +234,8 @@ export function FieldProcessStatusApp() {
 
   useEffect(() => {
     const scheduler = createLatestValueScheduler<FlameDetectorState>(
-      (callback) => window.requestAnimationFrame(callback),
-      (handle) => window.cancelAnimationFrame(handle),
+      (callback) => window.setTimeout(callback, WAVEFORM_UI_RENDER_INTERVAL_MS),
+      (handle) => window.clearTimeout(handle),
       (next) => setDetectors(next),
     );
     detectorRenderSchedulerRef.current = scheduler;

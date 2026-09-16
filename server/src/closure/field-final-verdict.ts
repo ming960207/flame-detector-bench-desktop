@@ -10,7 +10,15 @@ export interface FieldFinalVerdict {
 
 /**
  * A detector batch may be technically ready before the mechanical process has
- * finished.  Do not expose that intermediate evaluation as a production result.
+ * finished. Do not expose that intermediate evaluation as a production result.
+ *
+ * Once the waveform analyzer has latched COMPLETE for a concrete batchId, that
+ * completed production result remains authoritative even if the PLC subsequently
+ * returns to IDLE, the detector links reset, or the current PLC snapshot becomes
+ * temporarily unavailable. FieldWaveformAnalysis keeps the completed batchId/phase
+ * until the next automatic run starts; startBatch() then creates a new batchId and
+ * moves the phase away from COMPLETE, which is the only normal lifecycle boundary
+ * that initializes the displayed result for the next test.
  */
 export function evaluateFieldFinalVerdict(
   process: Pick<PLCProcessStatus, 'stage' | 'processStage' | 'complete' | 'valid'>
@@ -18,8 +26,12 @@ export function evaluateFieldFinalVerdict(
   detectorVerdict: FieldDetectorBatchVerdict,
   waveformAnalysis?: Pick<FieldWaveformAnalysisSnapshot, 'batchId' | 'phase' | 'verdict' | 'thresholds'>,
 ): FieldFinalVerdict {
-  if (!process || !process.valid) return { verdict: 'PENDING', reason: 'PLC_PROCESS_STATUS_INVALID' };
-  if (!isPLCProcessComplete(process)) return { verdict: 'PENDING', reason: 'WAITING_FOR_PLC_COMPLETE' };
+  const completedBatchLatched = Boolean(waveformAnalysis?.batchId && waveformAnalysis.phase === 'COMPLETE');
+  if (!completedBatchLatched) {
+    if (!process || !process.valid) return { verdict: 'PENDING', reason: 'PLC_PROCESS_STATUS_INVALID' };
+    if (!isPLCProcessComplete(process)) return { verdict: 'PENDING', reason: 'WAITING_FOR_PLC_COMPLETE' };
+  }
+
   const qualityEnabled = Boolean((waveformAnalysis as (Pick<FieldWaveformAnalysisSnapshot, 'thresholds'> | undefined))?.thresholds?.quality);
   const onlyTestInvalid = (detectorVerdict.testInvalidCount ?? 0) > 0
     && (detectorVerdict.productFailCount ?? 0) === 0;
