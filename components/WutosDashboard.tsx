@@ -40,6 +40,7 @@ import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
 import './wutos-dashboard.css';
+import './wutos-performance.css';
 
 const asset = (name: string) => import.meta.env.BASE_URL + 'wutos-assets/' + name;
 
@@ -175,6 +176,20 @@ function formatDate(value: Date): string {
 function formatTime(value: Date): string {
   return pad(value.getHours()) + ':' + pad(value.getMinutes()) + ':' + pad(value.getSeconds());
 }
+
+const DashboardClock: FC = () => {
+  const [clock, setClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <>
+    <span><CalendarDays />{formatDate(clock)}</span>
+    <span><Clock3 />{formatTime(clock)}</span>
+  </>;
+};
 
 function workflowIndex(status: PLCProcessStatus | null): number {
   if (!status) return -1;
@@ -842,12 +857,7 @@ export function WutosDashboard({
   onSubmitIndicatorVision,
   onSendSimulationCommand,
 }: WutosDashboardProps) {
-  const [clock, setClock] = useState(() => new Date());
   const [simulationOpen, setSimulationOpen] = useState(false);
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (!simulationOpen) return;
@@ -865,7 +875,7 @@ export function WutosDashboard({
     [detectors],
   );
   const activeWorkflowIndex = workflowIndex(status);
-  const alarms = alarmRows(clock, status, detectors, detectorVerdict, finalVerdict, channelOnline);
+  const alarms = alarmRows(new Date(), status, detectors, detectorVerdict, finalVerdict, channelOnline);
   const onlineCount = detectors?.onlineCount ?? units.filter((unit) => unit?.online).length;
   const faultCount = detectors?.faultCount ?? units.filter((unit) => unit?.fault).length;
   const fireCount = detectors?.fireCount ?? units.filter((unit) => unit?.fire).length;
@@ -896,8 +906,7 @@ export function WutosDashboard({
               {channelOnline ? <Wifi /> : <WifiOff />}
               {channelOnline ? '通信正常' : '等待连接'}
             </span>
-            <span><CalendarDays />{formatDate(clock)}</span>
-            <span><Clock3 />{formatTime(clock)}</span>
+            <DashboardClock />
             <button type="button" className={`wutos-icon-button ${waveformClearing ? 'is-clearing' : ''}`} onClick={() => void onClearWaveform()} disabled={waveformClearing} title="清除实时波形缓存" aria-label="清除实时波形缓存" aria-busy={waveformClearing}><RefreshCw /></button>
             <button type="button" className="wutos-command-button" onClick={() => setSimulationOpen(true)}><Send />模拟指令</button>
             {onOpenDetails && <button type="button" className="wutos-detail-button" onClick={onOpenDetails}><Settings2 />详情</button>}
