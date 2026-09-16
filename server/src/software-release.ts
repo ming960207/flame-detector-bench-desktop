@@ -11,6 +11,16 @@ const DEFAULT_BRANCH = 'refactor/unified-backend';
 const COMMAND_TIMEOUT_MS = 15_000;
 const LOG_UPLOAD_TIMEOUT_MS = 120_000;
 
+export const SOFTWARE_VERSION_PATHS = [
+  '.',
+  ':(exclude)diagnostic-logs/**',
+  ':(exclude)logs/**',
+] as const;
+
+export function softwareVersionRevListArgs(ref: string): string[] {
+  return ['rev-list', '-1', ref, '--', ...SOFTWARE_VERSION_PATHS];
+}
+
 interface RuntimeMarker {
   branch?: string;
   softwareCommit?: string;
@@ -166,16 +176,29 @@ export class SoftwareReleaseService {
     }
   }
 
-  private async latestCommit(): Promise<string | null> {
-    const output = await this.git(['-c', 'http.version=HTTP/1.1', 'ls-remote', REPOSITORY_URL, `refs/heads/${this.branch}`]);
-    const commit = output?.split(/\s+/)[0]?.trim() ?? '';
+  private async softwareCommit(ref: string): Promise<string | null> {
+    const commit = (await this.git(softwareVersionRevListArgs(ref)))?.trim() ?? '';
     return validCommit(commit) ? commit : null;
+  }
+
+  private async latestCommit(): Promise<string | null> {
+    const remoteRef = `refs/remotes/origin/${this.branch}`;
+    const fetchResult = await this.git([
+      '-c', 'http.version=HTTP/1.1',
+      'fetch', '--no-tags', REPOSITORY_URL,
+      `+refs/heads/${this.branch}:${remoteRef}`,
+    ]);
+    if (fetchResult === null) return null;
+    return this.softwareCommit(remoteRef);
   }
 
   async snapshot(): Promise<SoftwareVersionSnapshot> {
     const marker = await this.readJson<RuntimeMarker>('logs/runtime-build.json');
     const rollbackState = await this.readJson<RollbackState>('logs/rollback-state.json');
-    const currentCommit = (await this.git(['rev-parse', 'HEAD'])) || safeText(marker?.softwareCommit, 64) || null;
+    const markerSoftwareCommit = safeText(marker?.softwareCommit, 64);
+    const currentCommit = validCommit(markerSoftwareCommit)
+      ? markerSoftwareCommit
+      : await this.softwareCommit('HEAD');
     const currentDate = currentCommit ? await this.git(['show', '-s', '--format=%cI', currentCommit]) : null;
     const latest = await this.latestCommit();
     const updateScriptAvailable = await fs.access(this.path('scripts/update-current-branch.ps1')).then(() => true).catch(() => false);
@@ -302,7 +325,7 @@ export class SoftwareReleaseService {
       return {
         accepted: true,
         action: 'logs',
-        message: '诊断日志已提交到 GitHub。',
+        message: '诊断日志已提交到 GitHub；日志提交不计入软件版本。',
         output: outputTail(String(result.stdout ?? ''), String(result.stderr ?? '')),
       };
     } finally {
