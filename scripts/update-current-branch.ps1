@@ -102,6 +102,14 @@ function Get-SoftwareChanges([string]$BaseCommit, [string]$HeadCommit) {
     })
 }
 
+function Get-LatestSoftwareCommit([string]$Ref) {
+    $candidate = (& git rev-list -1 $Ref -- '.' ':(exclude)diagnostic-logs/**' ':(exclude)logs/**').Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($candidate)) {
+        throw "Unable to resolve latest software commit from $Ref."
+    }
+    return $candidate
+}
+
 function Prepare-RollbackState([string]$TargetCommit) {
     if ($env:FLAME_UPDATER_ROLLBACK_PREPARED -eq '1') { return }
     $installed = Get-InstalledRuntimeInfo
@@ -310,7 +318,8 @@ try {
     Write-Host "Repository: $repoRoot"
     Write-Host "Target branch: $targetBranch"
     Write-Host "Remote: $publicRemote"
-    Write-Host "Current commit: $before"
+    Write-Host "Current repository commit: $before"
+    Write-Host 'Version rule: diagnostic-logs/ and logs/ commits are not software versions.' -ForegroundColor DarkGray
     Write-Host 'WARNING: Local source changes and local-only commits will be discarded.' -ForegroundColor Yellow
     Write-Host 'Ignored runtime data such as logs and rollback history are preserved.'
 
@@ -321,7 +330,7 @@ try {
         if (-not $pinnedCommit) { $pinnedCommit = (& git rev-parse HEAD).Trim() }
         if ((& git rev-parse HEAD).Trim() -ne $pinnedCommit) { throw 'Updater resume commit does not match current HEAD.' }
         Prepare-RollbackState $pinnedCommit
-        Write-Host "[UPDATE] Resuming at synchronized commit $((& git rev-parse --short HEAD).Trim())." -ForegroundColor Green
+        Write-Host "[UPDATE] Resuming at synchronized software commit $((& git rev-parse --short HEAD).Trim())." -ForegroundColor Green
     } else {
         if (-not (Test-GitHubAccess 3)) { Fail 'GitHub repository is not reachable after 3 attempts or the target branch does not exist.' }
     }
@@ -337,11 +346,16 @@ try {
             $remoteCommit = (& git rev-parse HEAD).Trim()
         } else {
             Fetch-TargetBranch | Out-Null
-            $remoteCommit = (& git rev-parse $remoteRef).Trim()
+            $repositoryTipCommit = (& git rev-parse $remoteRef).Trim()
+            $remoteCommit = Get-LatestSoftwareCommit $repositoryTipCommit
             Prepare-RollbackState $remoteCommit
-            Write-Host "Remote commit: $((& git rev-parse --short $remoteRef).Trim())"
-            & git checkout -f -B $targetBranch $remoteRef
-            if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to $targetBranch." }
+            Write-Host "Remote repository tip: $((& git rev-parse --short $repositoryTipCommit).Trim())"
+            Write-Host "Software update target: $((& git rev-parse --short $remoteCommit).Trim())" -ForegroundColor Green
+            if ($repositoryTipCommit -ne $remoteCommit) {
+                Write-Host 'Latest remote commits contain diagnostic logs only; they are ignored as software versions.' -ForegroundColor DarkGray
+            }
+            & git checkout -f -B $targetBranch $remoteCommit
+            if ($LASTEXITCODE -ne 0) { throw "Unable to force switch to software commit $remoteCommit." }
             & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
             Restart-WithUpdatedUpdaterIfNeeded $remoteCommit
         }
@@ -351,8 +365,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'git clean -fd failed.' }
 
         $softwareCommit = (& git rev-parse HEAD).Trim()
-        if ($softwareCommit -ne $remoteCommit) { throw 'Local source commit does not match pinned/fetched source commit.' }
-        Write-Host "Source synchronized: $((& git rev-parse --short HEAD).Trim())" -ForegroundColor Green
+        if ($softwareCommit -ne $remoteCommit) { throw 'Local source commit does not match pinned software commit.' }
+        Write-Host "Software source synchronized: $((& git rev-parse --short HEAD).Trim())" -ForegroundColor Green
 
         Invoke-Checked 'Validate Electron main process syntax' 'node.exe' @('--check', 'desktop\main.cjs')
         Ensure-Dependencies
@@ -368,21 +382,18 @@ try {
 
         $postBuildFetchSucceeded = Fetch-TargetBranch -BestEffort
         if ($postBuildFetchSucceeded) {
-            $latestRemoteCommit = (& git rev-parse $remoteRef).Trim()
-            if ($latestRemoteCommit -ne $softwareCommit) {
-                $softwareChanges = @(Get-SoftwareChanges $softwareCommit $latestRemoteCommit)
-                if ($softwareChanges.Count -gt 0) {
-                    if ($pass -lt 2) {
-                        Write-Host 'Remote software changed during build. Repeating update against latest software...' -ForegroundColor Yellow
-                        $resumeFromSynchronizedCommit = $false
-                        continue
-                    }
-                    throw 'Remote software changed again during the second build pass. Run the updater again.'
+            $latestRepositoryCommit = (& git rev-parse $remoteRef).Trim()
+            $latestSoftwareCommit = Get-LatestSoftwareCommit $latestRepositoryCommit
+            if ($latestSoftwareCommit -ne $softwareCommit) {
+                if ($pass -lt 2) {
+                    Write-Host 'Remote software changed during build. Repeating update against latest software...' -ForegroundColor Yellow
+                    $resumeFromSynchronizedCommit = $false
+                    continue
                 }
-                Write-Host 'Remote advanced only by diagnostic/log commits; runtime build remains valid.'
-                & git checkout -f -B $targetBranch $remoteRef
-                if ($LASTEXITCODE -ne 0) { throw 'Unable to fast-forward local branch to latest log-only commit.' }
-                & git branch --set-upstream-to="origin/$targetBranch" $targetBranch *> $null
+                throw 'Remote software changed again during the second build pass. Run the updater again.'
+            }
+            if ($latestRepositoryCommit -ne $latestSoftwareCommit) {
+                Write-Host 'Remote advanced only by diagnostic/log commits; ignoring them for software version and local source checkout.' -ForegroundColor DarkGray
             }
         }
 
@@ -402,7 +413,7 @@ try {
     Write-Host 'SUCCESS: SOURCE + BACKEND + FRONTEND ARE UPDATED.' -ForegroundColor Green
     Write-Host "Branch: $currentBranch"
     Write-Host "Previous repository commit: $before"
-    Write-Host "Current repository commit: $currentShort"
+    Write-Host "Current software checkout: $currentShort"
     Write-Host "Software build commit: $softwareShort"
     if (Test-Path -LiteralPath $rollbackStatePath) {
         Write-Host "Rollback state: $rollbackStatePath"
