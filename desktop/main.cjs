@@ -10,6 +10,14 @@ const DEFAULT_BACKEND_PORT = 3003;
 const LOG_RETENTION_DAYS = 30;
 const LOG_MAX_SESSION_FILES = 60;
 const desktopApiToken = crypto.randomBytes(32).toString('hex');
+const hardwareAccelerationEnabled = process.env.FLAME_BENCH_ENABLE_GPU === '1';
+
+// The production bench favors deterministic rendering over GPU throughput. On
+// industrial Windows PCs, Chromium's GPU compositor can briefly lose its surface
+// and present a whole-window black frame even though the renderer itself remains
+// alive. Disable hardware acceleration by default, while keeping an explicit
+// environment override for diagnostics or future hardware validation.
+if (!hardwareAccelerationEnabled) app.disableHardwareAcceleration();
 
 let mainWindow;
 let backendRuntime;
@@ -132,6 +140,7 @@ function logRuntimeEnvironment(port) {
   writeDiagnostic('BOOT', `logs=${logDirectory}`);
   writeDiagnostic('BOOT', `platform=${process.platform} arch=${process.arch} pid=${process.pid}`);
   writeDiagnostic('BOOT', `electron=${process.versions.electron ?? '-'} chrome=${process.versions.chrome ?? '-'} node=${process.versions.node ?? '-'}`);
+  writeDiagnostic('BOOT', `gpuAcceleration=${hardwareAccelerationEnabled ? 'enabled' : 'disabled'} override=FLAME_BENCH_ENABLE_GPU`);
   writeDiagnostic('BOOT', `backendPort=${port} argv=${process.argv.map((value) => JSON.stringify(value)).join(' ')}`);
 }
 
@@ -162,8 +171,13 @@ async function startBackend(port) {
   process.env.DESKTOP_EMBEDDED_SERVER = '1';
   process.env.CLOSURE_MODE = 'field';
   process.env.DESKTOP_API_TOKEN = desktopApiToken;
+  // Keep the embedded backend pointed at the Electron main-process log directory.
+  // Without this explicit hand-off, source/dev deployments fall back to server/logs
+  // and automatic diagnostic uploads omit renderer/GPU lifecycle evidence.
+  process.env.DESKTOP_LOG_DIR = getLogDirectory();
   const dataDirectory = prepareRuntimeData();
   if (dataDirectory) process.env.APP_DATA_DIR = dataDirectory;
+  writeDiagnostic('BACKEND', `desktopLogDir=${process.env.DESKTOP_LOG_DIR}`);
   writeDiagnostic('BACKEND', `开始加载 ${serverEntry}`);
   const startedAt = Date.now();
   const serverModule = await import(pathToFileURL(serverEntry).href);
@@ -326,6 +340,11 @@ async function stopBackend() {
 
 initializeLogging();
 installProcessDiagnostics();
+writeDiagnostic('BOOT', `GPU硬件加速=${hardwareAccelerationEnabled ? '启用' : '禁用（稳定模式）'}`);
+
+app.on('child-process-gone', (_event, details) => {
+  writeDiagnostic('APP/CHILD_PROCESS_GONE', util.inspect(details, { depth: 6, breakLength: 160 }));
+});
 
 if (!app.requestSingleInstanceLock()) {
   writeDiagnostic('BOOT', '检测到已有实例，当前实例退出');
