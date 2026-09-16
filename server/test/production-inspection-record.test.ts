@@ -190,7 +190,44 @@ test('indicator vision evidence is included in the production report template', 
   const ledRow = document.match(/<td class="index">4<\/td><td class="item">LED 显示检验<\/td>([\s\S]*?)<\/tr>/)?.[1];
   if (!ledRow) throw new Error('LED 显示检验行缺失');
   assert.match(ledRow, /<span class="pass">合格<\/span>/);
-  assert.doesNotMatch(ledRow, /绿灯|红灯|黄灯|抓拍|vision-detail/);
+  assert.match(ledRow, /火警红灯：<span class="pass">合格<\/span>/);
+  assert.match(ledRow, /运行绿灯：<span class="pass">合格<\/span>/);
+  assert.doesNotMatch(ledRow, /黄灯|抓拍/);
+});
+
+test('LED report keeps fire-red and running-green failures independently visible', () => {
+  const productConfig = normalizeProductDetectionConfig({ selectedType: 'THREE_WAVELENGTH' }, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const checked = precheck(false) as any;
+  checked.indicatorVision = {
+    batchId: 'batch-1',
+    capturedAt: 4,
+    source: 'UVC_HSV',
+    captureCount: 2,
+    phases: ['ALARM_VERIFY'],
+    verdict: 'FAIL',
+    units: Array.from({ length: 6 }, (_, offset) => ({
+      slot: offset + 1,
+      runningGreen: 'PASS',
+      fireRed: offset === 0 ? 'FAIL' : 'PASS',
+      faultYellow: 'PASS',
+      verdict: offset === 0 ? 'FAIL' : 'PASS',
+    })),
+  };
+  const record = buildProductionInspectionRecord({
+    batchId: 'batch-1',
+    productConfig,
+    precheck: checked,
+    detectorVerdict: detectorVerdict(),
+    waveformAnalysis: analysis(),
+    recordConfig: DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
+    productionDate: Date.now(),
+  });
+  assert.equal(record.products[0]?.indicatorVision?.fireRed.status, '不合格');
+  assert.equal(record.products[0]?.indicatorVision?.runningGreen.status, '合格');
+  const ledRow = productionInspectionRecordDocument(record).match(/<td class="index">4<\/td><td class="item">LED 显示检验<\/td>([\s\S]*?)<\/tr>/)?.[1];
+  if (!ledRow) throw new Error('LED 显示检验行缺失');
+  assert.match(ledRow, /火警红灯：<span class="fail">不合格<\/span>/);
+  assert.match(ledRow, /运行绿灯：<span class="pass">合格<\/span>/);
 });
 
 test('production report follows the official inspection item order', () => {

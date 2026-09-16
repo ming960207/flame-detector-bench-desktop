@@ -233,7 +233,19 @@ function statusCell(status: InspectionItemStatus): string {
 }
 
 function indicatorVisionCell(value: IndicatorVisionInspectionValue | undefined, fallback: InspectionStatusValue): string {
-  return statusCell(value?.status ?? fallback.status);
+  const item = value ?? {
+    ...fallback,
+    runningGreen: fallback,
+    fireRed: fallback,
+    faultYellow: fallback,
+    captureCount: 0,
+    phases: [],
+  };
+  const detail = [
+    `火警红灯：${statusCell(item.fireRed.status)}`,
+    `运行绿灯：${statusCell(item.runningGreen.status)}`,
+  ].join('<br>');
+  return `${statusCell(item.status)}<br><span class="vision-detail">${detail}</span>`;
 }
 
 function combinedStatus(statuses: InspectionItemStatus[]): InspectionItemStatus {
