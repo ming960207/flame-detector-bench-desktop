@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Info, X } from 'lucide-react';
-import { hasActivePLCProcessAlarm, type PLCProcessStatus } from '../server/src/process-status';
+import { hasActivePLCProcessAlarm, isPLCProcessComplete, type PLCProcessStatus } from '../server/src/process-status';
 import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdict';
 import type { FieldDetectorBatchVerdict } from '../server/src/closure/field-detector-verdict';
 import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-waveform-analysis';
@@ -30,7 +30,7 @@ const FIELD_DEV_PAGE = !DESKTOP_RUNTIME && window.location.port === '3002';
 const HTTP = DESKTOP_RUNTIME?.backendHttpUrl || (FIELD_DEV_PAGE ? FIELD_DEV_HTTP : import.meta.env.VITE_BACKEND_API_URL || FIELD_DEV_HTTP);
 const WS = DESKTOP_RUNTIME?.backendWsUrl || (FIELD_DEV_PAGE ? FIELD_DEV_WS : import.meta.env.VITE_BACKEND_WS_URL || FIELD_DEV_WS);
 const WS_RECONNECT_DELAY_MS = 250;
-const WAVEFORM_UI_RENDER_INTERVAL_MS = 80;
+const DASHBOARD_UI_RENDER_INTERVAL_MS = 80;
 const WAVEFORM_UI_DIAGNOSTIC_INTERVAL_MS = 1000;
 const WAVEFORM_UI_DIAGNOSTICS_ENABLED = import.meta.env.VITE_WAVEFORM_UI_DIAGNOSTICS === '1';
 let lastWaveformUiDiagnosticAt = 0;
@@ -56,6 +56,25 @@ interface ClearWaveformPayload {
   error?: string;
   code?: string;
 }
+
+interface QueuedDashboardValue<Value> {
+  sequence: number;
+  value: Value;
+}
+
+interface QueuedDashboardRender {
+  status?: QueuedDashboardValue<PLCProcessStatus | null>;
+  detectors?: QueuedDashboardValue<FlameDetectorState>;
+  summary?: QueuedDashboardValue<FieldSummaryPayload>;
+  notice?: QueuedDashboardValue<string>;
+}
+
+type DashboardRenderPatch = {
+  status?: PLCProcessStatus | null;
+  detectors?: FlameDetectorState;
+  summary?: FieldSummaryPayload;
+  notice?: string;
+};
 
 function processDisplayLabel(status: PLCProcessStatus | null | undefined) {
   const label = status?.processLabel ?? status?.label;
@@ -101,14 +120,9 @@ export function FieldProcessStatusApp() {
   const [softwareReleaseOpen, setSoftwareReleaseOpen] = useState(false);
   const [waveformClearing, setWaveformClearing] = useState(false);
   const detectorStateRef = useRef<FlameDetectorState | null>(null);
-  const detectorRenderSchedulerRef = useRef<LatestValueScheduler<FlameDetectorState> | null>(null);
-
-  const publishDetectorState = useCallback((next: FlameDetectorState) => {
-    // Keep the full-rate latest state for delta merging and test evidence.
-    // Only the React presentation state below is rate-limited.
-    detectorStateRef.current = next;
-    detectorRenderSchedulerRef.current?.push(next);
-  }, []);
+  const dashboardRenderSchedulerRef = useRef<LatestValueScheduler<QueuedDashboardRender> | null>(null);
+  const dashboardRenderQueueRef = useRef<QueuedDashboardRender>({});
+  const dashboardRenderSequenceRef = useRef(0);
 
   const applySummary = useCallback((summary: FieldSummaryPayload) => {
     setStatus(summary.process ?? null);
@@ -122,11 +136,36 @@ export function FieldProcessStatusApp() {
     setRelayTest(summary.relayTest ?? null);
   }, []);
 
+  const queueDashboardUpdate = useCallback((patch: DashboardRenderPatch) => {
+    const sequence = ++dashboardRenderSequenceRef.current;
+    const current = dashboardRenderQueueRef.current;
+    const next: QueuedDashboardRender = { ...current };
+    if ('status' in patch) next.status = { sequence, value: patch.status ?? null };
+    if ('detectors' in patch && patch.detectors) next.detectors = { sequence, value: patch.detectors };
+    if ('summary' in patch && patch.summary) next.summary = { sequence, value: patch.summary };
+    if ('notice' in patch && patch.notice !== undefined) next.notice = { sequence, value: patch.notice };
+    dashboardRenderQueueRef.current = next;
+    dashboardRenderSchedulerRef.current?.push(next);
+  }, []);
+
+  const publishDetectorState = useCallback((next: FlameDetectorState) => {
+    // Keep the full-rate latest state for delta merging and test evidence.
+    // The same presentation queue also coalesces result summaries and PLC status
+    // so COMPLETE cannot paint a transient half-updated dashboard.
+    detectorStateRef.current = next;
+    queueDashboardUpdate({ detectors: next });
+  }, [queueDashboardUpdate]);
+
   const refresh = useCallback(async () => {
     const response = await fetch(HTTP + '/api/field/summary');
     if (!response.ok) throw new Error('PLC 工序服务未启动');
     const summary = await response.json() as FieldSummaryPayload;
-    applySummary(summary);
+    queueDashboardUpdate({
+      summary,
+      notice: summary.process?.valid
+        ? 'PLC 工序已同步：' + processDisplayLabel(summary.process)
+        : 'PLC 未接入：工序监测处于待同步状态。',
+    });
 
     const productResponse = await fetch(HTTP + '/api/product-config');
     if (productResponse.ok) {
@@ -149,10 +188,7 @@ export function FieldProcessStatusApp() {
       if (configPayload.config) setFlameConfig(configPayload.config);
     }
 
-    setNotice(summary.process?.valid
-      ? 'PLC 工序已同步：' + processDisplayLabel(summary.process)
-      : 'PLC 未接入：工序监测处于待同步状态。');
-  }, [applySummary, publishDetectorState]);
+  }, [publishDetectorState, queueDashboardUpdate]);
 
   const updateProductConfig = useCallback(async (patch: Partial<ProductDetectionConfig> | ProductDetectionConfig) => {
     const response = await fetch(`${HTTP}/api/product-config`, {
@@ -211,9 +247,9 @@ export function FieldProcessStatusApp() {
       throw new Error(payload.error || payload.code || '实时波形缓存清除失败');
     }
     publishDetectorState(payload.state);
-    if (payload.summary) applySummary(payload.summary);
+    if (payload.summary) queueDashboardUpdate({ summary: payload.summary });
     setNotice('已清除所有探测器实时波形缓存，等待新数据重新计算探头数值和比值。');
-  }, [applySummary, publishDetectorState]);
+  }, [publishDetectorState, queueDashboardUpdate]);
 
   const handleClearWaveform = useCallback(async () => {
     if (waveformClearing) return;
@@ -233,17 +269,23 @@ export function FieldProcessStatusApp() {
   }, []);
 
   useEffect(() => {
-    const scheduler = createLatestValueScheduler<FlameDetectorState>(
-      (callback) => window.setTimeout(callback, WAVEFORM_UI_RENDER_INTERVAL_MS),
+    const scheduler = createLatestValueScheduler<QueuedDashboardRender>(
+      (callback) => window.setTimeout(callback, DASHBOARD_UI_RENDER_INTERVAL_MS),
       (handle) => window.clearTimeout(handle),
-      (next) => setDetectors(next),
+      (next) => {
+        dashboardRenderQueueRef.current = {};
+        if (next.summary) applySummary(next.summary.value);
+        if (next.status && (!next.summary || next.status.sequence > next.summary.sequence)) setStatus(next.status.value);
+        if (next.detectors) setDetectors(next.detectors.value);
+        if (next.notice) setNotice(next.notice.value);
+      },
     );
-    detectorRenderSchedulerRef.current = scheduler;
+    dashboardRenderSchedulerRef.current = scheduler;
     return () => {
-      if (detectorRenderSchedulerRef.current === scheduler) detectorRenderSchedulerRef.current = null;
+      if (dashboardRenderSchedulerRef.current === scheduler) dashboardRenderSchedulerRef.current = null;
       scheduler.cancel();
     };
-  }, []);
+  }, [applySummary]);
 
   useEffect(() => {
     // Printing is a background production function. It starts with the field UI,
@@ -280,10 +322,17 @@ export function FieldProcessStatusApp() {
           const message = JSON.parse(data) as { type: string; payload: unknown; timestamp?: number };
           if (message.type === 'plc_process_status') {
             const next = message.payload as PLCProcessStatus;
-            setStatus(next);
-            setNotice(next.valid
-              ? 'PLC 工序已同步：' + processDisplayLabel(next)
-              : 'PLC 返回未知工序码');
+            // COMPLETE is followed by the authoritative field_summary carrying
+            // the detector/final verdict. Do not paint an intermediate
+            // "complete + previous result" frame from the separate PLC topic.
+            if (!isPLCProcessComplete(next)) {
+              queueDashboardUpdate({
+                status: next,
+                notice: next.valid
+                  ? 'PLC 工序已同步：' + processDisplayLabel(next)
+                  : 'PLC 返回未知工序码',
+              });
+            }
           }
           if (message.type === 'flame_state') {
             const state = message.payload as FlameDetectorState;
@@ -296,7 +345,7 @@ export function FieldProcessStatusApp() {
             const previous = detectorStateRef.current;
             if (previous) publishDetectorState(mergeFlameWaveformDelta(previous, delta));
           }
-          if (message.type === 'field_summary') applySummary(message.payload as FieldSummaryPayload);
+          if (message.type === 'field_summary') queueDashboardUpdate({ summary: message.payload as FieldSummaryPayload });
         } catch (error) {
           console.error('[RuntimeDiag][UI] invalid WebSocket message', error);
           setNotice('数据通道返回无效消息，等待下一次同步。');
@@ -315,7 +364,7 @@ export function FieldProcessStatusApp() {
       if (timer) clearTimeout(timer);
       socket?.close();
     };
-  }, [applySummary, publishDetectorState, refresh]);
+  }, [publishDetectorState, queueDashboardUpdate, refresh]);
 
   return <>
     <WutosDashboard

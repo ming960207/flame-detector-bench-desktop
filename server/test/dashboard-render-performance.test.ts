@@ -9,11 +9,23 @@ function source(relativePath: string): string {
 test('main detector UI keeps full-rate data but throttles React rendering to 12.5 fps', () => {
   const field = source('components/FieldProcessStatusApp.tsx');
 
-  assert.match(field, /const WAVEFORM_UI_RENDER_INTERVAL_MS = 80;/);
+  assert.match(field, /const DASHBOARD_UI_RENDER_INTERVAL_MS = 80;/);
   assert.match(field, /detectorStateRef\.current = next;/);
-  assert.match(field, /window\.setTimeout\(callback, WAVEFORM_UI_RENDER_INTERVAL_MS\)/);
+  assert.match(field, /window\.setTimeout\(callback, DASHBOARD_UI_RENDER_INTERVAL_MS\)/);
   assert.match(field, /window\.clearTimeout\(handle\)/);
   assert.doesNotMatch(field, /requestAnimationFrame\(callback\)/);
+});
+
+test('completion summary and PLC status share one coalesced dashboard render queue', () => {
+  const field = source('components/FieldProcessStatusApp.tsx');
+
+  assert.match(field, /const DASHBOARD_UI_RENDER_INTERVAL_MS = 80;/);
+  assert.match(field, /dashboardRenderSchedulerRef/);
+  assert.match(field, /queueDashboardUpdate\(\{\s*summary:/);
+  assert.match(field, /queueDashboardUpdate\(\{\s*status:/);
+  assert.match(field, /if \(!isPLCProcessComplete\(next\)\)/);
+  assert.doesNotMatch(field, /setStatus\(next\)/);
+  assert.doesNotMatch(field, /applySummary\(message\.payload as FieldSummaryPayload\)/);
 });
 
 test('dashboard clock no longer drives the whole dashboard once per second', () => {
