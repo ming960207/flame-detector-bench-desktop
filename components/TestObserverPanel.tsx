@@ -41,17 +41,17 @@ interface ArchiveItem {
 }
 
 const colors = {
-  panel: '#061b28',
-  panel2: '#04131f',
-  field: '#061722',
-  border: '#23576a',
-  cyan: '#43dced',
-  text: '#ccecf5',
-  title: '#f0fcff',
-  muted: '#7fa9b4',
-  pass: '#62e7b6',
-  warn: '#e2c363',
-  fail: '#f27769',
+  panel: 'var(--app-observer-panel, #061b28)',
+  panel2: 'var(--app-observer-panel2, #04131f)',
+  field: 'var(--app-observer-field, #061722)',
+  border: 'var(--app-observer-border, #23576a)',
+  cyan: 'var(--app-observer-cyan, #43dced)',
+  text: 'var(--app-observer-text, #ccecf5)',
+  title: 'var(--app-observer-title, #f0fcff)',
+  muted: 'var(--app-observer-muted, #7fa9b4)',
+  pass: 'var(--app-observer-pass, #62e7b6)',
+  warn: 'var(--app-observer-warn, #e2c363)',
+  fail: 'var(--app-observer-fail, #f27769)',
 };
 
 const inputStyle = {
@@ -254,7 +254,7 @@ export function TestObserverPanel({ backendHttpUrl, backendWsUrl }: Props) {
           </div>)}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr repeat(4, 1fr)', gap: 8, border: `1px solid ${colors.border}`, background: '#04131f', padding: '9px 10px', fontSize: 10.5 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr repeat(4, 1fr)', gap: 8, border: `1px solid ${colors.border}`, background: 'var(--app-observer-strip-bg, #04131f)', padding: '9px 10px', fontSize: 10.5 }}>
           <div><span style={{ color: colors.muted }}>正式状态源</span><strong style={{ display: 'block', marginTop: 3 }}>{snapshot?.source.formalBackendUrl ?? config?.source ?? '-'}</strong></div>
           <div><span style={{ color: colors.muted }}>服务内 WS</span><strong style={{ display: 'block', marginTop: 3, color: diagnostics?.wsConnected ? colors.pass : colors.warn }}>{diagnostics?.wsConnected ? '已连接' : '未连接'}</strong></div>
           <div><span style={{ color: colors.muted }}>HTTP 兜底</span><strong style={{ display: 'block', marginTop: 3, color: diagnostics?.pollConnected ? colors.pass : colors.warn }}>{diagnostics?.pollConnected ? '正常' : '未就绪'}</strong></div>
@@ -262,12 +262,12 @@ export function TestObserverPanel({ backendHttpUrl, backendWsUrl }: Props) {
           <div><span style={{ color: colors.muted }}>详情页通道</span><strong style={{ display: 'block', marginTop: 3, color: uiWsConnected ? colors.pass : colors.warn }}>{uiWsConnected ? '实时' : '重连中'}</strong></div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', border: `1px solid ${colors.border}`, background: '#05202b', padding: '8px 10px', fontSize: 10.5 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', border: `1px solid ${colors.border}`, background: 'var(--app-observer-isolation-bg, #05202b)', padding: '8px 10px', fontSize: 10.5 }}>
           <ShieldCheck size={14} color={colors.pass} />
           <strong style={{ color: colors.pass }}>硬隔离：</strong>
           <span>监听器不创建 PLC/Modbus 连接、不写 PLC、不控制探测器；仅消费正式 FieldRuntime 已发布的状态和波形。</span>
         </div>
-        {(snapshot?.source.lastError || message) && <div style={{ border: `1px solid ${colors.warn}`, background: '#241f10', color: colors.warn, padding: '8px 10px', fontSize: 10.5 }}>{message || snapshot?.source.lastError}</div>}
+        {(snapshot?.source.lastError || message) && <div style={{ border: `1px solid ${colors.warn}`, background: 'var(--app-observer-warn-bg, #241f10)', color: colors.warn, padding: '8px 10px', fontSize: 10.5 }}>{message || snapshot?.source.lastError}</div>}
       </div>
     </section>
 
@@ -322,7 +322,7 @@ export function TestObserverPanel({ backendHttpUrl, backendWsUrl }: Props) {
         </div>}
 
         <div style={{ border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '180px 170px minmax(220px,1fr)', gap: 8, padding: '7px 9px', background: '#082537', color: colors.muted, fontSize: 9.5 }}><span>阶段</span><span>规划时长（秒）</span><span>依据</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '180px 170px minmax(220px,1fr)', gap: 8, padding: '7px 9px', background: 'var(--app-observer-table-head-bg, #082537)', color: colors.muted, fontSize: 9.5 }}><span>阶段</span><span>规划时长（秒）</span><span>依据</span></div>
           {planDraft.map((stage) => <div key={stage.id} style={{ display: 'grid', gridTemplateColumns: '180px 170px minmax(220px,1fr)', gap: 8, alignItems: 'center', padding: '6px 9px', borderTop: `1px solid ${colors.border}`, fontSize: 10.5 }}>
             <div><strong>{stage.label}</strong><small style={{ display: 'block', color: colors.muted }}>{stage.id}</small></div>
             <input

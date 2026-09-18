@@ -532,3 +532,449 @@
   .wutos-result-model-control__label,
   .wutos-result-model-control__state { display: none; }
 }
+
+/* Theme toggle: color-only treatment. Geometry and responsive layout stay shared. */
+.wutos-theme-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9em;
+  padding: .35em .45em;
+  color: #b9e7ff;
+  border: 1px solid rgba(40, 157, 238, .7);
+  background: rgba(5, 43, 78, .78);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wutos-theme-button:hover {
+  color: #fff;
+  border-color: #3ef2ff;
+  box-shadow: 0 0 8px rgba(0, 227, 255, .42);
+}
+
+.wutos-theme-button:focus-visible {
+  outline: 2px solid #f0fdff;
+  outline-offset: 2px;
+}
+
+.wutos-theme-button svg { width: 1.15em; height: 1.15em; }
+
+/*
+ * Mint theme. Keep all sizing, positioning, grid tracks and container geometry
+ * from the production theme; only visual tokens are replaced here.
+ */
+.wutos-dashboard[data-theme="mint"] {
+  --mint-bg: #e8f4ea;
+  --mint-frame: #f5fbf5;
+  --mint-surface: rgba(248, 252, 248, .96);
+  --mint-surface-deep: rgba(232, 245, 234, .96);
+  --mint-line: #a7cdb1;
+  --mint-line-soft: #cfe3d3;
+  --mint-line-strong: #6cae82;
+  --mint-ink: #173c2b;
+  --mint-muted: #668174;
+  --mint-accent: #2e8b5c;
+  --mint-accent-deep: #17613f;
+  --mint-accent-soft: #bfe3c5;
+  --mint-info: #3b9b83;
+  --mint-red: #b4493f;
+  --mint-amber: #a47a26;
+  --wutos-bg: var(--mint-bg);
+  --wutos-panel: var(--mint-surface);
+  --wutos-panel-deep: var(--mint-surface-deep);
+  --wutos-line: var(--mint-line-strong);
+  --wutos-line-dim: var(--mint-line-soft);
+  --wutos-cyan: var(--mint-info);
+  --wutos-blue: var(--mint-accent);
+  --wutos-white: var(--mint-ink);
+  --wutos-muted: var(--mint-muted);
+  --wutos-green: #54b873;
+  --wutos-red: var(--mint-red);
+  color: var(--mint-ink) !important;
+  background: radial-gradient(circle at 50% 50%, rgba(137, 202, 151, .18), transparent 44%), var(--mint-bg) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-frame {
+  border-color: var(--mint-line-strong) !important;
+  background: var(--mint-frame) !important;
+  box-shadow: 0 10px 28px rgba(41, 105, 62, .16), inset 0 0 52px rgba(130, 197, 143, .12) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-backdrop {
+  background:
+    radial-gradient(ellipse at 51% 61%, rgba(126, 198, 143, .24), transparent 22%),
+    radial-gradient(ellipse at 50% 100%, rgba(104, 177, 119, .13), transparent 37%),
+    linear-gradient(180deg, #f4fbf4 0%, #e9f5eb 54%, #e1f0e4 100%) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-backdrop::before {
+  opacity: .34;
+  background-image:
+    linear-gradient(rgba(73, 143, 88, .08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(73, 143, 88, .06) 1px, transparent 1px) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-backdrop::after {
+  opacity: .35;
+  background:
+    linear-gradient(112deg, transparent 0 38%, rgba(88, 161, 101, .12) 39%, transparent 40% 100%),
+    linear-gradient(68deg, transparent 0 64%, rgba(88, 161, 101, .1) 65%, transparent 66% 100%) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-brand__logo {
+  filter: hue-rotate(-65deg) saturate(.78) brightness(.88) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-title-plaque::before {
+  border-bottom-color: var(--mint-line-strong) !important;
+  background: linear-gradient(90deg, transparent, rgba(190, 226, 195, .92), transparent) !important;
+  box-shadow: 0 15px 25px -21px rgba(68, 151, 88, .48) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-title-plaque h1,
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__header strong,
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card header strong {
+  color: var(--mint-ink) !important;
+  text-shadow: none !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-title-plaque span,
+.wutos-dashboard[data-theme="mint"] .wutos-header__meta,
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__status,
+.wutos-dashboard[data-theme="mint"] .wutos-flow-note {
+  color: var(--mint-muted) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-header__meta .wutos-connection.is-online,
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result.pass {
+  color: var(--mint-accent) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-connection.is-offline {
+  color: #8b9b90 !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-icon-button,
+.wutos-dashboard[data-theme="mint"] .wutos-detail-button,
+.wutos-dashboard[data-theme="mint"] .wutos-theme-button,
+.wutos-dashboard[data-theme="mint"] .wutos-command-button {
+  color: var(--mint-accent-deep) !important;
+  border-color: var(--mint-line-strong) !important;
+  background: rgba(234, 247, 235, .94) !important;
+  box-shadow: none !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-command-button {
+  background: linear-gradient(135deg, #4eaa70, #2a7d55) !important;
+  color: #f7fff8 !important;
+  border-color: #39875d !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-icon-button:hover,
+.wutos-dashboard[data-theme="mint"] .wutos-detail-button:hover,
+.wutos-dashboard[data-theme="mint"] .wutos-theme-button:hover {
+  color: var(--mint-accent-deep) !important;
+  border-color: var(--mint-accent) !important;
+  background: #dcefe0 !important;
+  box-shadow: 0 4px 10px rgba(47, 125, 79, .15) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-command-button:hover {
+  color: #fff !important;
+  border-color: #236a45 !important;
+  background: linear-gradient(135deg, #5eb77c, #318961) !important;
+  box-shadow: 0 5px 12px rgba(38, 117, 70, .2) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel {
+  border-color: var(--mint-line-strong) !important;
+  background: linear-gradient(180deg, rgba(248, 253, 248, .97), rgba(232, 245, 234, .95)) !important;
+  box-shadow: 0 8px 20px rgba(43, 111, 64, .1), inset 0 0 22px rgba(134, 197, 145, .12) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel::before {
+  border-color: rgba(112, 169, 123, .42) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel::after {
+  background: #8bbf96 !important;
+  box-shadow: none !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result small,
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result em {
+  color: #789184 !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result.fail,
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row b.danger,
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__metric-values b.is-over-limit {
+  color: var(--mint-red) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-panel__title-result.pending,
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row b.info {
+  color: var(--mint-info) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-signal-group h3,
+.wutos-dashboard[data-theme="mint"] .wutos-stage__status,
+.wutos-dashboard[data-theme="mint"] .wutos-stage__status small {
+  color: var(--mint-accent-deep) !important;
+  text-shadow: none !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-io-row {
+  border-bottom-color: #d4e6d8 !important;
+  background: rgba(231, 244, 233, .8) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-io-row span {
+  color: var(--mint-ink) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-io-row code {
+  color: var(--mint-accent) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-stage {
+  background: #fbfefb !important;
+  box-shadow: 0 10px 22px rgba(55, 109, 68, .12) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-machine,
+.wutos-dashboard[data-theme="mint"] .wutos-machine--real {
+  filter: contrast(1.02) saturate(.82) drop-shadow(0 22px 22px rgba(47, 88, 55, .2)) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card {
+  border-color: #9ccbad !important;
+  color: #285b3d !important;
+  background: linear-gradient(145deg, rgba(250, 255, 250, .98), rgba(229, 244, 231, .96)) !important;
+  box-shadow: 0 4px 12px rgba(51, 112, 65, .1), inset 0 0 10px rgba(120, 190, 135, .1) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card header {
+  color: #285b3d !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card header small,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card header b,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-caption span,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-section-title span,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-legend,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card footer,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-values small {
+  color: var(--mint-muted) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card header i,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card footer i {
+  background: #9ab6a0 !important;
+  box-shadow: none !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-online {
+  border-color: #75bd8b !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-online header i,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-online footer i {
+  background: #43b873 !important;
+  box-shadow: 0 0 5px rgba(67, 184, 115, .38) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-online header b {
+  color: var(--mint-accent) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fire {
+  border-color: rgba(214, 143, 53, .8) !important;
+  background: linear-gradient(145deg, #fffaf1, #fff0d9) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fire header i { background: #e3a044 !important; box-shadow: none !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fire header b { color: #a76a16 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fault { border-color: rgba(187, 76, 66, .78) !important; background: linear-gradient(145deg, #fff8f6, #fde7e1) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fault header i { background: #c95a4e !important; box-shadow: none !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-card.is-fault header b { color: #a33e35 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-wave {
+  border-block-color: #cfe3d3 !important;
+  background: linear-gradient(180deg, rgba(239, 249, 240, .96), rgba(226, 242, 228, .88)) !important;
+  color: #789381 !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-caption,
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-section-title {
+  color: #2d6744 !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-legend i.channel-1,
+.wutos-dashboard[data-theme="mint"] .wutos-wave-line.channel-1,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__line.channel-1 { background: #4a9d78 !important; stroke: #4a9d78 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-legend i.channel-2,
+.wutos-dashboard[data-theme="mint"] .wutos-wave-line.channel-2,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__line.channel-2 { background: #74b96e !important; stroke: #74b96e !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-legend i.channel-3,
+.wutos-dashboard[data-theme="mint"] .wutos-wave-line.channel-3,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__line.channel-3 { background: #c29a3b !important; stroke: #c29a3b !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-legend i.channel-4,
+.wutos-dashboard[data-theme="mint"] .wutos-wave-line.channel-4,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__line.channel-4 { background: #8d78b4 !important; stroke: #8d78b4 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-wave-grid { stroke: rgba(77, 135, 87, .16) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-values > span { color: #547b61 !important; border-color: rgba(92, 157, 104, .22) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-values b { color: #1f5d3b !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-sensor-values--ratios em { color: #356b49 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform {
+  border-color: #7cbd8d !important;
+  color: #1f5d3b !important;
+  background: linear-gradient(145deg, rgba(245, 252, 245, .98), rgba(224, 241, 227, .96)) !important;
+  box-shadow: 0 8px 18px rgba(49, 111, 63, .14), inset 0 0 16px rgba(123, 188, 135, .12) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__toggle:hover { color: var(--mint-accent-deep) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__toggle > svg,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__eyebrow { color: var(--mint-accent) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__status b { color: #547b61 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__status b.is-live { color: var(--mint-accent) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__collapse-hint { color: #588869 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__chart { border-color: #b7d9bd !important; background: linear-gradient(180deg, #e7f4e8, #d7ebda) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__grid { stroke: rgba(72, 133, 83, .2) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values-title { color: #356b49 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values-title b { color: #1f5d3b !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values-title span,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values span,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__legend,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values small { color: #6c8b76 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values span { border-color: #b7d9bd !important; background: rgba(245, 252, 245, .8) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__values b { color: #1d5a39 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__devices button { color: #5c8067 !important; border-color: #b5d3ba !important; background: #e9f5ea !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__devices button:hover,
+.wutos-dashboard[data-theme="mint"] .wutos-live-waveform__devices button.is-selected { color: #174c31 !important; border-color: #56a56e !important; background: #d1ead5 !important; box-shadow: 0 3px 8px rgba(55, 132, 73, .14) !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-table {
+  border-color: #a9cfb2 !important;
+  background: rgba(241, 249, 242, .9) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row {
+  border-top-color: #d5e7d8 !important;
+  color: #315a40 !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row--head { color: #1e5536 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row time,
+.wutos-dashboard[data-theme="mint"] .wutos-alarm-row > span:nth-child(2) small { color: #6e8c78 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card {
+  border-color: #a7ceb0 !important;
+  background: linear-gradient(145deg, #f4fbf4, #e2f1e4) !important;
+  box-shadow: inset 0 0 10px rgba(112, 180, 125, .1) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card small { color: #668574 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card b { text-shadow: none !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card.is-a-pass { border-color: #78be8b !important; color: #23814c !important; background: linear-gradient(145deg, #e4f4e6, #cae8cf) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card.is-b-pass { border-color: #a5c987 !important; color: #7e762c !important; background: linear-gradient(145deg, #f5f6df, #eaf0c8) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-final-result-card.is-fail { border-color: #d28a80 !important; color: #ae3d36 !important; background: linear-gradient(145deg, #fff2ef, #f8ded8) !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card {
+  border-color: #7fb890 !important;
+  background: rgba(240, 249, 241, .96) !important;
+  box-shadow: 0 5px 12px rgba(49, 116, 65, .1), inset 0 0 13px rgba(118, 190, 130, .1) !important;
+}
+
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card.pass { border-color: #68b783 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card.fail { border-color: #c65b50 !important; background: rgba(255, 240, 237, .94) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card.is-noise { border-color: #62b989 !important; box-shadow: 0 5px 16px rgba(55, 139, 78, .16), inset 0 0 15px rgba(91, 181, 111, .13) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card header { border-bottom-color: #cfe3d3 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card header span { color: #5f876a !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__metric-label,
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__metric-values > span { color: #668874 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__metric-values b { color: #1e5b39 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__processes { border-top-color: #cfe3d3 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp { color: #789181 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp > i { border-color: #91b69a !important; background: #d0e3d2 !important; box-shadow: inset 0 0 3px rgba(83, 133, 92, .16) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.pass { color: #2a8b54 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.pass > i { border-color: #73bd88 !important; background: #54b873 !important; box-shadow: 0 0 6px rgba(84, 184, 115, .35) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.fail { color: #b4493f !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.fail > i { border-color: #d27a70 !important; background: #b4493f !important; box-shadow: 0 0 6px rgba(180, 73, 63, .24) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.pending > i { border-color: #9cb3a2 !important; background: #b5c9b9 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp:focus-visible > i,
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp.is-open > i { outline-color: var(--mint-accent-deep) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp__popover { color: #557764 !important; border-color: #8fbe9a !important; background: rgba(246, 252, 246, .98) !important; box-shadow: 0 5px 16px rgba(44, 101, 56, .18) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-process-lamp__popover b { color: #1d5938 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detector-card__failure { color: #b4493f !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node { color: #537b60 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node__circle { border-color: #8bbb95 !important; background: #edf7ee !important; box-shadow: 0 4px 9px rgba(62, 125, 76, .12), inset 0 0 10px rgba(120, 186, 132, .12) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node small b { color: #779482 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node.is-done { color: #2d8653 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node.is-done .wutos-flow-node__circle { border-color: #64ae7a !important; background: #d7edd9 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node.is-current { color: #1f5d3b !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node.is-current .wutos-flow-node__circle { border-color: #4b9f68 !important; background: #cde7d1 !important; box-shadow: 0 4px 12px rgba(62, 145, 83, .22), inset 0 0 12px rgba(129, 205, 143, .2) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-node.is-current.is-alarm .wutos-flow-node__circle { border-color: var(--mint-red) !important; background: #f5d9d4 !important; box-shadow: 0 4px 12px rgba(180, 73, 63, .18) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-arrow span { background: #67ae7b !important; box-shadow: none !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-arrow svg { color: #418f5e !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-baseline { background: #a5c9ab !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-baseline i { border-color: #70b281 !important; background: #e3f1e4 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-baseline i.is-lit { background: #54b873 !important; box-shadow: 0 0 8px rgba(84, 184, 115, .35) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-flow-note code { color: #4a9060 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control { color: #5f826b !important; border-color: #a2c9ab !important; background: #edf7ee !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control__label { color: #6e8d77 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control select { color: #1d5938 !important; border-color: #9ec7a8 !important; background: #f8fcf8 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control select:disabled { color: #7d9984 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control__state { color: #2f965c !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control__state.is-busy { color: var(--mint-amber) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control__state.is-locked,
+.wutos-dashboard[data-theme="mint"] .wutos-result-model-control__state.is-error { color: var(--mint-red) !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-detail-overlay,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-backdrop { background: rgba(26, 66, 38, .22) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-shell,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-dialog { border-color: #75b989 !important; background: linear-gradient(145deg, #f4fbf4, #e5f2e7) !important; box-shadow: 0 14px 32px rgba(35, 94, 49, .2), inset 0 0 26px rgba(118, 190, 130, .1) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-shell > header,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-dialog__header { border-bottom-color: #c5dfca !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-shell > header h2,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-dialog__header h2 { color: var(--mint-ink) !important; text-shadow: none !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-shell > header p,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-dialog__header p { color: var(--mint-muted) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-shell > header button,
+.wutos-dashboard[data-theme="mint"] .wutos-detail-header-actions .wutos-detail-release-button,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-close { color: var(--mint-accent-deep) !important; border-color: #9dc7a7 !important; background: #e9f5ea !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-tabs { border-bottom-color: #c4dfca !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-tabs button { color: #668575 !important; border-color: #a4c9ab !important; background: #edf7ee !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-tabs button.is-active { color: #f8fff8 !important; border-color: #3f9660 !important; background: #3f9660 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-product,
+.wutos-dashboard[data-theme="mint"] .wutos-detail-production { border-color: #b6d5bb !important; background: rgba(242, 249, 243, .9) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-detail-section-note { color: #6b8973 !important; }
+
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-eyebrow { color: var(--mint-accent) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-close:hover,
+.wutos-dashboard[data-theme="mint"] .wutos-detail-header-actions .wutos-detail-release-button:hover { color: #174c31 !important; border-color: #4f9d68 !important; box-shadow: 0 4px 10px rgba(55, 132, 73, .16) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-targets { border-color: #a5ccb0 !important; background: #edf7ee !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-label { color: #438d5c !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-targets strong,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command__copy strong { color: #1e5b39 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-targets small,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-note,
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command__copy small { color: #6b8973 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-target-lights span { color: #6a8873 !important; border-color: #b4d3ba !important; background: #f3faf3 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-target-lights span.is-online { color: #287a4b !important; border-color: #83bd91 !important; background: #dff1e1 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-target-lights i { background: #a1b9a6 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-target-lights .is-online i { background: #54b873 !important; box-shadow: 0 0 5px rgba(84, 184, 115, .32) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command { color: #245f3f !important; border-color: #9fc9a9 !important; background: linear-gradient(145deg, #f4fbf4, #dfefdf) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command:hover:not(:disabled) { border-color: #4fa16a !important; background: linear-gradient(145deg, #e5f5e7, #cde8d2) !important; box-shadow: 0 5px 13px rgba(55, 132, 73, .16) !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command__copy code { color: #3a9560 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-command__send { color: #6c8d75 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-feedback { border-left-color: #54b873 !important; background: rgba(211, 239, 216, .9) !important; color: #286943 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-feedback.is-error { border-left-color: #b4493f !important; background: rgba(250, 224, 219, .9) !important; color: #9f3f37 !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-feedback code { color: #5f8b6b !important; }
+.wutos-dashboard[data-theme="mint"] .wutos-simulation-note svg { color: #a47a26 !important; }

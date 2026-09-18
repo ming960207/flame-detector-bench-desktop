@@ -39,6 +39,7 @@ import { FLAME_DETECTOR_SIMULATION_COMMANDS, type FlameDetectorSimulationCommand
 import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
+import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './wutos-dashboard.css';
 import './wutos-performance.css';
 
@@ -858,6 +859,7 @@ export function WutosDashboard({
   onSendSimulationCommand,
 }: WutosDashboardProps) {
   const [simulationOpen, setSimulationOpen] = useState(false);
+  const { theme, toggleTheme } = useAppTheme();
 
   useEffect(() => {
     if (!simulationOpen) return;
@@ -889,7 +891,7 @@ export function WutosDashboard({
   const isAlarm = Boolean(hasActivePLCProcessAlarm(status) || finalVerdict?.verdict === 'FAIL' || detectorVerdict?.grade === 'FAIL');
 
   return (
-    <main className="wutos-dashboard">
+    <main className="wutos-dashboard" data-theme={theme}>
       <div className="wutos-frame">
         <div className="wutos-backdrop" aria-hidden="true" />
 
@@ -907,6 +909,7 @@ export function WutosDashboard({
               {channelOnline ? '通信正常' : '等待连接'}
             </span>
             <DashboardClock />
+            <ThemeToggleButton theme={theme} onToggle={toggleTheme} compact className="wutos-theme-button" />
             <button type="button" className={`wutos-icon-button ${waveformClearing ? 'is-clearing' : ''}`} onClick={() => void onClearWaveform()} disabled={waveformClearing} title="清除实时波形缓存" aria-label="清除实时波形缓存" aria-busy={waveformClearing}><RefreshCw /></button>
             <button type="button" className="wutos-command-button" onClick={() => setSimulationOpen(true)}><Send />模拟指令</button>
             {onOpenDetails && <button type="button" className="wutos-detail-button" onClick={onOpenDetails}><Settings2 />详情</button>}

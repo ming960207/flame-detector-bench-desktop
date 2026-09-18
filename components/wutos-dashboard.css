@@ -90,7 +90,6 @@
   position: relative;
   align-self: start;
   line-height: 1;
-  filter: drop-shadow(0 0 7px rgba(38, 157, 255, .74));
 }
 
 .wutos-brand__logo {
@@ -99,7 +98,6 @@
   height: auto;
   object-fit: contain;
   object-position: left top;
-  filter: drop-shadow(0 0 7px rgba(38, 157, 255, .7));
 }
 
 .wutos-title-plaque {
@@ -130,7 +128,6 @@
   letter-spacing: .05em;
   line-height: 1.1;
   white-space: nowrap;
-  text-shadow: 0 0 11px rgba(46, 157, 255, .8);
 }
 
 .wutos-title-plaque span {

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>C · 翡翠指挥｜火焰探测器检测台</title>
+  <style>
+    :root { --bg:#e7f2e7; --surface:#f8fbf7; --white:#fff; --green:#176b4c; --deep:#0f4433; --ink:#163a2c; --muted:#6f897b; --line:#c9ded0; --soft:#d9edda; --lime:#cbed9d; --amber:#d3b966; --red:#b05e4d; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { height:100vh; overflow:hidden; background:var(--bg); color:var(--ink); font-family:"Microsoft YaHei","Noto Sans SC",system-ui,sans-serif; }
+    .console { height:100vh; display:grid; grid-template-rows:102px minmax(0,1fr) 136px; gap:16px; padding:22px 28px 22px; }
+    .top-strip { display:grid; grid-template-columns: 1fr 1.2fr 1fr; align-items:center; padding:0 22px; color:#eaf7ea; background:var(--deep); border:1px solid #0b392b; }
+    .top-left { display:flex; align-items:center; gap:18px; }
+    .top-left img { width:105px; filter:brightness(0) invert(1) saturate(.2); opacity:.9; }
+    .top-left span { padding-left:18px; border-left:1px solid rgba(234,247,234,.25); color:#a6c9ae; font-size:11px; line-height:1.5; }
+    .top-title { text-align:center; }
+    .top-title h1 { margin:0; font-family:Georgia,"Songti SC",serif; font-size:25px; font-weight:500; letter-spacing:-.04em; }
+    .top-title p { margin:7px 0 0; color:#9ac3a4; font:10px "Consolas",monospace; letter-spacing:.18em; }
+    .top-actions { display:flex; justify-content:flex-end; align-items:center; gap:11px; }
+    .action { padding:8px 11px; border:1px solid rgba(213,243,215,.24); color:#c5e1c8; font-size:11px; }
+    .action.is-live { border-color:#b6de8c; background:rgba(203,237,157,.14); color:var(--lime); }
+    .body { min-height:0; display:grid; grid-template-columns:minmax(0,1.85fr) minmax(270px,.75fr); gap:16px; }
+    .left-column { min-width:0; min-height:0; display:grid; grid-template-rows:166px 1fr; gap:16px; }
+    .verdict { position:relative; overflow:hidden; display:grid; grid-template-columns:1fr 1.3fr .65fr; align-items:center; gap:20px; padding:24px 28px; background:var(--surface); border:1px solid var(--line); }
+    .verdict::after { content:"READY"; position:absolute; right:27px; top:-20px; color:#e4f2e2; font:900 115px/1 "Consolas",monospace; letter-spacing:-.13em; pointer-events:none; }
+    .verdict-label { position:relative; z-index:1; color:var(--green); font:800 10px "Consolas",monospace; letter-spacing:.15em; text-transform:uppercase; }
+    .verdict h2 { position:relative; z-index:1; margin:7px 0 0; color:var(--deep); font-family:Georgia,"Songti SC",serif; font-weight:500; font-size:37px; letter-spacing:-.06em; }
+    .verdict-copy { position:relative; z-index:1; padding-left:22px; border-left:1px solid var(--line); color:var(--muted); font-size:12px; line-height:1.7; }
+    .verdict-copy b { display:block; margin-bottom:5px; color:var(--green); font-size:13px; }
+    .verdict-readout { position:relative; z-index:1; text-align:right; }
+    .verdict-readout strong { display:block; color:var(--green); font:700 30px "Consolas",monospace; }
+    .verdict-readout span { display:block; margin-top:4px; color:var(--muted); font-size:11px; }
+    .data-board { min-height:0; display:grid; grid-template-rows:42px 1fr; overflow:hidden; background:var(--surface); border:1px solid var(--line); }
+    .board-tabs { display:flex; align-items:center; gap:22px; padding:0 20px; border-bottom:1px solid var(--line); }
+    .board-tabs b { display:flex; align-items:center; height:100%; border-bottom:2px solid var(--green); color:var(--green); font-size:13px; }
+    .board-tabs span { color:var(--muted); font-size:12px; }
+    .matrix-wrap { min-height:0; padding:16px 20px 14px; }
+    .matrix-head, .matrix-row { display:grid; grid-template-columns:76px 1.25fr 1fr 1fr 1fr 80px; align-items:center; gap:10px; }
+    .matrix-head { min-height:25px; color:#8aa394; font-size:10px; letter-spacing:.08em; }
+    .matrix-row { min-height:46px; border-top:1px solid #e3eee5; color:#456455; font-size:12px; }
+    .matrix-row b { color:var(--deep); font:700 12px "Consolas",monospace; }
+    .matrix-row .name { color:var(--ink); font-weight:800; }
+    .bar { height:7px; overflow:hidden; background:#eaf2ea; }
+    .bar i { display:block; height:100%; background:#93ce9f; }
+    .bar.yellow i { background:#d7cf80; }
+    .matrix-status { justify-self:end; color:var(--green); font-size:11px; font-weight:800; }
+    .matrix-status.wait { color:#8a9d91; }
+    .side-column { min-width:0; min-height:0; display:grid; grid-template-rows: 1.05fr .95fr; gap:16px; }
+    .side-card { min-height:0; overflow:hidden; padding:18px; background:var(--surface); border:1px solid var(--line); }
+    .side-card h3 { margin:0; font-size:14px; }
+    .side-card .sub { display:block; margin-top:5px; color:var(--muted); font-size:10px; }
+    .machine-tile { position:relative; display:flex; justify-content:center; height:150px; margin:14px -2px 16px; overflow:hidden; background:#eef7ed; border:1px solid #dfebdf; }
+    .machine-tile::after { content:"REAL ASSET / BENCH 01"; position:absolute; left:10px; top:10px; color:#71967d; font:9px "Consolas",monospace; letter-spacing:.1em; }
+    .machine-tile img { width:73%; height:160px; object-fit:contain; mix-blend-mode:multiply; }
+    .side-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .side-stat { padding-top:10px; border-top:1px solid var(--line); }
+    .side-stat b { display:block; color:var(--deep); font:700 18px "Consolas",monospace; }
+    .side-stat span { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+    .signal-rows { margin-top:14px; }
+    .signal-row { display:flex; justify-content:space-between; align-items:center; min-height:31px; border-top:1px solid #e3eee5; color:#4b6b59; font-size:11px; }
+    .signal-row b { color:var(--green); font-size:11px; }
+    .signal-row b.warn { color:#9b832c; }
+    .event-list { margin-top:15px; }
+    .event { display:grid; grid-template-columns:48px 1fr; gap:10px; min-height:42px; padding:9px 0; border-top:1px solid #e3eee5; }
+    .event time { color:#8aa394; font:10px "Consolas",monospace; }
+    .event strong { display:block; color:var(--ink); font-size:11px; }
+    .event span { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+    .timeline { min-height:0; display:grid; grid-template-columns:196px 1fr; align-items:center; gap:26px; padding:20px 24px; background:var(--deep); color:#eaf7ea; }
+    .timeline-title h3 { margin:0; font-family:Georgia,"Songti SC",serif; font-size:20px; font-weight:500; }
+    .timeline-title p { margin:7px 0 0; color:#9fc7a8; font-size:11px; }
+    .steps { display:grid; grid-template-columns:repeat(6,1fr); gap:0; }
+    .step { position:relative; padding-left:8px; }
+    .step:not(:last-child)::after { content:""; position:absolute; top:8px; left:17px; right:0; border-top:1px solid rgba(212,241,216,.28); }
+    .step i { position:relative; z-index:1; display:block; width:16px; height:16px; border:1px solid #82b394; border-radius:50%; background:var(--deep); }
+    .step.active i { border:5px solid var(--lime); }
+    .step b { display:block; margin-top:9px; color:#eaf7ea; font-size:11px; white-space:nowrap; }
+    .step small { display:block; margin-top:3px; color:#8eb99a; font-size:10px; white-space:nowrap; }
+    @media (max-width: 900px) { body { height:auto; overflow:auto; } .console { height:auto; grid-template-rows:auto auto auto; padding:16px; } .top-strip,.body,.left-column,.side-column,.timeline { grid-template-columns:1fr; } .top-strip { gap:14px; padding:18px; } .top-title,.top-actions { text-align:left; justify-content:flex-start; } .body { grid-template-rows:auto auto; } .matrix-wrap { overflow:auto; } .verdict { grid-template-columns:1fr; } .verdict-copy { padding:0; border-left:0; } .timeline { gap:15px; } }
+  </style>
+</head>
+<body>
+  <!-- 方向 C：form 来自“PLC / 批次 / 过程”三种证据并行裁决，采用高密度指挥台骨架。 -->
+  <div class="console">
+    <header class="top-strip">
+      <div class="top-left"><img src="../../public/wutos-assets/wutos-logo-real.png" alt="WUTOS 理工光科"><span>智能生产<br>质量裁决台</span></div>
+      <div class="top-title"><h1>火焰探测器检测台</h1><p>FIELD QUALITY CONTROL / FLAME DETECTOR TEST BENCH</p></div>
+      <div class="top-actions"><span class="action is-live">● 现场在线</span><span class="action">GHT-1050-02</span><span style="color:#9fc7a8;font:11px Consolas,monospace">09:41:26</span></div>
+    </header>
+    <main class="body">
+      <section class="left-column">
+        <article class="verdict"><div><span class="verdict-label">Bench verdict / snapshot</span><h2>可以继续</h2></div><div class="verdict-copy"><b>当前窗口稳定</b>安全门联锁已闭合，PLC 自动运行允许已接通；探测器批次正在完成移动热源阶段。</div><div class="verdict-readout"><strong>04 / 06</strong><span>A 类合格 · 1 台 B 类合格</span></div></article>
+        <article class="data-board"><div class="board-tabs"><b>探测器批次</b><span>四波长采集</span><span>噪声阈值</span><span>结果记录</span></div><div class="matrix-wrap"><div class="matrix-head"><span>UNIT</span><span>判定</span><span>波动噪声</span><span>绝对噪声</span><span>SNR 23 / 45</span><span>状态</span></div>
+          <div class="matrix-row"><b>D-01</b><span class="name">A 类合格</span><div class="bar"><i style="width:92%"></i></div><div class="bar"><i style="width:88%"></i></div><div class="bar"><i style="width:96%"></i></div><span class="matrix-status">PASS</span></div>
+          <div class="matrix-row"><b>D-02</b><span class="name">A 类合格</span><div class="bar"><i style="width:88%"></i></div><div class="bar"><i style="width:83%"></i></div><div class="bar"><i style="width:91%"></i></div><span class="matrix-status">PASS</span></div>
+          <div class="matrix-row"><b>D-03</b><span class="name">B 类合格</span><div class="bar yellow"><i style="width:77%"></i></div><div class="bar yellow"><i style="width:71%"></i></div><div class="bar yellow"><i style="width:82%"></i></div><span class="matrix-status" style="color:#8f7930">B-PASS</span></div>
+          <div class="matrix-row"><b>D-04</b><span class="name">A 类合格</span><div class="bar"><i style="width:90%"></i></div><div class="bar"><i style="width:86%"></i></div><div class="bar"><i style="width:94%"></i></div><span class="matrix-status">PASS</span></div>
+          <div class="matrix-row"><b>D-05</b><span class="name" style="color:var(--muted)">等待采样</span><div class="bar"><i style="width:38%;background:#cddbd0"></i></div><div class="bar"><i style="width:38%;background:#cddbd0"></i></div><div class="bar"><i style="width:38%;background:#cddbd0"></i></div><span class="matrix-status wait">WAIT</span></div>
+          <div class="matrix-row"><b>D-06</b><span class="name">A 类合格</span><div class="bar"><i style="width:84%"></i></div><div class="bar"><i style="width:81%"></i></div><div class="bar"><i style="width:88%"></i></div><span class="matrix-status">PASS</span></div>
+        </div></article>
+      </section>
+      <aside class="side-column">
+        <article class="side-card"><h3>检测台资产</h3><span class="sub">REAL BENCH / UNIT 01</span><div class="machine-tile"><img src="../../public/wutos-assets/machine-real.png" alt="检测台实物图"></div><div class="side-stats"><div class="side-stat"><b>06</b><span>在线探测器</span></div><div class="side-stat"><b>12.4</b><span>参考峰值 mV</span></div><div class="side-stat"><b>0.8%</b><span>波动噪声</span></div><div class="side-stat"><b>01:42</b><span>阶段用时</span></div></div></article>
+        <article class="side-card"><h3>PLC / 事件</h3><span class="sub">SIGNALS & RECENT EVENTS</span><div class="signal-rows"><div class="signal-row"><span>自动运行允许</span><b>ON</b></div><div class="signal-row"><span>安全门联锁</span><b>ON</b></div><div class="signal-row"><span>火警继电器</span><b>OFF</b></div><div class="signal-row"><span>故障继电器</span><b class="warn">CHECK</b></div></div><div class="event-list"><div class="event"><time>09:40</time><div><strong>移动热源到位</strong><span>阶段状态已更新</span></div></div><div class="event"><time>09:38</time><div><strong>批次开始采集</strong><span>6 台探测器响应</span></div></div></div></article>
+      </aside>
+    </main>
+    <footer class="timeline"><div class="timeline-title"><h3>四阶段闭环</h3><p>当前位于 02 / 06 · 预计剩余 04:18</p></div><div class="steps"><div class="step"><i></i><b>初始化</b><small>完成</small></div><div class="step active"><i></i><b>移动热源</b><small>进行中</small></div><div class="step"><i></i><b>爆闪干扰</b><small>待开始</small></div><div class="step"><i></i><b>电磁占位</b><small>待开始</small></div><div class="step"><i></i><b>回初始位</b><small>待开始</small></div><div class="step"><i></i><b>记录</b><small>待生成</small></div></div></footer>
+  </div>
+</body>
+</html>

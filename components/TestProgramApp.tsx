@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Archive, CheckCircle2, ChevronDown, ChevronUp, CircleAlert, Download, RefreshCw, Settings2, ShieldCheck, TimerReset, Wifi, X } from 'lucide-react';
+import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './test-program.css';
 
 type StageId = 'INIT' | 'HEAT_POSITIONING' | 'HEAT_SIGNAL_STABILIZATION' | 'HEAT_NOISE_CAPTURE' | 'HEAT_INTERFERENCE' | 'FLASH' | 'EMC' | 'RETURN_HOME' | 'COMPLETE' | 'FAULT' | 'UNKNOWN';
@@ -377,6 +378,7 @@ function Metric({ label, value, tone = '' }: { label: string; value: string; ton
 }
 
 export function TestProgramApp() {
+  const { theme, toggleTheme } = useAppTheme();
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
   const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
@@ -584,6 +586,7 @@ export function TestProgramApp() {
         </div>
         <div className="test-header-actions">
           <span className={`test-connection ${connected && snapshot?.source?.connected ? 'is-online' : ''}`}><i />{connected && snapshot?.source?.connected ? '监听在线' : '等待正式程序'}</span>
+          <ThemeToggleButton theme={theme} onToggle={toggleTheme} className="test-theme-toggle" />
           <button type="button" className="test-settings-button" aria-label="配置规划时长" onClick={openSettings}><Settings2 size={14} />规划配置</button>
           <button type="button" onClick={() => void refresh()}><RefreshCw size={14} />刷新</button>
         </div>

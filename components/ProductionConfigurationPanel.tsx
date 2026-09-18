@@ -29,19 +29,19 @@ interface ProductionRecordSummary {
 }
 
 const palette = {
-  panelTop: '#082537',
-  panelBottom: '#04131f',
-  field: '#061722',
-  border: '#1ccfe166',
-  borderSoft: '#2b728299',
-  cyan: '#43dced',
-  text: '#ccecf5',
-  title: '#f0fcff',
-  muted: '#7fa9b4',
-  dim: '#64818b',
-  pass: '#62e7b6',
-  warn: '#e2c363',
-  fail: '#f27769',
+  panelTop: 'var(--app-production-panel-top, #082537)',
+  panelBottom: 'var(--app-production-panel-bottom, #04131f)',
+  field: 'var(--app-production-field, #061722)',
+  border: 'var(--app-production-border, #1ccfe166)',
+  borderSoft: 'var(--app-production-border-soft, #2b728299)',
+  cyan: 'var(--app-production-cyan, #43dced)',
+  text: 'var(--app-production-text, #ccecf5)',
+  title: 'var(--app-production-title, #f0fcff)',
+  muted: 'var(--app-production-muted, #7fa9b4)',
+  dim: 'var(--app-production-dim, #64818b)',
+  pass: 'var(--app-production-pass, #62e7b6)',
+  warn: 'var(--app-production-warn, #e2c363)',
+  fail: 'var(--app-production-fail, #f27769)',
 };
 
 const inputStyle = {
@@ -208,7 +208,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
 
   const controlDisabled = locked || loading || !relay;
 
-  return <section className="production-config-panel" aria-labelledby="production-config-title" style={{ width: '100%', border: `1px solid ${palette.border}`, background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`, color: palette.text, boxShadow: 'inset 0 0 24px rgba(32,204,229,.05)' }}>
+  return <section className="production-config-panel" aria-labelledby="production-config-title" style={{ width: '100%', border: `1px solid ${palette.border}`, background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`, color: palette.text, boxShadow: 'var(--app-production-shadow, inset 0 0 24px rgba(32,204,229,.05))' }}>
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '16px 18px', borderBottom: `1px solid ${palette.borderSoft}` }}>
           <div>
             <small style={{ color: palette.cyan, font: '700 10px Consolas, monospace', letterSpacing: '.16em' }}>PRODUCTION CONFIG</small>
@@ -223,7 +223,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
         {loading && <div style={{ padding: 28, color: palette.cyan, fontSize: 12 }}>正在读取生产配置…</div>}
 
         {!loading && relay && recordConfig && <div style={{ padding: 18, display: 'grid', gap: 14 }}>
-          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <div>
                 <b style={{ color: palette.title, fontSize: 13 }}>继电器反馈检测源</b>
@@ -249,7 +249,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             <div style={{ marginTop: 9, color: palette.dim, fontSize: 10, lineHeight: 1.6 }}>协议地址从 0 开始；X1 对应协议地址 0x0000。继电器反馈输入只参与测试判定，通讯失败时测试直接判定失败。</div>
           </section>
 
-          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <div>
                 <b style={{ color: palette.title, fontSize: 13 }}>继电器功能测试</b>
@@ -277,7 +277,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
                 setRelay({ ...relay, config: { ...relay.config, mappings } });
               };
               const rowReady = isDioChannelAddress(mapping.alarmInputAddress) && isDioChannelAddress(mapping.faultInputAddress);
-              return <div key={mapping.detectorIndex} style={{ display: 'grid', gridTemplateColumns: '.5fr 1fr .9fr 1fr .9fr', gap: 7, alignItems: 'center', marginBottom: 6, padding: '5px 6px', border: `1px solid ${rowReady ? 'rgba(98,231,182,.18)' : 'rgba(226,195,99,.16)'}`, background: 'rgba(6,23,34,.72)' }}>
+              return <div key={mapping.detectorIndex} style={{ display: 'grid', gridTemplateColumns: '.5fr 1fr .9fr 1fr .9fr', gap: 7, alignItems: 'center', marginBottom: 6, padding: '5px 6px', border: `1px solid ${rowReady ? 'var(--app-production-pass-border, rgba(98,231,182,.18))' : 'var(--app-production-warn-border, rgba(226,195,99,.16))'}`, background: 'var(--app-production-row-bg, rgba(6,23,34,.72))' }}>
                 <b style={{ color: rowReady ? palette.pass : palette.warn }}>D{mapping.detectorIndex}</b>
                 <input disabled={controlDisabled} value={mapping.alarmInputAddress} placeholder="如 X1" onChange={(e) => update({ alarmInputAddress: e.target.value })} style={inputStyle} />
                 <select disabled={controlDisabled} value={mapping.alarmNormalLevel ? '1' : '0'} onChange={(e) => update({ alarmNormalLevel: e.target.value === '1' })} style={inputStyle}><option value="0">0 · NO 常见</option><option value="1">1 · NC 常见</option></select>
@@ -288,7 +288,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>请输入 DIO 通道 X1～X64。具体型号启用继电器测试后，DIO 参数或 12 路反馈映射不完整会明确记录为继电器预检失败，绝不会误判为合格。</p>
           </section>
 
-          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
             <b style={{ color: palette.title, fontSize: 13 }}>自动生产检验记录配置</b>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.45fr 1fr .65fr', gap: 8, marginTop: 11 }}>
               <label style={labelStyle}>检验员<input disabled={locked} value={recordConfig.inspector} placeholder="请输入检验员" onChange={(e) => setRecordConfig({ ...recordConfig, inspector: e.target.value })} style={inputStyle} /></label>
@@ -299,7 +299,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             <p style={{ color: palette.dim, fontSize: 10.5, margin: '9px 0 0', lineHeight: 1.6 }}>本配置在正式批次启动时冻结；完成后自动保存结构化 JSON、完整原始归档与 Word 兼容表格 `.doc`，正式记录同时进入 MQTT 可靠上传队列。</p>
           </section>
 
-          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'rgba(4,19,31,.55)', padding: 14 }}>
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
               <div><b style={{ color: palette.title, fontSize: 13 }}>最近生产检验记录</b><div style={{ marginTop: 3, color: palette.dim, fontSize: 10 }}>最近 20 批 · 自动归档 · 可查看表格预览或导出 `.doc`</div></div>
               <button type="button" disabled={recordsLoading} onClick={() => void loadRecords()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '6px 9px', cursor: recordsLoading ? 'wait' : 'pointer', opacity: recordsLoading ? .5 : 1, font: 'inherit', fontSize: 10 }}><RefreshCw size={12} />刷新</button>
@@ -319,13 +319,13 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
             </div>
           </section>
 
-          {message && <div style={{ padding: '8px 10px', border: `1px solid ${messageIsSuccess ? 'rgba(98,231,182,.28)' : 'rgba(242,119,105,.28)'}`, color: messageIsSuccess ? palette.pass : palette.fail, background: 'rgba(6,23,34,.72)', fontSize: 10.5 }}>{message}</div>}
+          {message && <div style={{ padding: '8px 10px', border: `1px solid ${messageIsSuccess ? 'var(--app-production-pass-border, rgba(98,231,182,.28))' : 'var(--app-production-fail-border, rgba(242,119,105,.28))'}`, color: messageIsSuccess ? palette.pass : palette.fail, background: 'var(--app-production-row-bg, rgba(6,23,34,.72))', fontSize: 10.5 }}>{message}</div>}
 
           <footer style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <span style={{ color: locked ? palette.warn : palette.dim, fontSize: 10 }}>{locked ? '流程运行期间为只读模式，历史记录仍可查看/导出。' : mappingsComplete ? '12 路反馈通道已填写；保存后由后台重新校验。' : `仍有 ${12 - inputCount} 路反馈通道未填写。`}</span>
             <div style={{ display: 'flex', gap: 7 }}>
               <button type="button" onClick={() => void openLatestRecord()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.borderSoft}`, background: palette.field, color: palette.text, padding: '7px 11px', cursor: 'pointer', font: 'inherit', fontSize: 10.5 }}><FileText size={13} />最新记录</button>
-              <button type="button" disabled={saving || locked || !relay || !recordConfig} onClick={() => void save()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.cyan}`, background: palette.cyan, color: '#06202b', padding: '7px 12px', cursor: saving || locked ? 'not-allowed' : 'pointer', opacity: saving || locked ? .5 : 1, font: 'inherit', fontSize: 10.5, fontWeight: 700 }}><Save size={13} />{saving ? '保存中…' : '保存并应用'}</button>
+              <button type="button" disabled={saving || locked || !relay || !recordConfig} onClick={() => void save()} style={{ display: 'flex', alignItems: 'center', gap: 5, border: `1px solid ${palette.cyan}`, background: palette.cyan, color: 'var(--app-production-action-text, #06202b)', padding: '7px 12px', cursor: saving || locked ? 'not-allowed' : 'pointer', opacity: saving || locked ? .5 : 1, font: 'inherit', fontSize: 10.5, fontWeight: 700 }}><Save size={13} />{saving ? '保存中…' : '保存并应用'}</button>
             </div>
           </footer>
         </div>}

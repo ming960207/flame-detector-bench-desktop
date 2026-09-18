@@ -132,20 +132,20 @@ function allocationText(precheck: ProductPrecheckReport | null): { text: string;
 }
 
 const palette = {
-  panelTop: 'rgba(8,37,55,.98)',
-  panelBottom: 'rgba(4,19,31,.98)',
-  border: 'rgba(28,207,225,.40)',
-  borderSoft: 'rgba(43,114,130,.62)',
-  text: '#ccecf5',
-  title: '#f0fcff',
-  muted: '#7fa9b4',
-  dim: '#64818b',
-  cyan: '#43dced',
-  pass: '#62e7b6',
-  warn: '#e2c363',
-  fail: '#f27769',
-  field: '#061722',
-  fieldBorder: '#2b7282',
+  panelTop: 'var(--app-product-panel-top, rgba(8,37,55,.98))',
+  panelBottom: 'var(--app-product-panel-bottom, rgba(4,19,31,.98))',
+  border: 'var(--app-product-border, rgba(28,207,225,.40))',
+  borderSoft: 'var(--app-product-border-soft, rgba(43,114,130,.62))',
+  text: 'var(--app-product-text, #ccecf5)',
+  title: 'var(--app-product-title, #f0fcff)',
+  muted: 'var(--app-product-muted, #7fa9b4)',
+  dim: 'var(--app-product-dim, #64818b)',
+  cyan: 'var(--app-product-cyan, #43dced)',
+  pass: 'var(--app-product-pass, #62e7b6)',
+  warn: 'var(--app-product-warn, #e2c363)',
+  fail: 'var(--app-product-fail, #f27769)',
+  field: 'var(--app-product-field, #061722)',
+  fieldBorder: 'var(--app-product-field-border, #2b7282)',
 };
 
 const fieldStyle = {
@@ -303,7 +303,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
       color: palette.text,
       border: `1px solid ${palette.border}`,
       background: `linear-gradient(145deg,${palette.panelTop},${palette.panelBottom})`,
-      boxShadow: 'inset 0 0 18px rgba(32,204,229,.07)',
+      boxShadow: 'var(--app-product-shadow, inset 0 0 18px rgba(32,204,229,.07))',
       fontFamily: '"Microsoft YaHei UI", "Noto Sans SC", sans-serif',
     }}
   >
@@ -386,7 +386,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
           </label>
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 34, marginTop: 9, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10.5 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 34, marginTop: 9, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: 'var(--app-product-soft-field, #061923)', fontSize: 10.5 }}>
           <input
             type="checkbox"
             checked={draftProfile.skipSoftwareVersionCheck}
@@ -397,7 +397,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
         </label>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 9 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10.5 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: 'var(--app-product-soft-field, #061923)', fontSize: 10.5 }}>
             <input
               type="checkbox"
               checked={draftProfile.relayFunctionalTestEnabled}
@@ -406,7 +406,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
             />
             继电器功能测试
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10.5 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '0 8px', color: palette.muted, border: `1px solid ${palette.borderSoft}`, background: 'var(--app-product-soft-field, #061923)', fontSize: 10.5 }}>
             <input
               type="checkbox"
               checked={draftProfile.productCodeRule.enabled}
@@ -450,7 +450,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
           <span style={{ color: palette.muted }}>编号规则 <b style={{ color: savedCodeMissing.length ? palette.warn : palette.pass }}>{savedCodeMissing.length ? '未完整配置' : '已配置'}</b></span>
         </div>
 
-        <div style={{ marginTop: 9, padding: '7px 8px', color: toneColor(allocation.tone), border: `1px solid ${palette.borderSoft}`, background: '#061923', fontSize: 10 }}>本批产品编号：{allocation.text}</div>
+        <div style={{ marginTop: 9, padding: '7px 8px', color: toneColor(allocation.tone), border: `1px solid ${palette.borderSoft}`, background: 'var(--app-product-soft-field, #061923)', fontSize: 10 }}>本批产品编号：{allocation.text}</div>
 
         {precheck && <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${palette.borderSoft}`, color: palette.muted, fontSize: 10 }}>
           <div style={{ color: precheckTone }}>实际检查 {precheck.units.length} 台 · {failedUnits.length ? `${failedUnits.length} 台异常` : precheck.verdict === 'PASS' ? '预检通过' : '等待结果'}</div>
@@ -463,7 +463,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 6, marginTop: 7 }}>
               {relayReport.units.map((unit) => {
                 const reasons = [...relayActionReasons(unit.alarm), ...relayActionReasons(unit.fault)];
-                return <div key={unit.detectorIndex} style={{ minWidth: 0, padding: '6px 7px', border: `1px solid ${unit.verdict === 'PASS' ? 'rgba(98,231,182,.32)' : 'rgba(242,119,105,.32)'}`, background: unit.verdict === 'PASS' ? 'rgba(10,54,48,.42)' : 'rgba(64,20,20,.32)' }}>
+                return <div key={unit.detectorIndex} style={{ minWidth: 0, padding: '6px 7px', border: `1px solid ${unit.verdict === 'PASS' ? 'var(--app-product-pass-border, rgba(98,231,182,.32))' : 'var(--app-product-fail-border, rgba(242,119,105,.32))'}`, background: unit.verdict === 'PASS' ? 'var(--app-product-pass-bg, rgba(10,54,48,.42))' : 'var(--app-product-fail-bg, rgba(64,20,20,.32))' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}><b style={{ color: palette.title, fontSize: 10.5 }}>D{unit.detectorIndex}</b><strong style={{ color: unit.verdict === 'PASS' ? palette.pass : palette.fail, fontSize: 10 }}>{relayActionText(unit.verdict)}</strong></div>
                   <div style={{ marginTop: 4, color: palette.muted, fontSize: 9.5 }}>火警 {relayActionText(unit.alarm.verdict)} · 故障 {relayActionText(unit.fault.verdict)}</div>
                   {reasons.length > 0 && <div style={{ marginTop: 4, color: palette.fail, fontSize: 9.5, lineHeight: 1.45 }}>{reasons.join('；')}</div>}
@@ -472,14 +472,14 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
             </div>
           </section>}
           {failedUnits.length > 0 && <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
-            {failedUnits.slice(0, 6).map((unit) => <div key={unit.index} style={{ padding: '5px 6px', color: '#ffaaa0', border: '1px solid rgba(242,119,105,.30)', background: 'rgba(64,20,20,.28)' }}>
+            {failedUnits.slice(0, 6).map((unit) => <div key={unit.index} style={{ padding: '5px 6px', color: 'var(--app-product-fail-text, #ffaaa0)', border: '1px solid var(--app-product-fail-border, rgba(242,119,105,.30))', background: 'var(--app-product-fail-bg, rgba(64,20,20,.28))' }}>
               <b>D{unit.index}</b> · {unit.reasons.map(reasonText).join(' / ')}
-              <div style={{ marginTop: 2, color: '#a98686' }}>版本 {unit.actualSoftwareVersion ?? '-'} · 探头 {unit.actualProbeCount ?? '-'}/{unit.expectedProbeCount} · 灵敏度 {unit.sensitivityLevel ?? '-'}</div>
+              <div style={{ marginTop: 2, color: 'var(--app-product-fail-muted, #a98686)' }}>版本 {unit.actualSoftwareVersion ?? '-'} · 探头 {unit.actualProbeCount ?? '-'}/{unit.expectedProbeCount} · 灵敏度 {unit.sensitivityLevel ?? '-'}</div>
             </div>)}
           </div>}
         </div>}
 
-        {noDataUnits.length > 0 && <div style={{ marginTop: 8, padding: '6px 7px', color: palette.warn, border: '1px solid rgba(226,195,99,.28)', background: 'rgba(68,55,12,.22)', fontSize: 10 }}>
+        {noDataUnits.length > 0 && <div style={{ marginTop: 8, padding: '6px 7px', color: palette.warn, border: '1px solid var(--app-product-warn-border, rgba(226,195,99,.28))', background: 'var(--app-product-warn-bg, rgba(68,55,12,.22))', fontSize: 10 }}>
           波形异常：{noDataUnits.map((unit) => `D${unit.index} ${unit.noDataProbes?.map(probeLabel).join('/')}`).join('；')}
         </div>}
 
@@ -499,7 +499,7 @@ export function ProductTypeControl({ config, locked, precheck, busy, detectorVer
               onClick={() => void saveCurrentProfile()}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '7px 11px',
-                color: '#06202b', border: `1px solid ${palette.cyan}`, background: palette.cyan,
+                color: 'var(--app-product-action-text, #06202b)', border: `1px solid ${palette.cyan}`, background: palette.cyan,
                 cursor: locked || saving || !dirty ? 'not-allowed' : 'pointer', opacity: locked || saving || !dirty ? .45 : 1,
                 font: 'inherit', fontSize: 10.5, fontWeight: 700,
               }}
