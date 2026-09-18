@@ -55,8 +55,8 @@ Run archives and logs are kept outside the temporary extracted runtime:
 %APPDATA%\FlameDetectorTestProgram\browser-profile\
 ```
 
-Each completed or aborted run stores a detailed JSON file and a concise
-Markdown report containing stage timings, relay transitions, waveform samples,
+Each completed or aborted run stores a detailed JSON file and a local HTML
+report containing stage timings, relay transitions, waveform samples,
 thresholds, detector values, and formal decision evidence. A minimal one-line
 record for every run is appended to:
 

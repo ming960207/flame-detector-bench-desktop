@@ -1,0 +1,175 @@
+﻿<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>GHT-1050-02 点型红外火焰探测器检验记录表</title>
+<!--[if gte mso 9]>
+<xml>
+ <w:WordDocument>
+  <w:View>Print</w:View>
+  <w:Zoom>100</w:Zoom>
+  <w:DoNotOptimizeForBrowser/>
+ </w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+@page {
+  size: 841.9pt 595.3pt;
+  mso-page-orientation: landscape;
+  margin: 19.85pt 34pt 19.85pt 34pt;
+  mso-header-margin: 0pt;
+  mso-footer-margin: 0pt;
+}
+@page Section1 {
+  size: 841.9pt 595.3pt;
+  mso-page-orientation: landscape;
+  margin: 19.85pt 34pt 19.85pt 34pt;
+  mso-header-margin: 0pt;
+  mso-footer-margin: 0pt;
+  mso-paper-source: 0;
+}
+div.Section1 { page: Section1; }
+body {
+  font-family: 'SimSun', '宋体', serif;
+  font-size: 8.5pt;
+  color: #000;
+  margin: 0;
+  padding: 0;
+  line-height: 1.1;
+}
+p { margin: 0; padding: 0; }
+.page-container { width: 100%; page-break-inside: avoid; }
+.doc-title {
+  text-align: center;
+  font-size: 14pt;
+  font-family: 'SimSun', '宋体', serif;
+  font-weight: normal;
+  letter-spacing: 1.5pt;
+  margin: 0 0 3pt 0;
+  line-height: 1.2;
+}
+.meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2pt;
+  font-size: 8.5pt;
+  table-layout: fixed;
+}
+.meta-table td {
+  border: 0;
+  padding: 1pt 3pt;
+  white-space: nowrap;
+}
+.w-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1.5pt solid #000;
+  text-align: center;
+  font-size: 8.5pt;
+  table-layout: fixed;
+  mso-padding-alt: 1.5pt 1pt 1.5pt 1pt;
+}
+.w-table td, .w-table th {
+  border: 0.75pt solid #000;
+  padding: 2pt 1.5pt;
+  height: 20pt;
+  vertical-align: middle;
+  word-break: break-all;
+  overflow: hidden;
+}
+.w-table th { font-weight: normal; }
+.w-table .index { width: 4%; }
+.w-table .item { width: 24%; text-align: left; padding-left: 4pt; }
+.sample-code-label { text-align: left; padding-left: 4pt !important; }
+.sample-code { white-space: nowrap !important; word-break: keep-all !important; font-size: 7.5pt; letter-spacing: -0.1pt; }
+.t-left { text-align: left !important; padding-left: 4pt !important; }
+.t-right { text-align: right !important; padding-right: 4pt !important; }
+.no-wrap { white-space: nowrap !important; }
+.v-text {
+  writing-mode: vertical-lr;
+  mso-direction-alt: auto;
+  letter-spacing: 1pt;
+  width: 6%;
+  font-size: 8.5pt;
+  padding: 1pt 0;
+}
+.pass { font-weight: 700; }
+.fail { font-weight: 700; text-decoration: underline; }
+.not-tested { font-weight: 700; text-decoration: underline; }
+.not-applicable { font-weight: 600; }
+.vision-detail {
+  color: #444;
+  font-size: 7.5pt;
+  line-height: 1.15;
+  white-space: normal;
+}
+@media screen {
+  body { margin: 24px; background: #fff; }
+  .w-table { font-size: 12px; }
+  .w-table td, .w-table th { padding: 7px 5px; height: 28px; }
+  .vision-detail { font-size: 10px; }
+  .sample-code { font-size: 10px; letter-spacing: -0.2px; }
+}
+@media print { body { margin: 8mm; } }
+</style>
+</head>
+<body>
+<div class="Section1">
+<div class="page-container">
+  <div class="doc-title">GHT-1050-02&nbsp;&nbsp;点型红外火焰探测器检验记录表</div>
+
+  <table class="meta-table">
+    <tr>
+      <td style="width: 25%;" class="t-left">表单编号：WUTOS/IMS-JL836</td>
+      <td style="width: 25%;" class="t-left">版本：A/0</td>
+      <td style="width: 25%;" class="t-left">检验数量：6 台</td>
+      <td style="width: 25%;" class="t-right">生产日期：2026-09-13</td>
+    </tr>
+    <tr>
+      <td colspan="2" class="t-left">检验依据：GB15631－2008</td>
+      <td class="t-left">批次：example-20260913-01</td>
+      <td class="t-right">检验员：范例检验员</td>
+    </tr>
+  </table>
+
+  <table class="w-table">
+    <colgroup>
+      <col style="width: 6%;">
+      <col style="width: 4%;">
+      <col style="width: 24%;">
+      <col style="width: 11.00%;"><col style="width: 11.00%;"><col style="width: 11.00%;"><col style="width: 11.00%;"><col style="width: 11.00%;"><col style="width: 11.00%;">
+    </colgroup>
+    <thead>
+      <tr>
+        <th colspan="3" style="height: 22pt;">编号<br>检验内容</th>
+        <th style="width: 11.00%">1</th><th style="width: 11.00%">2</th><th style="width: 11.00%">3</th><th style="width: 11.00%">4</th><th style="width: 11.00%">5</th><th style="width: 11.00%">6</th>
+      </tr>
+      <tr>
+        <th></th>
+        <th></th>
+        <th class="sample-code-label">产品编号</th>
+        <td class="sample-code">410205901020100001</td><td class="sample-code">410205901020100002</td><td class="sample-code">410205901020100003</td><td class="sample-code">410205901020100004</td><td class="sample-code">410205901020100005</td><td class="sample-code">410205901020100006</td>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td rowspan="10" class="v-text">生产检验项目</td><td class="index">1</td><td class="item">工作电流检验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">2</td><td class="item">火警动作检验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">3</td><td class="item">故障动作检验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">4</td><td class="item">LED 显示检验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">5</td><td class="item">幅值测试</td><td>109，105<br><span class="pass">合格</span></td><td>110，106<br><span class="pass">合格</span></td><td>111，107<br><span class="pass">合格</span></td><td>112，108<br><span class="pass">合格</span></td><td>113，109<br><span class="pass">合格</span></td><td>114，110<br><span class="pass">合格</span></td></tr>
+<tr><td class="index">6</td><td class="item">产品默认设置</td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td><td><span class="pass">合格</span><br><span class="vision-detail">版本：90.22.09.15<br>探头：2<br>灵敏度：2</span></td></tr>
+<tr><td class="index">7</td><td class="item">抗干扰测试</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">8</td><td class="item">电源波动试验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">9</td><td class="item">高温运行试验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+<tr><td class="index">10</td><td class="item">低温运行试验</td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td><td><span class="pass">合格</span></td></tr>
+      <tr>
+        <td colspan="9" class="t-right no-wrap" style="height: 23pt;">
+          检验结论：<span class="pass">合格</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;检验员：范例检验员 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;日期：2026-09-13
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</div>
+</body>
+</html>

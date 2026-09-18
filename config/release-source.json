@@ -1,0 +1,14 @@
+{
+  "source": "gitee",
+  "branch": "refactor/unified-backend",
+  "git": {
+    "label": "GitHub",
+    "repository": "https://github.com/ming960207/flame-detector-bench-desktop",
+    "remoteUrl": "https://github.com/ming960207/flame-detector-bench-desktop.git"
+  },
+  "gitee": {
+    "label": "Gitee",
+    "repository": "https://gitee.com/mingchangpeng/flame-detector-bench-desktop",
+    "remoteUrl": "https://gitee.com/mingchangpeng/flame-detector-bench-desktop.git"
+  }
+}

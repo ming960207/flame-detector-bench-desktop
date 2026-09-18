@@ -1,0 +1,10 @@
+2026-09-09 09:22:12 | run=test-20260909012158702-ed418b | status=ABORTED | result=PENDING | grade=PENDING | duration=13.71 s | stages=0/2 | relays=15 | detectors=324 | waveforms=0
+2026-09-09 09:24:45 | run=test-20260909012214837-c6efb6 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.46 s | stages=10/10 | relays=61 | detectors=3264 | waveforms=29212
+2026-09-09 11:08:36 | run=test-20260909030824879-8c4422 | status=ABORTED | result=PENDING | grade=PENDING | duration=11.23 s | stages=0/2 | relays=15 | detectors=270 | waveforms=0
+2026-09-09 11:11:09 | run=test-20260909030838563-72e908 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.71 s | stages=10/10 | relays=61 | detectors=3366 | waveforms=27788
+2026-09-09 11:21:42 | run=test-20260909032133170-240ab2 | status=ABORTED | result=PENDING | grade=PENDING | duration=9.27 s | stages=0/2 | relays=9 | detectors=228 | waveforms=0
+2026-09-09 11:24:16 | run=test-20260909032145547-49b1f1 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.31 s | stages=10/10 | relays=61 | detectors=3372 | waveforms=28484
+2026-09-09 13:23:12 | run=test-20260909052300812-6b2f36 | status=ABORTED | result=PENDING | grade=PENDING | duration=11.24 s | stages=0/2 | relays=15 | detectors=270 | waveforms=0
+2026-09-09 13:25:45 | run=test-20260909052314321-8b29e2 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.65 s | stages=10/10 | relays=61 | detectors=3288 | waveforms=28596
+2026-09-09 13:27:03 | run=test-20260909052646022-fc4829 | status=ABORTED | result=PENDING | grade=PENDING | duration=17.47 s | stages=0/2 | relays=9 | detectors=426 | waveforms=0
+2026-09-09 13:29:37 | run=test-20260909052706578-1576a4 | status=COMPLETED | result=FAIL | grade=FAIL | duration=150.53 s | stages=10/10 | relays=61 | detectors=3444 | waveforms=26392

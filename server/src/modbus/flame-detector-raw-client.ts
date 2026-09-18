@@ -2,6 +2,8 @@ import { Socket } from 'node:net';
 import { calculateModbusCRC16 } from './flame-data-decoder.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 700;
+/** 现场 TCP 独立端口拓扑：每个端口仅挂一台探测器，所有探测器从站地址均为 0x01。 */
+const FIELD_TCP_DEVICE_ADDRESS = 0x01;
 
 function appendCRC(body: Buffer): Buffer {
   const crc = calculateModbusCRC16(body);
@@ -60,29 +62,41 @@ export class RawTcpModbusClient {
 
   async readHoldingRegisters(address: number, startAddress: number, quantity: number): Promise<{ data: number[] }> {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 125) throw new Error('Modbus RTU 读取寄存器数量无效');
+    // Raw TCP 现场每个 TCP 端口仅对应一台地址 01 的探测器；禁止把 detectorIndex/持久化 address 带入帧地址。
+    void address;
+    const targetAddress = FIELD_TCP_DEVICE_ADDRESS;
     const body = Buffer.from([
-      address & 0xFF,
+      targetAddress,
       0x03,
       (startAddress >>> 8) & 0xFF,
       startAddress & 0xFF,
       (quantity >>> 8) & 0xFF,
       quantity & 0xFF,
     ]);
-    const response = await this.enqueue(() => this.exchange(appendCRC(body), address & 0xFF, 0x03, quantity));
+    const response = await this.enqueue(() => this.exchange(appendCRC(body), targetAddress, 0x03, quantity));
     const data = Array.from({ length: quantity }, (_, index) => response.readUInt16BE(3 + index * 2));
     return { data };
   }
 
   async writeRegisters(address: number, startAddress: number, values: number[]): Promise<void> {
     if (!Number.isInteger(values.length) || values.length < 1 || values.length > 123) throw new Error('Modbus RTU 写入寄存器数量无效');
+    // 普通有地址 Raw TCP 写也固定走 01；火警/故障/复位控制另由 relay-simulation 走 FF 广播写。
+    void address;
+    const targetAddress = FIELD_TCP_DEVICE_ADDRESS;
     const body = Buffer.alloc(7 + values.length * 2);
-    body[0] = address & 0xFF;
+    body[0] = targetAddress;
     body[1] = 0x10;
     body.writeUInt16BE(startAddress & 0xFFFF, 2);
     body.writeUInt16BE(values.length, 4);
     body[6] = values.length * 2;
     values.forEach((value, index) => body.writeUInt16BE(Number(value) & 0xFFFF, 7 + index * 2));
-    await this.enqueue(() => this.exchange(appendCRC(body), address & 0xFF, 0x10, values.length));
+    await this.enqueue(() => this.exchange(appendCRC(body), targetAddress, 0x10, values.length));
+  }
+
+  async sendRawFrame(frame: Buffer): Promise<void> {
+    if (!Buffer.isBuffer(frame) || frame.length < 3) throw new Error('探测器原始帧无效');
+    const request = Buffer.from(frame);
+    await this.enqueue(() => this.writeOneWay(request));
   }
 
   async close(): Promise<void> {
@@ -157,6 +171,17 @@ export class RawTcpModbusClient {
         });
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private writeOneWay(request: Buffer): Promise<void> {
+    if (!this.isOpen) return Promise.reject(new Error('探测器原始 TCP 连接不可用'));
+    return new Promise<void>((resolve, reject) => {
+      try {
+        this.socket.write(request, (error) => error ? reject(error) : resolve());
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }

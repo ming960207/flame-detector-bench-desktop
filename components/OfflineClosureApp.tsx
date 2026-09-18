@@ -14,6 +14,7 @@ import {
   Wifi,
   XCircle,
 } from 'lucide-react';
+import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import {
   CLOSURE_STAGES,
   canAdvanceOfflineStage,
@@ -42,6 +43,7 @@ const initialState: ClosureState = {
 };
 
 export function OfflineClosureApp() {
+  const { theme, toggleTheme } = useAppTheme();
   const [state, setState] = useState<ClosureState>(initialState);
   const [connected, setConnected] = useState(false);
   const [lastResult, setLastResult] = useState<ClosureCommandResult | null>(null);
@@ -228,6 +230,7 @@ export function OfflineClosureApp() {
             <Wifi size={17} aria-hidden="true" />
             <span>{connected ? '本机服务已连接' : '等待本机服务'}</span>
           </div>
+          <ThemeToggleButton theme={theme} onToggle={toggleTheme} className="closure-theme-toggle" />
         </div>
         <div className="closure-rule" />
         <p className="closure-disclaimer"><AlertTriangle size={15} aria-hidden="true" /> 安全回路、PLC 输出与现场 FAT/SAT 均不在本次离线仿真范围内。</p>

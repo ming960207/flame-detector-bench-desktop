@@ -1,0 +1,1136 @@
+/*
+ * Cross-page theme layer.
+ * The reference theme follows the supplied blue/white industrial HMI image;
+ * the mint theme keeps the existing green palette coherent outside the home
+ * dashboard. No layout, grid, sizing or positioning rules live in this file.
+ */
+
+html[data-app-theme="reference"],
+html[data-app-theme="mint"] {
+  color-scheme: light;
+}
+
+html[data-app-theme="reference"] {
+  --app-page-bg: #eaf5fb;
+  --app-surface: #ffffff;
+  --app-surface-soft: #eff8fd;
+  --app-line: #a8cfe7;
+  --app-line-soft: #d0e6f2;
+  --app-ink: #153e5d;
+  --app-muted: #5e7f95;
+  --app-blue: #1687d4;
+  --app-blue-deep: #0869ad;
+  --app-cyan: #37b9df;
+  --app-green: #1ca76c;
+  --app-amber: #df922e;
+  --app-red: #d95350;
+  --app-product-panel-top: #ffffff;
+  --app-product-panel-bottom: #eaf6fc;
+  --app-product-border: #9bc9e2;
+  --app-product-border-soft: #cfe5f1;
+  --app-product-text: #315a74;
+  --app-product-title: #173f5f;
+  --app-product-muted: #64849a;
+  --app-product-dim: #718fa1;
+  --app-product-cyan: #258fd5;
+  --app-product-pass: #1f9b64;
+  --app-product-warn: #a97820;
+  --app-product-fail: #c64d49;
+  --app-product-field: #ffffff;
+  --app-product-field-border: #8fc1dc;
+  --app-product-soft-field: #f1f8fc;
+  --app-product-shadow: 0 6px 18px rgba(46, 119, 158, .12);
+  --app-product-pass-border: rgba(31, 155, 100, .36);
+  --app-product-pass-bg: rgba(31, 155, 100, .08);
+  --app-product-fail-border: rgba(198, 77, 73, .34);
+  --app-product-fail-bg: rgba(198, 77, 73, .08);
+  --app-product-fail-text: #b44945;
+  --app-product-fail-muted: #8d7373;
+  --app-product-warn-border: rgba(169, 120, 32, .35);
+  --app-product-warn-bg: rgba(169, 120, 32, .08);
+  --app-product-action-text: #ffffff;
+  --app-production-panel-top: #ffffff;
+  --app-production-panel-bottom: #eaf6fc;
+  --app-production-field: #ffffff;
+  --app-production-border: #9bc9e2;
+  --app-production-border-soft: #cfe5f1;
+  --app-production-cyan: #258fd5;
+  --app-production-text: #315a74;
+  --app-production-title: #173f5f;
+  --app-production-muted: #64849a;
+  --app-production-dim: #718fa1;
+  --app-production-pass: #1f9b64;
+  --app-production-warn: #a97820;
+  --app-production-fail: #c64d49;
+  --app-production-section-bg: #f3f9fc;
+  --app-production-row-bg: #edf7fb;
+  --app-production-shadow: 0 6px 18px rgba(46, 119, 158, .12);
+  --app-production-pass-border: rgba(31, 155, 100, .36);
+  --app-production-warn-border: rgba(169, 120, 32, .35);
+  --app-production-fail-border: rgba(198, 77, 73, .34);
+  --app-production-action-text: #ffffff;
+  --app-observer-panel: #ffffff;
+  --app-observer-panel2: #eef8fd;
+  --app-observer-field: #f4fbfe;
+  --app-observer-border: #a6cee5;
+  --app-observer-cyan: #258fd5;
+  --app-observer-text: #315a74;
+  --app-observer-title: #173f5f;
+  --app-observer-muted: #64849a;
+  --app-observer-pass: #1f9b64;
+  --app-observer-warn: #a97820;
+  --app-observer-fail: #c64d49;
+  --app-observer-strip-bg: #edf7fb;
+  --app-observer-isolation-bg: #e4f3f9;
+  --app-observer-warn-bg: #fff7e8;
+  --app-observer-table-head-bg: #e6f3f9;
+}
+
+.app-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 7px 10px;
+  color: #b9e7ff;
+  border: 1px solid rgba(40, 157, 238, .7);
+  background: rgba(5, 43, 78, .78);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.app-theme-toggle.is-compact {
+  min-width: 1.9em;
+  padding: .35em .45em;
+}
+
+.app-theme-toggle:hover {
+  color: #fff;
+  border-color: #3ef2ff;
+  box-shadow: 0 0 8px rgba(0, 227, 255, .35);
+}
+
+.app-theme-toggle:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+html[data-app-theme="reference"] .app-theme-toggle,
+html[data-app-theme="mint"] .app-theme-toggle {
+  color: var(--app-blue-deep) !important;
+  border-color: var(--app-line) !important;
+  background: var(--app-surface-soft) !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme="reference"] .app-theme-toggle:hover,
+html[data-app-theme="mint"] .app-theme-toggle:hover {
+  color: var(--app-blue-deep) !important;
+  border-color: var(--app-blue) !important;
+  background: color-mix(in srgb, var(--app-blue) 8%, white) !important;
+}
+
+html[data-app-theme="mint"] {
+  --app-page-bg: #edf7ef;
+  --app-surface: #fbfefb;
+  --app-surface-soft: #eef8f0;
+  --app-line: #a6ceb0;
+  --app-line-soft: #d5e8d8;
+  --app-ink: #173c2b;
+  --app-muted: #668174;
+  --app-blue: #3e9d70;
+  --app-blue-deep: #17613f;
+  --app-cyan: #54a979;
+  --app-green: #42af6b;
+  --app-amber: #aa7b26;
+  --app-red: #b4493f;
+  --app-product-panel-top: #fbfefb;
+  --app-product-panel-bottom: #e9f6eb;
+  --app-product-border: #a6ceb0;
+  --app-product-border-soft: #d5e8d8;
+  --app-product-text: #315c43;
+  --app-product-title: #173c2b;
+  --app-product-muted: #668174;
+  --app-product-dim: #789181;
+  --app-product-cyan: #3e9d70;
+  --app-product-pass: #2a9558;
+  --app-product-warn: #aa7b26;
+  --app-product-fail: #b4493f;
+  --app-product-field: #ffffff;
+  --app-product-field-border: #9ec7a8;
+  --app-product-soft-field: #f0f8f1;
+  --app-product-shadow: 0 6px 18px rgba(46, 111, 65, .1);
+  --app-product-pass-border: rgba(42, 149, 88, .34);
+  --app-product-pass-bg: rgba(42, 149, 88, .08);
+  --app-product-fail-border: rgba(180, 73, 63, .32);
+  --app-product-fail-bg: rgba(180, 73, 63, .08);
+  --app-product-fail-text: #a7443c;
+  --app-product-fail-muted: #806f6f;
+  --app-product-warn-border: rgba(170, 123, 38, .32);
+  --app-product-warn-bg: rgba(170, 123, 38, .08);
+  --app-product-action-text: #ffffff;
+  --app-production-panel-top: #fbfefb;
+  --app-production-panel-bottom: #e9f6eb;
+  --app-production-field: #ffffff;
+  --app-production-border: #a6ceb0;
+  --app-production-border-soft: #d5e8d8;
+  --app-production-cyan: #3e9d70;
+  --app-production-text: #315c43;
+  --app-production-title: #173c2b;
+  --app-production-muted: #668174;
+  --app-production-dim: #789181;
+  --app-production-pass: #2a9558;
+  --app-production-warn: #aa7b26;
+  --app-production-fail: #b4493f;
+  --app-production-section-bg: #f1f8f2;
+  --app-production-row-bg: #edf7ee;
+  --app-production-shadow: 0 6px 18px rgba(46, 111, 65, .1);
+  --app-production-pass-border: rgba(42, 149, 88, .34);
+  --app-production-warn-border: rgba(170, 123, 38, .32);
+  --app-production-fail-border: rgba(180, 73, 63, .32);
+  --app-production-action-text: #ffffff;
+  --app-observer-panel: #fbfefb;
+  --app-observer-panel2: #eef8f0;
+  --app-observer-field: #f5fbf5;
+  --app-observer-border: #abd0b2;
+  --app-observer-cyan: #3e9d70;
+  --app-observer-text: #315c43;
+  --app-observer-title: #173c2b;
+  --app-observer-muted: #668174;
+  --app-observer-pass: #2a9558;
+  --app-observer-warn: #aa7b26;
+  --app-observer-fail: #b4493f;
+  --app-observer-strip-bg: #eef8ef;
+  --app-observer-isolation-bg: #e4f2e5;
+  --app-observer-warn-bg: #fff7e6;
+  --app-observer-table-head-bg: #e9f5ea;
+}
+
+html[data-app-theme="reference"] body,
+html[data-app-theme="mint"] body {
+  background: var(--app-page-bg) !important;
+  color: var(--app-ink) !important;
+}
+
+/* Shared detail shell and page chrome. */
+html[data-app-theme="reference"] .wutos-detail-shell,
+html[data-app-theme="mint"] .wutos-detail-shell {
+  border-color: var(--app-line) !important;
+  background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important;
+  box-shadow: 0 18px 40px rgba(42, 100, 133, .18), inset 0 0 24px rgba(105, 177, 210, .08) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-shell > header,
+html[data-app-theme="mint"] .wutos-detail-shell > header {
+  border-bottom-color: var(--app-line-soft) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-shell > header h2,
+html[data-app-theme="mint"] .wutos-detail-shell > header h2,
+html[data-app-theme="reference"] .wutos-detail-shell > header p,
+html[data-app-theme="mint"] .wutos-detail-shell > header p {
+  color: var(--app-ink) !important;
+  text-shadow: none !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-shell > header p,
+html[data-app-theme="mint"] .wutos-detail-shell > header p,
+html[data-app-theme="reference"] .wutos-detail-section-note,
+html[data-app-theme="mint"] .wutos-detail-section-note {
+  color: var(--app-muted) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-shell > header button,
+html[data-app-theme="mint"] .wutos-detail-shell > header button,
+html[data-app-theme="reference"] .wutos-detail-header-actions .wutos-detail-release-button,
+html[data-app-theme="mint"] .wutos-detail-header-actions .wutos-detail-release-button {
+  color: var(--app-blue-deep) !important;
+  border-color: var(--app-line) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-tabs,
+html[data-app-theme="mint"] .wutos-detail-tabs {
+  border-bottom-color: var(--app-line-soft) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-tabs button,
+html[data-app-theme="mint"] .wutos-detail-tabs button {
+  color: var(--app-muted) !important;
+  border-color: var(--app-line) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-tabs button.is-active,
+html[data-app-theme="mint"] .wutos-detail-tabs button.is-active {
+  color: #fff !important;
+  border-color: var(--app-blue) !important;
+  background: var(--app-blue) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-product,
+html[data-app-theme="mint"] .wutos-detail-product,
+html[data-app-theme="reference"] .wutos-detail-production,
+html[data-app-theme="mint"] .wutos-detail-production {
+  border-color: var(--app-line-soft) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] .wutos-detail-overlay,
+html[data-app-theme="mint"] .wutos-detail-overlay,
+html[data-app-theme="reference"] .wutos-simulation-backdrop,
+html[data-app-theme="mint"] .wutos-simulation-backdrop,
+html[data-app-theme="reference"] .software-release-backdrop,
+html[data-app-theme="mint"] .software-release-backdrop,
+html[data-app-theme="reference"] .detector-modal-backdrop,
+html[data-app-theme="mint"] .detector-modal-backdrop,
+html[data-app-theme="reference"] .test-config-backdrop,
+html[data-app-theme="mint"] .test-config-backdrop {
+  background: rgba(17, 64, 94, .24) !important;
+}
+
+/* The supplied blue/white reference theme for the production home screen. */
+html[data-app-theme="reference"] .wutos-dashboard {
+  --wutos-bg: #eaf5fb;
+  --wutos-panel: rgba(255, 255, 255, .95);
+  --wutos-panel-deep: rgba(237, 247, 253, .94);
+  --wutos-line: #258fd5;
+  --wutos-line-dim: rgba(61, 151, 204, .42);
+  --wutos-cyan: #29b7df;
+  --wutos-blue: #1687d4;
+  --wutos-white: #153e5d;
+  --wutos-muted: #62829a;
+  --wutos-green: #27b276;
+  --wutos-red: #d95350;
+  color: var(--app-ink) !important;
+  background: radial-gradient(circle at 50% 50%, rgba(98, 190, 231, .2), transparent 44%), #eaf5fb !important;
+}
+
+html[data-app-theme="reference"] .wutos-frame {
+  border-color: #79b9df !important;
+  background: #f7fcff !important;
+  box-shadow: 0 10px 28px rgba(61, 139, 181, .2), inset 0 0 56px rgba(71, 173, 218, .12) !important;
+}
+
+html[data-app-theme="reference"] .wutos-backdrop {
+  background:
+    radial-gradient(ellipse at 51% 61%, rgba(111, 201, 238, .26), transparent 22%),
+    radial-gradient(ellipse at 50% 100%, rgba(77, 166, 221, .14), transparent 37%),
+    linear-gradient(180deg, #f4fbff 0%, #eaf6fc 54%, #dcedf8 100%) !important;
+}
+
+html[data-app-theme="reference"] .wutos-backdrop::before {
+  opacity: .32;
+  background-image: linear-gradient(rgba(66, 155, 207, .09) 1px, transparent 1px), linear-gradient(90deg, rgba(66, 155, 207, .07) 1px, transparent 1px) !important;
+}
+
+html[data-app-theme="reference"] .wutos-backdrop::after {
+  opacity: .38;
+  background: linear-gradient(112deg, transparent 0 38%, rgba(54, 141, 203, .12) 39%, transparent 40% 100%), linear-gradient(68deg, transparent 0 64%, rgba(54, 141, 203, .09) 65%, transparent 66% 100%) !important;
+}
+
+html[data-app-theme="reference"] .wutos-brand__logo {
+  filter: none !important;
+}
+
+html[data-app-theme="reference"] .wutos-title-plaque::before {
+  border-bottom-color: #5db5e4 !important;
+  background: linear-gradient(90deg, transparent, rgba(201, 232, 247, .96), transparent) !important;
+  box-shadow: 0 15px 25px -21px rgba(32, 143, 211, .5) !important;
+}
+
+html[data-app-theme="reference"] .wutos-title-plaque h1,
+html[data-app-theme="reference"] .wutos-panel__title,
+html[data-app-theme="reference"] .wutos-live-waveform__header strong,
+html[data-app-theme="reference"] .wutos-detector-card header strong {
+  color: #153e5d !important;
+  text-shadow: none !important;
+}
+
+html[data-app-theme="reference"] .wutos-title-plaque span,
+html[data-app-theme="reference"] .wutos-header__meta,
+html[data-app-theme="reference"] .wutos-panel__title-result,
+html[data-app-theme="reference"] .wutos-live-waveform__status,
+html[data-app-theme="reference"] .wutos-flow-note {
+  color: #62829a !important;
+}
+
+html[data-app-theme="reference"] .wutos-icon-button,
+html[data-app-theme="reference"] .wutos-detail-button,
+html[data-app-theme="reference"] .wutos-theme-button,
+html[data-app-theme="reference"] .wutos-command-button {
+  color: #126aa7 !important;
+  border-color: #7db9dc !important;
+  background: rgba(239, 249, 255, .96) !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme="reference"] .wutos-command-button {
+  color: #fff !important;
+  border-color: #167fc5 !important;
+  background: linear-gradient(135deg, #2c9edf, #0874bf) !important;
+}
+
+/* Result header model selector: remove the last dark-theme surface from the reference view. */
+html[data-app-theme="reference"] .wutos-result-model-control {
+  color: #52758b !important;
+  border-color: #9bc9e2 !important;
+  background: #edf8fd !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control__label {
+  color: #5e8298 !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control select {
+  color: #173f5f !important;
+  border-color: #8fc1dc !important;
+  background: #ffffff !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control select:focus {
+  border-color: #258fd5 !important;
+  box-shadow: 0 0 0 2px rgba(37, 143, 213, .14) !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control select:disabled {
+  color: #718fa1 !important;
+  background: #f0f8fc !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control__state {
+  color: #209264 !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control__state.is-busy {
+  color: #a97820 !important;
+}
+
+html[data-app-theme="reference"] .wutos-result-model-control__state.is-locked,
+html[data-app-theme="reference"] .wutos-result-model-control__state.is-error {
+  color: #c64d49 !important;
+}
+
+html[data-app-theme="reference"] .wutos-panel {
+  border-color: #65afe0 !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .97), rgba(235, 247, 253, .95)) !important;
+  box-shadow: 0 6px 17px rgba(45, 126, 171, .14), inset 0 0 22px rgba(103, 186, 224, .1) !important;
+}
+
+html[data-app-theme="reference"] .wutos-panel::before { border-color: rgba(93, 165, 210, .38) !important; }
+html[data-app-theme="reference"] .wutos-panel::after { background: #65b7e5 !important; box-shadow: none !important; }
+html[data-app-theme="reference"] .wutos-signal-group h3 { color: #117bc2 !important; }
+html[data-app-theme="reference"] .wutos-io-row { border-bottom-color: #d0e6f2 !important; background: rgba(231, 245, 252, .82) !important; }
+html[data-app-theme="reference"] .wutos-io-row span { color: #244f6e !important; }
+html[data-app-theme="reference"] .wutos-io-row code { color: #167dcc !important; }
+html[data-app-theme="reference"] .wutos-stage { background: #fff !important; box-shadow: 0 10px 22px rgba(60, 125, 165, .14) !important; }
+html[data-app-theme="reference"] .wutos-machine--real { filter: contrast(1.02) saturate(.94) drop-shadow(0 22px 22px rgba(45, 88, 118, .18)) !important; }
+html[data-app-theme="reference"] .wutos-stage__status,
+html[data-app-theme="reference"] .wutos-stage__status small { color: #267195 !important; text-shadow: none !important; }
+
+html[data-app-theme="reference"] .wutos-sensor-card {
+  border-color: #94c9e7 !important;
+  color: #245673 !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .98), rgba(230, 244, 252, .96)) !important;
+  box-shadow: 0 4px 11px rgba(42, 117, 161, .12), inset 0 0 10px rgba(80, 170, 218, .08) !important;
+}
+
+html[data-app-theme="reference"] .wutos-sensor-card header,
+html[data-app-theme="reference"] .wutos-sensor-caption,
+html[data-app-theme="reference"] .wutos-sensor-section-title { color: #1f5878 !important; }
+html[data-app-theme="reference"] .wutos-sensor-card header small,
+html[data-app-theme="reference"] .wutos-sensor-card header b,
+html[data-app-theme="reference"] .wutos-sensor-caption span,
+html[data-app-theme="reference"] .wutos-sensor-section-title span,
+html[data-app-theme="reference"] .wutos-sensor-legend,
+html[data-app-theme="reference"] .wutos-sensor-card footer,
+html[data-app-theme="reference"] .wutos-sensor-values small { color: #67869a !important; }
+html[data-app-theme="reference"] .wutos-sensor-card.is-online { border-color: #65c495 !important; }
+html[data-app-theme="reference"] .wutos-sensor-card.is-online header i,
+html[data-app-theme="reference"] .wutos-sensor-card.is-online footer i { background: #1eb878 !important; box-shadow: 0 0 5px rgba(30, 184, 120, .35) !important; }
+html[data-app-theme="reference"] .wutos-sensor-card.is-online header b { color: #198e60 !important; }
+html[data-app-theme="reference"] .wutos-sensor-wave { border-block-color: #cee5f1 !important; background: linear-gradient(180deg, #eff9fd, #e2f2fa) !important; color: #6f94a6 !important; }
+html[data-app-theme="reference"] .wutos-wave-grid { stroke: rgba(41, 128, 176, .16) !important; }
+html[data-app-theme="reference"] .wutos-wave-line.channel-1 { stroke: #0c8bd6 !important; }
+html[data-app-theme="reference"] .wutos-wave-line.channel-2 { stroke: #1daf76 !important; }
+html[data-app-theme="reference"] .wutos-wave-line.channel-3 { stroke: #dc951f !important; }
+html[data-app-theme="reference"] .wutos-wave-line.channel-4 { stroke: #7f66bd !important; }
+html[data-app-theme="reference"] .wutos-sensor-values > span { color: #54788d !important; border-color: rgba(42, 129, 177, .2) !important; }
+html[data-app-theme="reference"] .wutos-sensor-values b { color: #164f70 !important; }
+
+html[data-app-theme="reference"] .wutos-live-waveform {
+  border-color: #70bce2 !important;
+  color: #245d7d !important;
+  background: linear-gradient(145deg, rgba(246, 252, 255, .98), rgba(224, 242, 251, .96)) !important;
+  box-shadow: 0 7px 16px rgba(39, 119, 167, .13), inset 0 0 16px rgba(83, 177, 220, .1) !important;
+}
+
+html[data-app-theme="reference"] .wutos-live-waveform__toggle > svg,
+html[data-app-theme="reference"] .wutos-live-waveform__eyebrow { color: #1486cf !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__chart { border-color: #aad3e8 !important; background: linear-gradient(180deg, #e8f6fc, #d9edf7) !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__grid { stroke: rgba(54, 132, 178, .2) !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__values span { border-color: #b4d8e9 !important; background: rgba(248, 253, 255, .84) !important; color: #61839a !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__values b { color: #194f70 !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__devices button { color: #5f8398 !important; border-color: #acd2e5 !important; background: #eaf6fc !important; }
+html[data-app-theme="reference"] .wutos-live-waveform__devices button.is-selected { color: #15557b !important; border-color: #56a9d7 !important; background: #d8edf8 !important; box-shadow: 0 3px 8px rgba(45, 127, 174, .14) !important; }
+
+html[data-app-theme="reference"] .wutos-alarm-table { border-color: #9fc9e4 !important; background: rgba(239, 248, 253, .92) !important; }
+html[data-app-theme="reference"] .wutos-alarm-row { border-top-color: #d2e6f1 !important; color: #315d78 !important; }
+html[data-app-theme="reference"] .wutos-alarm-row--head { color: #1f5777 !important; }
+html[data-app-theme="reference"] .wutos-alarm-row time,
+html[data-app-theme="reference"] .wutos-alarm-row > span:nth-child(2) small { color: #6c8ca0 !important; }
+html[data-app-theme="reference"] .wutos-final-result-card { border-color: #9cc9e4 !important; background: linear-gradient(145deg, #f7fcff, #e2f2fa) !important; box-shadow: inset 0 0 10px rgba(78, 167, 214, .1) !important; }
+html[data-app-theme="reference"] .wutos-final-result-card small { color: #66869a !important; }
+html[data-app-theme="reference"] .wutos-final-result-card b { text-shadow: none !important; }
+html[data-app-theme="reference"] .wutos-final-result-card.is-a-pass { border-color: #75c99d !important; color: #168c5b !important; background: linear-gradient(145deg, #e9f8ef, #d4f0df) !important; }
+html[data-app-theme="reference"] .wutos-final-result-card.is-b-pass { border-color: #9ccde6 !important; color: #147fbe !important; }
+html[data-app-theme="reference"] .wutos-final-result-card.is-fail { border-color: #db928b !important; color: #c74743 !important; background: linear-gradient(145deg, #fff5f3, #f8dfdc) !important; }
+html[data-app-theme="reference"] .wutos-detector-card { border-color: #78b9df !important; background: rgba(241, 249, 253, .96) !important; box-shadow: 0 5px 12px rgba(43, 117, 162, .1), inset 0 0 13px rgba(96, 180, 222, .08) !important; }
+html[data-app-theme="reference"] .wutos-detector-card.pass { border-color: #68bd90 !important; }
+html[data-app-theme="reference"] .wutos-detector-card.fail { border-color: #cf6a61 !important; background: rgba(255, 244, 241, .96) !important; }
+html[data-app-theme="reference"] .wutos-detector-card header { border-bottom-color: #cbe2ef !important; }
+html[data-app-theme="reference"] .wutos-detector-card header span,
+html[data-app-theme="reference"] .wutos-detector-card__metric-label,
+html[data-app-theme="reference"] .wutos-detector-card__metric-values > span { color: #65879a !important; }
+html[data-app-theme="reference"] .wutos-detector-card__metric-values b { color: #1a5878 !important; }
+html[data-app-theme="reference"] .wutos-detector-card__processes { border-top-color: #cbe2ef !important; }
+html[data-app-theme="reference"] .wutos-process-lamp { color: #718d9d !important; }
+html[data-app-theme="reference"] .wutos-process-lamp > i { border-color: #8eafbf !important; background: #d7e8f0 !important; box-shadow: inset 0 0 3px rgba(70, 121, 151, .14) !important; }
+html[data-app-theme="reference"] .wutos-process-lamp.pass { color: #188b5c !important; }
+html[data-app-theme="reference"] .wutos-process-lamp.pass > i { border-color: #6bc493 !important; background: #29b276 !important; box-shadow: 0 0 6px rgba(41, 178, 118, .3) !important; }
+html[data-app-theme="reference"] .wutos-process-lamp.fail { color: #c84d49 !important; }
+html[data-app-theme="reference"] .wutos-process-lamp.fail > i { border-color: #d9857e !important; background: #d95350 !important; box-shadow: 0 0 6px rgba(217, 83, 80, .22) !important; }
+html[data-app-theme="reference"] .wutos-process-lamp.pending > i { border-color: #a1b8c5 !important; background: #b8cad3 !important; }
+html[data-app-theme="reference"] .wutos-flow-node { color: #4c7188 !important; }
+html[data-app-theme="reference"] .wutos-flow-node__circle { border-color: #83b6d3 !important; background: #edf7fc !important; box-shadow: 0 4px 9px rgba(59, 126, 164, .12), inset 0 0 10px rgba(111, 188, 223, .1) !important; }
+html[data-app-theme="reference"] .wutos-flow-node small b { color: #6d91a3 !important; }
+html[data-app-theme="reference"] .wutos-flow-node.is-done { color: #1f8b61 !important; }
+html[data-app-theme="reference"] .wutos-flow-node.is-done .wutos-flow-node__circle { border-color: #5dbb8b !important; background: #dff2e8 !important; }
+html[data-app-theme="reference"] .wutos-flow-node.is-current { color: #17567a !important; }
+html[data-app-theme="reference"] .wutos-flow-node.is-current .wutos-flow-node__circle { border-color: #2699d4 !important; background: #cce9f7 !important; box-shadow: 0 4px 12px rgba(52, 151, 207, .2), inset 0 0 12px rgba(117, 200, 232, .18) !important; }
+html[data-app-theme="reference"] .wutos-flow-arrow span { background: #2a9ad5 !important; box-shadow: none !important; }
+html[data-app-theme="reference"] .wutos-flow-arrow svg { color: #197dbb !important; }
+html[data-app-theme="reference"] .wutos-flow-baseline { background: #a6cee4 !important; }
+html[data-app-theme="reference"] .wutos-flow-baseline i { border-color: #63aedd !important; background: #e6f3fa !important; }
+html[data-app-theme="reference"] .wutos-flow-baseline i.is-lit { background: #29a5d9 !important; box-shadow: 0 0 8px rgba(41, 165, 217, .3) !important; }
+
+/* Field process / workbench pages. */
+html[data-app-theme="reference"] .bench-console,
+html[data-app-theme="mint"] .bench-console {
+  color: var(--app-ink) !important;
+  background: radial-gradient(ellipse at 50% -15%, var(--app-surface-soft) 0, var(--app-page-bg) 43%, #dfeef5 100%) !important;
+}
+
+html[data-app-theme="reference"] .bench-console::before,
+html[data-app-theme="mint"] .bench-console::before {
+  opacity: .3;
+  background-image: linear-gradient(color-mix(in srgb, var(--app-blue) 14%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--app-blue) 12%, transparent) 1px, transparent 1px) !important;
+}
+
+html[data-app-theme="reference"] .tech-header,
+html[data-app-theme="mint"] .tech-header {
+  border-color: var(--app-line) !important;
+  background: linear-gradient(90deg, var(--app-surface), var(--app-surface-soft), var(--app-surface)) !important;
+  box-shadow: 0 8px 22px rgba(56, 130, 168, .12), inset 0 0 20px rgba(110, 185, 219, .1) !important;
+}
+
+html[data-app-theme="reference"] .title-icon,
+html[data-app-theme="mint"] .title-icon { color: #fff !important; background: var(--app-blue) !important; box-shadow: 0 4px 12px color-mix(in srgb, var(--app-blue) 30%, transparent) !important; }
+html[data-app-theme="reference"] .bench-title h1,
+html[data-app-theme="mint"] .bench-title h1,
+html[data-app-theme="reference"] .process-monitor h2,
+html[data-app-theme="mint"] .process-monitor h2,
+html[data-app-theme="reference"] .detector-panel h2,
+html[data-app-theme="mint"] .detector-panel h2,
+html[data-app-theme="reference"] .result-panel h2,
+html[data-app-theme="mint"] .result-panel h2 { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .bench-title p,
+html[data-app-theme="mint"] .bench-title p,
+html[data-app-theme="reference"] .bench-stats span,
+html[data-app-theme="mint"] .bench-stats span,
+html[data-app-theme="reference"] .header-status,
+html[data-app-theme="mint"] .header-status { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .bench-stats,
+html[data-app-theme="mint"] .bench-stats { border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .bench-stats div,
+html[data-app-theme="mint"] .bench-stats div { border-left-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .bench-stats b,
+html[data-app-theme="mint"] .bench-stats b { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .header-status button,
+html[data-app-theme="mint"] .header-status button { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .process-monitor,
+html[data-app-theme="mint"] .process-monitor,
+html[data-app-theme="reference"] .detector-panel,
+html[data-app-theme="mint"] .detector-panel,
+html[data-app-theme="reference"] .result-panel,
+html[data-app-theme="mint"] .result-panel,
+html[data-app-theme="reference"] .detector-workbench,
+html[data-app-theme="mint"] .detector-workbench { border-color: var(--app-line) !important; background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important; box-shadow: 0 6px 18px rgba(51, 118, 154, .1) !important; }
+html[data-app-theme="reference"] .section-kicker,
+html[data-app-theme="mint"] .section-kicker { color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .plc-badge,
+html[data-app-theme="mint"] .plc-badge { color: var(--app-muted) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .plc-badge.is-online,
+html[data-app-theme="mint"] .plc-badge.is-online { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 55%, white) !important; }
+html[data-app-theme="reference"] .process-node,
+html[data-app-theme="mint"] .process-node { color: var(--app-muted) !important; border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .process-node.is-done,
+html[data-app-theme="mint"] .process-node.is-done { color: var(--app-green) !important; border-color: var(--app-green) !important; }
+html[data-app-theme="reference"] .process-node.is-current,
+html[data-app-theme="mint"] .process-node.is-current { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; box-shadow: 0 6px 13px color-mix(in srgb, var(--app-blue) 22%, transparent) !important; }
+html[data-app-theme="reference"] .process-node:not(:last-child)::after,
+html[data-app-theme="mint"] .process-node:not(:last-child)::after { border-color: var(--app-line) !important; }
+html[data-app-theme="reference"] .device-card,
+html[data-app-theme="mint"] .device-card,
+html[data-app-theme="reference"] .waveform-card,
+html[data-app-theme="mint"] .waveform-card,
+html[data-app-theme="reference"] .detector-card,
+html[data-app-theme="mint"] .detector-card { border-color: var(--app-line) !important; background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important; box-shadow: 0 4px 12px rgba(57, 127, 165, .08) !important; }
+html[data-app-theme="reference"] .device-card header,
+html[data-app-theme="mint"] .device-card header,
+html[data-app-theme="reference"] .device-card p,
+html[data-app-theme="mint"] .device-card p,
+html[data-app-theme="reference"] .device-card footer,
+html[data-app-theme="mint"] .device-card footer { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .device-reading,
+html[data-app-theme="mint"] .device-reading { color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .result-panel>strong,
+html[data-app-theme="mint"] .result-panel>strong,
+html[data-app-theme="reference"] .final-result-banner h2,
+html[data-app-theme="mint"] .final-result-banner h2,
+html[data-app-theme="reference"] .detector-card-header b,
+html[data-app-theme="mint"] .detector-card-header b { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .result-panel>p,
+html[data-app-theme="mint"] .result-panel>p,
+html[data-app-theme="reference"] .final-result-banner p,
+html[data-app-theme="mint"] .final-result-banner p { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .result-rule,
+html[data-app-theme="mint"] .result-rule,
+html[data-app-theme="reference"] .final-result-rule,
+html[data-app-theme="mint"] .final-result-rule { border-color: var(--app-line) !important; }
+html[data-app-theme="reference"] .result-rule span,
+html[data-app-theme="mint"] .result-rule span { color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .bench-notice,
+html[data-app-theme="mint"] .bench-notice { color: var(--app-muted) !important; border-left-color: var(--app-blue) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .waveform-panel,
+html[data-app-theme="mint"] .waveform-panel,
+html[data-app-theme="reference"] .auto-test-panel,
+html[data-app-theme="mint"] .auto-test-panel,
+html[data-app-theme="reference"] .waveform-shell,
+html[data-app-theme="mint"] .waveform-shell { border-color: var(--app-line-soft) !important; background: linear-gradient(180deg, var(--app-surface-soft), var(--app-surface)) !important; }
+html[data-app-theme="reference"] .panel-heading b,
+html[data-app-theme="mint"] .panel-heading b,
+html[data-app-theme="reference"] .workbench-header h2,
+html[data-app-theme="mint"] .workbench-header h2 { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .panel-heading span,
+html[data-app-theme="mint"] .panel-heading span,
+html[data-app-theme="reference"] .workbench-header p,
+html[data-app-theme="mint"] .workbench-header p { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .workbench-actions button,
+html[data-app-theme="mint"] .workbench-actions button,
+html[data-app-theme="reference"] .detector-modal footer button,
+html[data-app-theme="mint"] .detector-modal footer button { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .workbench-actions .test-action,
+html[data-app-theme="mint"] .workbench-actions .test-action,
+html[data-app-theme="reference"] .detector-modal .test-action,
+html[data-app-theme="mint"] .detector-modal .test-action { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; }
+html[data-app-theme="reference"] .waveform-values span,
+html[data-app-theme="mint"] .waveform-values span,
+html[data-app-theme="reference"] .device-metrics span,
+html[data-app-theme="mint"] .device-metrics span,
+html[data-app-theme="reference"] .waveform-card-metrics span,
+html[data-app-theme="mint"] .waveform-card-metrics span { color: var(--app-muted) !important; border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .waveform-values b,
+html[data-app-theme="mint"] .waveform-values b,
+html[data-app-theme="reference"] .device-metrics b,
+html[data-app-theme="mint"] .device-metrics b,
+html[data-app-theme="reference"] .waveform-card-metrics b,
+html[data-app-theme="mint"] .waveform-card-metrics b { color: var(--app-ink) !important; }
+
+/* Offline closure page. It already has semantic variables, so swap those first. */
+html[data-app-theme="reference"] .closure-console,
+html[data-app-theme="mint"] .closure-console {
+  --ink: var(--app-ink);
+  --muted: var(--app-muted);
+  --edge: var(--app-line-soft);
+  --canvas: var(--app-page-bg);
+  --panel: var(--app-surface);
+  --signal: var(--app-blue);
+  --ember: var(--app-amber);
+  --danger: var(--app-red);
+  --calm: var(--app-cyan);
+  color: var(--app-ink) !important;
+  background: radial-gradient(circle at 76% -4%, color-mix(in srgb, var(--app-blue) 18%, transparent), transparent 29rem), linear-gradient(132deg, var(--app-page-bg), var(--app-surface) 48%, var(--app-surface-soft)) !important;
+}
+
+html[data-app-theme="reference"] .closure-status-card,
+html[data-app-theme="mint"] .closure-status-card { background: rgba(255, 255, 255, .86) !important; }
+html[data-app-theme="reference"] .closure-panel,
+html[data-app-theme="mint"] .closure-panel { border-color: var(--app-line-soft) !important; background: linear-gradient(135deg, rgba(255, 255, 255, .96), rgba(235, 246, 251, .96)) !important; }
+html[data-app-theme="reference"] .closure-report,
+html[data-app-theme="mint"] .closure-report { background: linear-gradient(150deg, rgba(230, 244, 251, .96), rgba(249, 252, 253, .98)) !important; }
+html[data-app-theme="reference"] .closure-report.is-ready { border-color: color-mix(in srgb, var(--app-green) 52%, white) !important; background: linear-gradient(150deg, rgba(226, 248, 237, .96), rgba(248, 252, 249, .98)) !important; }
+html[data-app-theme="reference"] .closure-button--primary,
+html[data-app-theme="mint"] .closure-button--primary,
+html[data-app-theme="reference"] .closure-button--record,
+html[data-app-theme="mint"] .closure-button--record { color: #fff !important; background: var(--app-blue) !important; }
+html[data-app-theme="reference"] .closure-button--pass,
+html[data-app-theme="mint"] .closure-button--pass { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 45%, white) !important; background: color-mix(in srgb, var(--app-green) 10%, white) !important; }
+html[data-app-theme="reference"] .closure-button--quiet,
+html[data-app-theme="mint"] .closure-button--quiet,
+html[data-app-theme="reference"] .closure-icon-button,
+html[data-app-theme="mint"] .closure-icon-button { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: transparent !important; }
+html[data-app-theme="reference"] .closure-detector,
+html[data-app-theme="mint"] .closure-detector { border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .closure-detector.valid,
+html[data-app-theme="mint"] .closure-detector.valid { border-color: color-mix(in srgb, var(--app-green) 42%, white) !important; }
+html[data-app-theme="reference"] .closure-detector.valid i,
+html[data-app-theme="mint"] .closure-detector.valid i { background: var(--app-green) !important; box-shadow: none !important; }
+
+/* Test program page. */
+html[data-app-theme="reference"] .test-program-screen,
+html[data-app-theme="mint"] .test-program-screen { color: var(--app-ink) !important; background: radial-gradient(ellipse at 52% -14%, var(--app-surface-soft) 0, var(--app-page-bg) 42%, #dceef6 100%) !important; }
+html[data-app-theme="reference"] .test-program-screen::before,
+html[data-app-theme="mint"] .test-program-screen::before { background-image: linear-gradient(color-mix(in srgb, var(--app-blue) 13%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--app-blue) 11%, transparent) 1px, transparent 1px) !important; }
+html[data-app-theme="reference"] .test-program-header,
+html[data-app-theme="mint"] .test-program-header,
+html[data-app-theme="reference"] .test-source-strip,
+html[data-app-theme="mint"] .test-source-strip,
+html[data-app-theme="reference"] .test-panel,
+html[data-app-theme="mint"] .test-panel { border-color: var(--app-line) !important; background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important; box-shadow: 0 6px 17px rgba(47, 121, 158, .1) !important; }
+html[data-app-theme="reference"] .test-program-mark,
+html[data-app-theme="mint"] .test-program-mark { color: #fff !important; background: var(--app-blue) !important; box-shadow: 0 4px 12px color-mix(in srgb, var(--app-blue) 28%, transparent) !important; }
+html[data-app-theme="reference"] .test-kicker,
+html[data-app-theme="mint"] .test-kicker,
+html[data-app-theme="reference"] .test-panel-heading h2,
+html[data-app-theme="mint"] .test-panel-heading h2 { color: var(--app-blue-deep) !important; }
+html[data-app-theme="reference"] .test-program-title h1,
+html[data-app-theme="mint"] .test-program-title h1 { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .test-program-title p,
+html[data-app-theme="mint"] .test-program-title p,
+html[data-app-theme="reference"] .test-panel-heading p,
+html[data-app-theme="mint"] .test-panel-heading p { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .test-header-actions button,
+html[data-app-theme="mint"] .test-header-actions button,
+html[data-app-theme="reference"] .test-selects select,
+html[data-app-theme="mint"] .test-selects select,
+html[data-app-theme="reference"] .test-archive-controls select,
+html[data-app-theme="mint"] .test-archive-controls select { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .test-metric,
+html[data-app-theme="mint"] .test-metric,
+html[data-app-theme="reference"] .test-relay-card,
+html[data-app-theme="mint"] .test-relay-card,
+html[data-app-theme="reference"] .test-wave-chart,
+html[data-app-theme="mint"] .test-wave-chart,
+html[data-app-theme="reference"] .test-wave-cards>div,
+html[data-app-theme="mint"] .test-wave-cards>div,
+html[data-app-theme="reference"] .test-wave-meta,
+html[data-app-theme="mint"] .test-wave-meta { border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .test-metric span,
+html[data-app-theme="mint"] .test-metric span,
+html[data-app-theme="reference"] .test-wave-cards span,
+html[data-app-theme="mint"] .test-wave-cards span,
+html[data-app-theme="reference"] .test-wave-meta span,
+html[data-app-theme="mint"] .test-wave-meta span { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .test-metric strong,
+html[data-app-theme="mint"] .test-metric strong,
+html[data-app-theme="reference"] .test-wave-cards b,
+html[data-app-theme="mint"] .test-wave-cards b { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] :where(.test-stage-live, .test-count-badge, .test-verdict-chip),
+html[data-app-theme="mint"] :where(.test-stage-live, .test-count-badge, .test-verdict-chip) { color: var(--app-amber) !important; border-color: color-mix(in srgb, var(--app-amber) 52%, white) !important; background: color-mix(in srgb, var(--app-amber) 8%, white) !important; }
+html[data-app-theme="reference"] .test-stage-live,
+html[data-app-theme="mint"] .test-stage-live { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 52%, white) !important; background: color-mix(in srgb, var(--app-green) 8%, white) !important; }
+html[data-app-theme="reference"] .test-verdict-chip.pass,
+html[data-app-theme="mint"] .test-verdict-chip.pass { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 52%, white) !important; background: color-mix(in srgb, var(--app-green) 8%, white) !important; }
+html[data-app-theme="reference"] .test-verdict-chip.fail,
+html[data-app-theme="mint"] .test-verdict-chip.fail { color: var(--app-red) !important; border-color: color-mix(in srgb, var(--app-red) 52%, white) !important; background: color-mix(in srgb, var(--app-red) 8%, white) !important; }
+html[data-app-theme="reference"] .test-verdict-mark,
+html[data-app-theme="mint"] .test-verdict-mark { color: var(--app-amber) !important; border-color: color-mix(in srgb, var(--app-amber) 52%, white) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .test-verdict-mark.pass,
+html[data-app-theme="mint"] .test-verdict-mark.pass { color: var(--app-green) !important; border-color: var(--app-green) !important; }
+html[data-app-theme="reference"] .test-verdict-mark.fail,
+html[data-app-theme="mint"] .test-verdict-mark.fail { color: var(--app-red) !important; border-color: var(--app-red) !important; }
+html[data-app-theme="reference"] .test-table th,
+html[data-app-theme="mint"] .test-table th { color: var(--app-blue-deep) !important; border-bottom-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .test-table td,
+html[data-app-theme="mint"] .test-table td { color: var(--app-muted) !important; border-bottom-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .test-table tbody tr:hover,
+html[data-app-theme="mint"] .test-table tbody tr:hover,
+html[data-app-theme="reference"] .test-table tbody tr.is-current,
+html[data-app-theme="mint"] .test-table tbody tr.is-current { background: color-mix(in srgb, var(--app-blue) 9%, white) !important; box-shadow: inset 3px 0 var(--app-blue) !important; }
+html[data-app-theme="reference"] .test-wave-shell,
+html[data-app-theme="mint"] .test-wave-shell { border-color: var(--app-line-soft) !important; background: linear-gradient(#eef8fc, #e1f1f8) !important; }
+html[data-app-theme="reference"] .test-wave-title b,
+html[data-app-theme="mint"] .test-wave-title b,
+html[data-app-theme="reference"] .test-decision-main strong,
+html[data-app-theme="mint"] .test-decision-main strong { color: var(--app-ink) !important; }
+
+/* Camera evidence, software release and MES popovers. */
+html[data-app-theme="reference"] .indicator-camera.is-expanded,
+html[data-app-theme="mint"] .indicator-camera.is-expanded { border-top-color: var(--app-line) !important; }
+html[data-app-theme="reference"] .indicator-camera__eyebrow,
+html[data-app-theme="mint"] .indicator-camera__eyebrow,
+html[data-app-theme="reference"] .indicator-camera__evidence-preview header a,
+html[data-app-theme="mint"] .indicator-camera__evidence-preview header a { color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .indicator-camera__heading strong,
+html[data-app-theme="mint"] .indicator-camera__heading strong,
+html[data-app-theme="reference"] .indicator-camera__slot > b,
+html[data-app-theme="mint"] .indicator-camera__slot > b { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .indicator-camera__heading small,
+html[data-app-theme="mint"] .indicator-camera__heading small,
+html[data-app-theme="reference"] .indicator-camera__phase span,
+html[data-app-theme="mint"] .indicator-camera__phase span,
+html[data-app-theme="reference"] .indicator-camera__phase small,
+html[data-app-theme="mint"] .indicator-camera__phase small,
+html[data-app-theme="reference"] .indicator-camera__capture-empty,
+html[data-app-theme="mint"] .indicator-camera__capture-empty { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .indicator-camera__button,
+html[data-app-theme="mint"] .indicator-camera__button,
+html[data-app-theme="reference"] .indicator-camera__icon-button,
+html[data-app-theme="mint"] .indicator-camera__icon-button { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .indicator-camera__button.is-primary,
+html[data-app-theme="mint"] .indicator-camera__button.is-primary { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; }
+html[data-app-theme="reference"] .indicator-camera__workbench,
+html[data-app-theme="mint"] .indicator-camera__workbench,
+html[data-app-theme="reference"] .indicator-camera__evidence-preview,
+html[data-app-theme="mint"] .indicator-camera__evidence-preview,
+html[data-app-theme="reference"] .indicator-camera__capture-list,
+html[data-app-theme="mint"] .indicator-camera__capture-list,
+html[data-app-theme="reference"] .indicator-camera__side-panel,
+html[data-app-theme="mint"] .indicator-camera__side-panel { border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .indicator-camera__viewport,
+html[data-app-theme="mint"] .indicator-camera__viewport,
+html[data-app-theme="reference"] .indicator-camera__photo-frame,
+html[data-app-theme="mint"] .indicator-camera__photo-frame { border-color: var(--app-line) !important; background: #fff !important; }
+html[data-app-theme="reference"] .indicator-camera__slot,
+html[data-app-theme="mint"] .indicator-camera__slot { border-color: var(--app-line-soft) !important; background: rgba(255, 255, 255, .76) !important; }
+html[data-app-theme="reference"] .indicator-camera__slot > div > span,
+html[data-app-theme="mint"] .indicator-camera__slot > div > span { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .indicator-camera__capture-list > button,
+html[data-app-theme="mint"] .indicator-camera__capture-list > button { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .indicator-camera__capture-list > button:hover,
+html[data-app-theme="mint"] .indicator-camera__capture-list > button:hover,
+html[data-app-theme="reference"] .indicator-camera__capture-list > button.is-selected,
+html[data-app-theme="mint"] .indicator-camera__capture-list > button.is-selected { border-color: var(--app-line) !important; background: color-mix(in srgb, var(--app-blue) 9%, white) !important; }
+
+html[data-app-theme="reference"] .software-release-panel,
+html[data-app-theme="mint"] .software-release-panel { border-color: var(--app-line) !important; background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important; box-shadow: 0 18px 40px rgba(38, 101, 134, .2) !important; color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .software-release-panel__header,
+html[data-app-theme="mint"] .software-release-panel__header { border-bottom-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .software-release-panel__header h2,
+html[data-app-theme="mint"] .software-release-panel__header h2,
+html[data-app-theme="reference"] .software-release-card-title strong,
+html[data-app-theme="mint"] .software-release-card-title strong { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .software-release-panel__header p,
+html[data-app-theme="mint"] .software-release-panel__header p,
+html[data-app-theme="reference"] .software-release-card-title span,
+html[data-app-theme="mint"] .software-release-card-title span,
+html[data-app-theme="reference"] .software-release-actions-card>small,
+html[data-app-theme="mint"] .software-release-actions-card>small { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .software-release-panel__close,
+html[data-app-theme="mint"] .software-release-panel__close,
+html[data-app-theme="reference"] .software-release-card-title button,
+html[data-app-theme="mint"] .software-release-card-title button,
+html[data-app-theme="reference"] .software-release-actions button,
+html[data-app-theme="mint"] .software-release-actions button,
+html[data-app-theme="reference"] .software-release-actions a,
+html[data-app-theme="mint"] .software-release-actions a { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .software-release-actions button.is-primary,
+html[data-app-theme="mint"] .software-release-actions button.is-primary,
+html[data-app-theme="reference"] .software-release-submit.is-primary,
+html[data-app-theme="mint"] .software-release-submit.is-primary { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; }
+html[data-app-theme="reference"] .software-release-version-card,
+html[data-app-theme="mint"] .software-release-version-card,
+html[data-app-theme="reference"] .software-release-latest-card,
+html[data-app-theme="mint"] .software-release-latest-card,
+html[data-app-theme="reference"] .software-release-actions-card,
+html[data-app-theme="mint"] .software-release-actions-card,
+html[data-app-theme="reference"] .software-release-logs-card,
+html[data-app-theme="mint"] .software-release-logs-card { border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .software-release-facts span,
+html[data-app-theme="mint"] .software-release-facts span,
+html[data-app-theme="reference"] .software-release-log-form input,
+html[data-app-theme="mint"] .software-release-log-form input,
+html[data-app-theme="reference"] .software-release-log-form textarea,
+html[data-app-theme="mint"] .software-release-log-form textarea { color: var(--app-ink) !important; border-color: var(--app-line) !important; background: var(--app-surface) !important; }
+
+html[data-app-theme="reference"] .wutos-mes-status,
+html[data-app-theme="mint"] .wutos-mes-status { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: rgba(239, 249, 255, .96) !important; box-shadow: none !important; }
+html[data-app-theme="reference"] .wutos-mes-status__detail,
+html[data-app-theme="mint"] .wutos-mes-status__detail { color: var(--app-ink) !important; border-color: var(--app-line) !important; background: var(--app-surface) !important; box-shadow: 0 10px 28px rgba(38, 101, 134, .18) !important; }
+html[data-app-theme="reference"] .wutos-mes-status__detail > strong,
+html[data-app-theme="mint"] .wutos-mes-status__detail > strong { color: var(--app-ink) !important; border-bottom-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .wutos-mes-status__detail em,
+html[data-app-theme="mint"] .wutos-mes-status__detail em { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .wutos-mes-status__detail b,
+html[data-app-theme="mint"] .wutos-mes-status__detail b { color: var(--app-ink) !important; }
+
+/* Header alignment pass: one compact control baseline, MES badge below it. */
+.wutos-header__meta {
+  align-items: center !important;
+  gap: clamp(4px, .8%, 10px) !important;
+}
+
+.wutos-header__meta > .app-theme-toggle,
+.wutos-header__meta > .wutos-icon-button,
+.wutos-header__meta > .wutos-command-button,
+.wutos-header__meta > .wutos-detail-button {
+  flex: 0 0 auto !important;
+  min-height: 1.9em !important;
+  height: 1.9em !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.wutos-header__meta > .app-theme-toggle.is-compact {
+  width: 1.9em !important;
+  min-width: 1.9em !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+.wutos-header__meta > .app-theme-toggle.is-compact svg,
+.wutos-header__meta > .wutos-icon-button svg,
+.wutos-header__meta > .wutos-command-button svg,
+.wutos-header__meta > .wutos-detail-button svg {
+  width: 1.05em !important;
+  height: 1.05em !important;
+}
+
+.wutos-header__meta > .wutos-command-button,
+.wutos-header__meta > .wutos-detail-button {
+  gap: .18em !important;
+  padding: 0 .48em !important;
+}
+
+.wutos-header__meta > .wutos-icon-button {
+  width: 1.9em !important;
+  padding: 0 !important;
+}
+
+html[data-app-theme="reference"] .wutos-mes-status,
+html[data-app-theme="mint"] .wutos-mes-status,
+html:not([data-app-theme="reference"]):not([data-app-theme="mint"]) .wutos-mes-status {
+  top: calc(100% + .32em) !important;
+  right: 0 !important;
+  z-index: 10 !important;
+}
+
+/* Label printer tokens are intentionally variable-based in its own stylesheet. */
+html[data-app-theme="reference"] .label-printer-panel,
+html[data-app-theme="mint"] .label-printer-panel {
+  --lp-panel: #f5fbfe;
+  --lp-panel-deep: #e5f2f9;
+  --lp-field: #ffffff;
+  --lp-line: #a6cfe5;
+  --lp-line-soft: #cfe5f0;
+  --lp-cyan: var(--app-blue);
+  --lp-text: var(--app-ink);
+  --lp-title: var(--app-ink);
+  --lp-muted: var(--app-muted);
+  --lp-green: var(--app-green);
+  --lp-amber: var(--app-amber);
+  --lp-red: var(--app-red);
+  background: linear-gradient(145deg, var(--lp-panel), var(--lp-panel-deep)) !important;
+  box-shadow: 0 6px 18px rgba(48, 121, 157, .1) !important;
+}
+
+html[data-app-theme="reference"] .label-printer-panel::before,
+html[data-app-theme="mint"] .label-printer-panel::before { opacity: .18; background-image: linear-gradient(color-mix(in srgb, var(--app-blue) 12%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--app-blue) 10%, transparent) 1px, transparent 1px) !important; }
+html[data-app-theme="reference"] .label-preview-card,
+html[data-app-theme="mint"] .label-preview-card,
+html[data-app-theme="reference"] .label-control-card,
+html[data-app-theme="mint"] .label-control-card,
+html[data-app-theme="reference"] .label-queue-card,
+html[data-app-theme="mint"] .label-queue-card { border-color: var(--app-line-soft) !important; background: rgba(255, 255, 255, .72) !important; }
+html[data-app-theme="reference"] .label-field select,
+html[data-app-theme="mint"] .label-field select { color: var(--app-ink) !important; border-color: var(--app-line) !important; background: var(--app-surface) !important; }
+html[data-app-theme="reference"] .label-button-primary,
+html[data-app-theme="mint"] .label-button-primary { color: #fff !important; background: var(--app-blue) !important; border-color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .label-button-secondary,
+html[data-app-theme="mint"] .label-button-secondary,
+html[data-app-theme="reference"] .label-retry-button,
+html[data-app-theme="mint"] .label-retry-button { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+
+html[data-app-theme="reference"] :where(.printer-health, .label-toggle, .label-queue-card, .label-spec-strip>div, .label-connection-note, .label-template-lock, .label-printer-notice, .label-queue-stat, .label-queue-row-heading),
+html[data-app-theme="mint"] :where(.printer-health, .label-toggle, .label-queue-card, .label-spec-strip>div, .label-connection-note, .label-template-lock, .label-printer-notice, .label-queue-stat, .label-queue-row-heading) {
+  border-color: var(--lp-line-soft) !important;
+  background: var(--lp-panel-deep) !important;
+}
+
+html[data-app-theme="reference"] .label-toggle-track,
+html[data-app-theme="mint"] .label-toggle-track { border-color: var(--lp-line) !important; background: #d7e8ee !important; }
+html[data-app-theme="reference"] .label-toggle-track i,
+html[data-app-theme="mint"] .label-toggle-track i { background: #7e9ca7 !important; }
+html[data-app-theme="reference"] .label-toggle>input:checked+.label-toggle-track,
+html[data-app-theme="mint"] .label-toggle>input:checked+.label-toggle-track { border-color: var(--lp-cyan) !important; background: color-mix(in srgb, var(--lp-cyan) 18%, white) !important; }
+html[data-app-theme="reference"] .label-toggle>input:checked+.label-toggle-track i,
+html[data-app-theme="mint"] .label-toggle>input:checked+.label-toggle-track i { background: var(--lp-cyan) !important; }
+
+html[data-app-theme="reference"] .label-preview-stage,
+html[data-app-theme="mint"] .label-preview-stage {
+  border-color: var(--lp-line) !important;
+  background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--lp-cyan) 12%, transparent), transparent 62%), var(--lp-panel-deep) !important;
+}
+
+html[data-app-theme="reference"] .label-preview-stage::before,
+html[data-app-theme="mint"] .label-preview-stage::before { opacity: .26 !important; background-image: linear-gradient(color-mix(in srgb, var(--lp-cyan) 14%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--lp-cyan) 14%, transparent) 1px, transparent 1px) !important; }
+html[data-app-theme="reference"] .label-preview-axis,
+html[data-app-theme="mint"] .label-preview-axis { color: var(--lp-muted) !important; }
+html[data-app-theme="reference"] .label-preview-centerline,
+html[data-app-theme="mint"] .label-preview-centerline { border-left-color: color-mix(in srgb, var(--lp-cyan) 46%, transparent) !important; }
+html[data-app-theme="reference"] .label-preview-centerline span,
+html[data-app-theme="mint"] .label-preview-centerline span { color: var(--lp-cyan) !important; }
+
+html[data-app-theme="reference"] .label-spec-strip>div,
+html[data-app-theme="mint"] .label-spec-strip>div { color: var(--lp-cyan) !important; }
+html[data-app-theme="reference"] .label-printer-notice,
+html[data-app-theme="mint"] .label-printer-notice { color: var(--lp-muted) !important; }
+html[data-app-theme="reference"] .label-queue-row,
+html[data-app-theme="mint"] .label-queue-row { border-top-color: var(--lp-line-soft) !important; }
+html[data-app-theme="reference"] .label-queue-row-heading,
+html[data-app-theme="mint"] .label-queue-row-heading { color: var(--lp-muted) !important; }
+
+/* Detail workbench: waveform, thresholds, forms and evidence cards. */
+html[data-app-theme="reference"] :where(.detector-workbench, .waveform-panel, .auto-test-panel, .detector-modal, .quality-config-block, .quality-threshold-group, .quality-detector-group, .final-result-banner, .detector-card, .waveform-card),
+html[data-app-theme="mint"] :where(.detector-workbench, .waveform-panel, .auto-test-panel, .detector-modal, .quality-config-block, .quality-threshold-group, .quality-detector-group, .final-result-banner, .detector-card, .waveform-card) {
+  color: var(--app-ink) !important;
+  border-color: var(--app-line) !important;
+  background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important;
+  box-shadow: 0 5px 14px rgba(44, 112, 148, .08) !important;
+}
+
+html[data-app-theme="reference"] :where(.workbench-header h2, .panel-heading b, .detector-modal h2, .quality-config-heading, .quality-snr-heading b, .final-result-banner h2, .detector-card-header b, .waveform-card-header b),
+html[data-app-theme="mint"] :where(.workbench-header h2, .panel-heading b, .detector-modal h2, .quality-config-heading, .quality-snr-heading b, .final-result-banner h2, .detector-card-header b, .waveform-card-header b) {
+  color: var(--app-ink) !important;
+  text-shadow: none !important;
+}
+
+html[data-app-theme="reference"] :where(.workbench-header p, .panel-heading span, .detector-card-header span, .waveform-card-header span, .quality-config-heading span, .quality-snr-heading span, .detector-card-section-heading span, .probe-data-section>header span, .detector-card>footer, .waveform-card footer, .workbench-message),
+html[data-app-theme="mint"] :where(.workbench-header p, .panel-heading span, .detector-card-header span, .waveform-card-header span, .quality-config-heading span, .quality-snr-heading span, .detector-card-section-heading span, .probe-data-section>header span, .detector-card>footer, .waveform-card footer, .workbench-message) {
+  color: var(--app-muted) !important;
+}
+
+html[data-app-theme="reference"] :where(.workbench-actions button, .detector-modal footer button, .icon-button),
+html[data-app-theme="mint"] :where(.workbench-actions button, .detector-modal footer button, .icon-button) {
+  color: var(--app-blue-deep) !important;
+  border-color: var(--app-line) !important;
+  background: var(--app-surface-soft) !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme="reference"] :where(.workbench-actions .test-action, .detector-modal .test-action),
+html[data-app-theme="mint"] :where(.workbench-actions .test-action, .detector-modal .test-action) {
+  color: #fff !important;
+  border-color: var(--app-blue) !important;
+  background: var(--app-blue) !important;
+}
+
+html[data-app-theme="reference"] :where(.panel-heading select, .detector-config-form select, .detector-config-form input, .config-grid input, .config-unit input, .config-unit select),
+html[data-app-theme="mint"] :where(.panel-heading select, .detector-config-form select, .detector-config-form input, .config-grid input, .config-unit input, .config-unit select) {
+  color: var(--app-ink) !important;
+  border-color: var(--app-line) !important;
+  background: var(--app-surface) !important;
+}
+
+html[data-app-theme="reference"] :where(.config-grid label, .config-unit, .quality-threshold-grid label, .quality-snr-row, .quality-snr-grade, .detector-card__metric-label, .detector-card__metric-values>span, .probe-metric span, .probe-ratio span, .detector-card-quality span, .waveform-card-metrics span),
+html[data-app-theme="mint"] :where(.config-grid label, .config-unit, .quality-threshold-grid label, .quality-snr-row, .quality-snr-grade, .detector-card__metric-label, .detector-card__metric-values>span, .probe-metric span, .probe-ratio span, .detector-card-quality span, .waveform-card-metrics span) {
+  color: var(--app-muted) !important;
+}
+
+html[data-app-theme="reference"] :where(.config-unit, .quality-threshold-group, .quality-snr-grade, .probe-data-section, .probe-metric, .probe-ratio, .detector-card-quality span, .waveform-card-metrics span),
+html[data-app-theme="mint"] :where(.config-unit, .quality-threshold-group, .quality-snr-grade, .probe-data-section, .probe-metric, .probe-ratio, .detector-card-quality span, .waveform-card-metrics span) {
+  border-color: var(--app-line-soft) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] :where(.detector-card__metric-values b, .probe-metric b, .probe-ratio b, .detector-card-quality b, .waveform-card-metrics b),
+html[data-app-theme="mint"] :where(.detector-card__metric-values b, .probe-metric b, .probe-ratio b, .detector-card-quality b, .waveform-card-metrics b) {
+  color: var(--app-ink) !important;
+}
+
+html[data-app-theme="reference"] :where(.waveform-shell, .waveform-card .waveform-shell, .detector-card-waveform .waveform-shell),
+html[data-app-theme="mint"] :where(.waveform-shell, .waveform-card .waveform-shell, .detector-card-waveform .waveform-shell) {
+  border-color: var(--app-line-soft) !important;
+  background: linear-gradient(180deg, var(--app-surface-soft), var(--app-surface)) !important;
+}
+
+html[data-app-theme="reference"] :where(.wave-axis, .wave-grid-line),
+html[data-app-theme="mint"] :where(.wave-axis, .wave-grid-line) { stroke: color-mix(in srgb, var(--app-blue) 48%, white) !important; }
+html[data-app-theme="reference"] .wave-axis-label,
+html[data-app-theme="mint"] .wave-axis-label { fill: var(--app-muted) !important; }
+html[data-app-theme="reference"] :where(.detector-card__processes, .detector-card-header, .waveform-card-header),
+html[data-app-theme="mint"] :where(.detector-card__processes, .detector-card-header, .waveform-card-header) { border-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .analysis-phase-badge,
+html[data-app-theme="mint"] .analysis-phase-badge { color: var(--app-amber) !important; border-color: color-mix(in srgb, var(--app-amber) 56%, white) !important; background: color-mix(in srgb, var(--app-amber) 8%, white) !important; }
+html[data-app-theme="reference"] .analysis-phase-badge.noise,
+html[data-app-theme="mint"] .analysis-phase-badge.noise { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 48%, white) !important; background: color-mix(in srgb, var(--app-green) 8%, white) !important; }
+html[data-app-theme="reference"] .analysis-phase-badge.complete,
+html[data-app-theme="mint"] .analysis-phase-badge.complete { color: var(--app-green) !important; border-color: color-mix(in srgb, var(--app-green) 48%, white) !important; background: color-mix(in srgb, var(--app-green) 8%, white) !important; }
+html[data-app-theme="reference"] :where(.detector-card.pass, .waveform-card.pass, .result-panel.pass),
+html[data-app-theme="mint"] :where(.detector-card.pass, .waveform-card.pass, .result-panel.pass) { border-color: color-mix(in srgb, var(--app-green) 62%, white) !important; }
+html[data-app-theme="reference"] :where(.detector-card.fail, .waveform-card.fail, .result-panel.fail),
+html[data-app-theme="mint"] :where(.detector-card.fail, .waveform-card.fail, .result-panel.fail) { border-color: color-mix(in srgb, var(--app-red) 62%, white) !important; background: color-mix(in srgb, var(--app-red) 6%, white) !important; }
+html[data-app-theme="reference"] .final-result-main>strong,
+html[data-app-theme="mint"] .final-result-main>strong { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .final-result-rule span,
+html[data-app-theme="mint"] .final-result-rule span { color: var(--app-blue) !important; }
+html[data-app-theme="reference"] .final-result-rule small,
+html[data-app-theme="mint"] .final-result-rule small { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .measurement-stage-list>div,
+html[data-app-theme="mint"] .measurement-stage-list>div { color: var(--app-muted) !important; border-color: var(--app-line-soft) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .measurement-stage-list>div.is-active,
+html[data-app-theme="mint"] .measurement-stage-list>div.is-active { color: var(--app-blue-deep) !important; border-color: var(--app-blue) !important; background: color-mix(in srgb, var(--app-blue) 9%, white) !important; }
+html[data-app-theme="reference"] .measurement-stage-list>div.is-done,
+html[data-app-theme="mint"] .measurement-stage-list>div.is-done { color: var(--app-green) !important; border-color: var(--app-green) !important; }
+html[data-app-theme="reference"] .analysis-limit-box,
+html[data-app-theme="mint"] .analysis-limit-box { border-color: color-mix(in srgb, var(--app-amber) 45%, white) !important; background: color-mix(in srgb, var(--app-amber) 6%, white) !important; }
+html[data-app-theme="reference"] .analysis-limit-box span,
+html[data-app-theme="mint"] .analysis-limit-box span { color: var(--app-amber) !important; }
+html[data-app-theme="reference"] .analysis-limit-box b,
+html[data-app-theme="mint"] .analysis-limit-box b { color: var(--app-muted) !important; }
+
+/* Test program secondary panels and configuration modal. */
+html[data-app-theme="reference"] :where(.test-notice, .test-config-note, .test-empty-cell, .test-basis-scroll, .archive-loading-note),
+html[data-app-theme="mint"] :where(.test-notice, .test-config-note, .test-empty-cell, .test-basis-scroll, .archive-loading-note) {
+  color: var(--app-muted) !important;
+  border-color: var(--app-line-soft) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] :where(.test-step-list li, .test-event-list>div, .test-unit-verdicts>div, .test-decision-main, .test-evidence-list>div, .test-subheading, .test-config-reference, .test-config-footer),
+html[data-app-theme="mint"] :where(.test-step-list li, .test-event-list>div, .test-unit-verdicts>div, .test-decision-main, .test-evidence-list>div, .test-subheading, .test-config-reference, .test-config-footer) {
+  border-color: var(--app-line-soft) !important;
+  background: var(--app-surface-soft) !important;
+}
+
+html[data-app-theme="reference"] :where(.test-step-list li.is-active, .test-table tbody tr.is-current),
+html[data-app-theme="mint"] :where(.test-step-list li.is-active, .test-table tbody tr.is-current) { color: var(--app-blue-deep) !important; border-color: var(--app-blue) !important; background: color-mix(in srgb, var(--app-blue) 9%, white) !important; }
+html[data-app-theme="reference"] .test-step-list li.is-active i,
+html[data-app-theme="mint"] .test-step-list li.is-active i { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; }
+html[data-app-theme="reference"] :where(.test-step-list li.is-done, .test-relay-card.is-on),
+html[data-app-theme="mint"] :where(.test-step-list li.is-done, .test-relay-card.is-on) { color: var(--app-green) !important; border-color: var(--app-green) !important; background: color-mix(in srgb, var(--app-green) 8%, white) !important; }
+html[data-app-theme="reference"] .test-decision-main span,
+html[data-app-theme="mint"] .test-decision-main span,
+html[data-app-theme="reference"] .test-event-list>div,
+html[data-app-theme="mint"] .test-event-list>div { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] :where(.test-settings-button, .test-inline-toggle, .test-modal-secondary, .test-modal-close),
+html[data-app-theme="mint"] :where(.test-settings-button, .test-inline-toggle, .test-modal-secondary, .test-modal-close) { color: var(--app-blue-deep) !important; border-color: var(--app-line) !important; background: var(--app-surface-soft) !important; }
+html[data-app-theme="reference"] .test-config-modal,
+html[data-app-theme="mint"] .test-config-modal { color: var(--app-ink) !important; border-color: var(--app-line) !important; background: linear-gradient(145deg, var(--app-surface), var(--app-surface-soft)) !important; box-shadow: 0 18px 50px rgba(39, 104, 139, .2) !important; }
+html[data-app-theme="reference"] .test-config-header,
+html[data-app-theme="mint"] .test-config-header { border-bottom-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .test-config-header h2,
+html[data-app-theme="mint"] .test-config-header h2,
+html[data-app-theme="reference"] .test-config-reference h3,
+html[data-app-theme="mint"] .test-config-reference h3 { color: var(--app-ink) !important; }
+html[data-app-theme="reference"] .test-config-header p,
+html[data-app-theme="mint"] .test-config-header p,
+html[data-app-theme="reference"] .test-config-reference header p,
+html[data-app-theme="mint"] .test-config-reference header p { color: var(--app-muted) !important; }
+html[data-app-theme="reference"] .test-config-footer,
+html[data-app-theme="mint"] .test-config-footer { border-top-color: var(--app-line-soft) !important; }
+html[data-app-theme="reference"] .test-modal-primary,
+html[data-app-theme="mint"] .test-modal-primary { color: #fff !important; border-color: var(--app-blue) !important; background: var(--app-blue) !important; }
