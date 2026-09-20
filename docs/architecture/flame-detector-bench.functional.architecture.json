@@ -22,8 +22,8 @@
       {
         "id": "practice-and-acceptance",
         "label": "演练与验收辅助",
-        "focus": ["ui", "offline", "test", "status", "records"],
-        "note": "离线演练用于验证软件闭环，测试观察用于回看正式状态，两者都不替代现场安全确认。"
+        "focus": ["ui", "test", "status", "records"],
+        "note": "测试观察用于回看正式状态，生产记录用于核对报告、标签和追溯结果，均不替代现场安全确认。"
       }
     ]
   },
@@ -50,15 +50,6 @@
       "label": "六台火焰探测器",
       "tag": "六台同时观察",
       "pos": [20, 500],
-      "size": [190, 96]
-    },
-    {
-      "id": "offline",
-      "type": "backend",
-      "label": "离线演练",
-      "sublabel": "虚拟推进四阶段闭环",
-      "tag": "不连接现场设备",
-      "pos": [230, 120],
       "size": [190, 96]
     },
     {
@@ -120,7 +111,7 @@
     {
       "kind": "region",
       "label": "上位机软件功能",
-      "wraps": ["offline", "ui", "status", "waveform", "verdict", "records", "test"],
+      "wraps": ["ui", "status", "waveform", "verdict", "records", "test"],
       "pad": 34
     }
   ],
@@ -131,16 +122,6 @@
       "to": "ui",
       "label": "查看与处理",
       "variant": "emphasis"
-    },
-    {
-      "id": "offline-to-ui",
-      "from": "offline",
-      "to": "ui",
-      "label": "演练状态",
-      "variant": "dashed",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "labelAt": [325, 240]
     },
     {
       "id": "ui-to-status",
@@ -231,8 +212,8 @@
       "dot": "rose",
       "title": "使用边界",
       "items": [
-        "离线演练只验证软件闭环，不连接 PLC、探测器或外部服务",
         "测试观察只读跟踪正式状态，不改变正式程序和设备配置",
+        "生产记录、标签打印和 MES 上传均服从批次质量门禁",
         "软件显示不能替代安全门、限位、急停、FAT/SAT 或现场确认"
       ]
     }

@@ -14,10 +14,10 @@
         "note": "从 S7 PLC 与六台探测器读取状态，在本机完成波形分析、批次裁决和结果记录。"
       },
       {
-        "id": "isolated-runtime-modes",
-        "label": "离线与测试旁路",
-        "focus": ["renderer", "offline-runtime", "test-runtime", "field-runtime", "local-stores"],
-        "note": "离线闭环不初始化现场设备；测试程序只读观察正式现场状态并独立归档。"
+        "id": "observer-and-acceptance",
+        "label": "测试观察与现场验收",
+        "focus": ["renderer", "test-runtime", "field-runtime", "local-stores"],
+        "note": "测试程序只读观察正式现场状态并独立归档，现场验收以 PLC/HMI、上位机和生产记录为准。"
       },
       {
         "id": "blocked-legacy-boundary",
@@ -51,7 +51,7 @@
       "type": "backend",
       "label": "现场只读状态服务",
       "sublabel": "field-status-server · HTTP + WebSocket",
-      "tag": "CLOSURE_MODE=field",
+      "tag": "现场只读运行时",
       "pos": [340, 330],
       "size": [250, 104]
     },
@@ -59,7 +59,7 @@
       "id": "renderer",
       "type": "frontend",
       "label": "React/Vite 渲染器",
-      "sublabel": "index.tsx · Field / Offline / Test",
+      "sublabel": "index.tsx · Field / Test",
       "tag": "file:// dist/index.html",
       "pos": [680, 330],
       "size": [230, 104]
@@ -77,18 +77,9 @@
       "id": "local-stores",
       "type": "database",
       "label": "本机持久化",
-      "sublabel": "配置 · 现场结果 · 离线审计 · 测试归档",
+      "sublabel": "配置 · 现场结果 · 测试归档",
       "tag": "APP_DATA_DIR / logs / data",
       "pos": [340, 540],
-      "size": [250, 104]
-    },
-    {
-      "id": "offline-runtime",
-      "type": "backend",
-      "label": "离线闭环服务",
-      "sublabel": "offline-server · 共享 UI",
-      "tag": "默认隔离现场设备",
-      "pos": [680, 540],
       "size": [250, 104]
     },
     {
@@ -114,7 +105,7 @@
     {
       "kind": "region",
       "label": "Windows 上位机本机 / 127.0.0.1",
-      "wraps": ["field-runtime", "renderer", "desktop-host", "local-stores", "offline-runtime", "test-runtime", "legacy-runtime"],
+      "wraps": ["field-runtime", "renderer", "desktop-host", "local-stores", "test-runtime", "legacy-runtime"],
       "pad": 34
     }
   ],
@@ -151,16 +142,6 @@
       "fromSide": "bottom",
       "toSide": "top",
       "labelAt": [795, 196]
-    },
-    {
-      "id": "offline-to-stores",
-      "from": "offline-runtime",
-      "to": "local-stores",
-      "label": "追加式 JSONL · SHA-256 链",
-      "variant": "dashed",
-      "fromSide": "left",
-      "toSide": "right",
-      "labelAt": [635, 658]
     },
     {
       "id": "test-to-field",
@@ -220,7 +201,7 @@
       "title": "裁决与证据",
       "items": [
         "FieldWaveformAnalysis、FieldDetectorVerdict、FieldFinalVerdict 在本机完成批次门禁",
-        "现场完成结果写入 logs；离线闭环写入带 SHA-256 前序链的 JSONL",
+        "现场完成结果写入生产记录和日志，并保留批次、标签与上传状态",
         "测试观察器独立跟踪阶段、波形和探测器观测并归档报告"
       ]
     },
@@ -228,8 +209,8 @@
       "dot": "rose",
       "title": "安全边界",
       "items": [
-        "当前桌面正式入口启动 CLOSURE_MODE=field，只读观察 PLC 与探测器",
-        "offline 模式不初始化 PLC、探测器、MQTT 或外部报告连接",
+        "当前桌面正式入口固定使用现场状态服务，只读观察 PLC 与探测器",
+        "MES、MQTT 和诊断上传均受结果门禁与配置开关约束",
         "旧 server/src/index.ts 的直接 DO/MQTT/上传路径受 FIELD_RUNTIME_DISABLED 硬门禁约束"
       ]
     }

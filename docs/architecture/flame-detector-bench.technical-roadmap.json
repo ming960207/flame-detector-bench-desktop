@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "火焰探测器检测台｜技术路线与交付闭环",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.technical-roadmap.html",
+    "quality_profile": "showcase",
+    "viewBox": [1380, 770],
+    "repository": {
+      "url": "https://github.com/ming960207/flame-detector-bench-desktop.git",
+      "revision": "0011980172e7b23e0b06f72006126216bd77cc1e"
+    },
+    "views": [
+      {
+        "id": "technical-path",
+        "label": "技术主路线",
+        "focus": ["operator", "plc", "fieldui", "fieldruntime", "analysis", "records"],
+        "note": "从现场动作、只读采集到波形判定和生产记录，查看软件与设备如何形成一条闭环。"
+      },
+      {
+        "id": "quality-gate",
+        "label": "质量放行门禁",
+        "focus": ["plc", "detectors", "fieldruntime", "analysis", "records", "fieldgate"],
+        "note": "只有 PLC 完成、六台设备证据齐全、质量分析通过且审计完整，才进入放行。"
+      },
+      {
+        "id": "delivery-readiness",
+        "label": "现场交付路径",
+        "focus": ["plc", "fieldruntime", "observer", "fieldgate", "mes"],
+        "note": "现场状态服务、只读观察、PLC/HMI 版本、CRC、FAT/SAT 和生产接口共同构成交付路径。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "检测台操作人员",
+      "tag": "现场使用",
+      "pos": [30, 360],
+      "size": [140, 82],
+      "sources": [
+        { "path": "docs/操作人员操作指南.md", "label": "操作规程" }
+      ]
+    },
+    {
+      "id": "plc",
+      "type": "external",
+      "label": "PLC / HMI 控制",
+      "sublabel": "S7-200 SMART · MCGS",
+      "tag": "顺序控制与安全联锁",
+      "pos": [190, 145],
+      "size": [180, 88],
+      "sources": [
+        { "path": "PLC.awl", "label": "PLC 程序" },
+        { "path": "config/plc-hmi-upper-contract.json", "label": "跨层契约" }
+      ]
+    },
+    {
+      "id": "detectors",
+      "type": "external",
+      "label": "六台火焰探测器",
+      "sublabel": "TCP/RTU · Modbus · 波形",
+      "tag": "六台同时观测",
+      "pos": [190, 545],
+      "size": [180, 88],
+      "sources": [
+        { "path": "火焰协议", "label": "Modbus 协议" },
+        { "path": "server/src/modbus/flame-detector-service.ts", "label": "设备服务" }
+      ]
+    },
+    {
+      "id": "fieldui",
+      "type": "frontend",
+      "label": "上位机主界面",
+      "sublabel": "工序 · 通信 · 波形 · 结果",
+      "tag": "React / TypeScript",
+      "pos": [390, 350],
+      "size": [180, 88],
+      "sources": [
+        { "path": "components/FieldProcessStatusApp.tsx", "label": "现场入口" },
+        { "path": "components/WutosDashboard.tsx", "label": "主屏" }
+      ]
+    },
+    {
+      "id": "fieldruntime",
+      "type": "backend",
+      "label": "统一现场后端",
+      "sublabel": "S7 只读 · HTTP/WS · 批次",
+      "tag": "Node.js / Express",
+      "pos": [600, 350],
+      "size": [190, 88],
+      "sources": [
+        { "path": "server/src/main.ts", "label": "运行时入口" },
+        { "path": "server/src/product-aware-field-runtime.ts", "label": "现场运行时" }
+      ]
+    },
+    {
+      "id": "analysis",
+      "type": "backend",
+      "label": "波形分析与质量裁决",
+      "sublabel": "噪声 · 热源 · 爆闪 · EMC",
+      "tag": "A/B/NG/需复测",
+      "pos": [820, 350],
+      "size": [190, 88],
+      "sources": [
+        { "path": "server/src/closure/field-waveform-analysis.ts", "label": "波形分析" },
+        { "path": "server/src/closure/field-detector-verdict.ts", "label": "结果裁决" }
+      ]
+    },
+    {
+      "id": "records",
+      "type": "database",
+      "label": "记录、报告与标签",
+      "sublabel": "审计 · Word/HTML · 打印队列",
+      "tag": "本地可追溯",
+      "pos": [1040, 350],
+      "size": [190, 88],
+      "sources": [
+        { "path": "server/src/production-inspection-record-store.ts", "label": "生产记录" },
+        { "path": "server/src/label-print-queue.ts", "label": "标签队列" }
+      ]
+    },
+    {
+      "id": "observer",
+      "type": "backend",
+      "label": "只读测试观察器",
+      "sublabel": "阶段计时 · 波形回看 · 归档",
+      "tag": "不发送控制命令",
+      "pos": [1040, 620],
+      "size": [190, 82],
+      "sources": [
+        { "path": "server/src/test-program/test-program-observer.ts", "label": "观察器" },
+        { "path": "components/TestObserverPanel.tsx", "label": "观察面板" }
+      ]
+    },
+    {
+      "id": "fieldgate",
+      "type": "security",
+      "label": "现场发布与验收门禁",
+      "sublabel": "资产哈希 · CRC · FAT · SAT",
+      "tag": "当前仍阻断",
+      "pos": [820, 515],
+      "size": [210, 88],
+      "sources": [
+        { "path": "scripts/field-readiness.mjs", "label": "静态门禁" },
+        { "path": "config/field-deployment-status.json", "label": "部署状态" }
+      ]
+    },
+    {
+      "id": "mes",
+      "type": "cloud",
+      "label": "可选外部系统",
+      "sublabel": "MES · MQTT · 诊断上传",
+      "tag": "必须服从放行门禁",
+      "pos": [1040, 165],
+      "size": [190, 82],
+      "sources": [
+        { "path": "server/src/mes-publisher.ts", "label": "MES" },
+        { "path": "server/src/mqtt-publisher.ts", "label": "MQTT" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "检测台现场设备",
+      "wraps": ["plc", "detectors"],
+      "pad": 30
+    },
+    {
+      "kind": "region",
+      "label": "上位机软件闭环",
+      "wraps": ["fieldui", "fieldruntime", "analysis", "records", "observer", "fieldgate"],
+      "pad": 34
+    }
+  ],
+  "connections": [
+    {
+      "id": "operator-ui",
+      "from": "operator",
+      "to": "fieldui",
+      "label": "查看与操作",
+      "variant": "emphasis"
+    },
+    {
+      "id": "plc-runtime",
+      "from": "plc",
+      "to": "fieldruntime",
+      "label": "S7 只读：VW600/VW602 + I/Q/M",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "detectors-runtime",
+      "from": "detectors",
+      "to": "fieldruntime",
+      "label": "TCP/RTU：状态与波形",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [[385, 589], [385, 745], [695, 745], [695, 480]],
+      "labelAt": [470, 745]
+    },
+    {
+      "id": "ui-runtime",
+      "from": "fieldui",
+      "to": "fieldruntime",
+      "label": "HTTP + WebSocket",
+      "variant": "emphasis",
+      "labelDy": -38
+    },
+    {
+      "id": "runtime-analysis",
+      "from": "fieldruntime",
+      "to": "analysis",
+      "label": "批次状态与采样",
+      "variant": "emphasis",
+      "labelDy": 68
+    },
+    {
+      "id": "analysis-records",
+      "from": "analysis",
+      "to": "records",
+      "label": "质量判定与证据",
+      "variant": "emphasis",
+      "labelDy": 68
+    },
+    {
+      "id": "records-gate",
+      "from": "records",
+      "to": "fieldgate",
+      "label": "审计、报告与验收材料",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "plc-gate",
+      "from": "plc",
+      "to": "fieldgate",
+      "label": "版本 / CRC / 安全证据",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [[280, 100], [1360, 100], [1360, 480], [925, 480]],
+      "labelAt": [1300, 100]
+    },
+    {
+      "id": "records-mes",
+      "from": "records",
+      "to": "mes",
+      "label": "受门禁保护的状态/结果",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "技术主路线",
+      "items": [
+        "现场 PLC/HMI 负责顺序动作和安全联锁",
+        "上位机只读聚合 PLC、六台探测器和继电器反馈",
+        "波形分析、批次裁决和记录输出形成软件闭环"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "质量放行条件",
+      "items": [
+        "PLC 必须完成 EMC 后回初始位并进入 COMPLETE",
+        "六台设备的通信、预检、波形和功能证据必须齐全",
+        "PASS、报告、标签和可选上传共享同一批次门禁"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "当前交付状态",
+      "items": [
+        "现场上位机代码、生产记录和接口已纳入统一构建验证",
+        "PLC/HMI 已部署且工程文件为最终版本，CRC、部署日期和维护人员需补录",
+        "限位超时、手动旁路、EMC 点位和爆闪节拍需先统一"
+      ]
+    }
+  ]
+}
