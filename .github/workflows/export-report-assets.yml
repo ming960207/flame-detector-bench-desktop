@@ -1,0 +1,28 @@
+name: Export report image assets
+
+on:
+  push:
+    branches:
+      - codex/technical-report
+
+jobs:
+  export-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Collect report assets
+        shell: bash
+        run: |
+          mkdir -p report-assets
+          cp -r docs/architecture/ui-screenshots report-assets/
+          cp -r docs/architecture/report-samples-real report-assets/
+          cp docs/architecture/flame-detector-bench.technical-roadmap.visual-check.1440x900.light.png report-assets/
+          cp docs/architecture/flame-detector-bench.functional.architecture.visual-check.1440x900.light.png report-assets/
+          cp docs/architecture/flame-detector-bench.time-axis.visual-check.1440x900.light.png report-assets/
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: flame-report-assets
+          path: report-assets
+          if-no-files-found: error
