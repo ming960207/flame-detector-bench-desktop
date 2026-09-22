@@ -16,11 +16,13 @@ import {
   MoveUp,
   RefreshCw,
   RotateCcw,
+  Send,
   Settings2,
   SunMedium,
   TriangleAlert,
   Wifi,
   WifiOff,
+  X,
   Zap,
 } from 'lucide-react';
 import { hasActivePLCProcessAlarm, isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../server/src/process-status';
@@ -30,8 +32,16 @@ import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdic
 import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-waveform-analysis';
 import type { FlameDetectorState, FlameDetectorUnitState } from '../server/src/types';
 import type { FlameSample } from '../server/src/types';
+import type { ProductPrecheckReport } from '../server/src/product-profile';
+import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
+import type { IndicatorVisionReport } from '../server/src/indicator-vision';
+import { FLAME_DETECTOR_SIMULATION_COMMANDS, type FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
+import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
 import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
+import { IndicatorCameraPanel } from './indicator-camera';
+import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './wutos-dashboard.css';
+import './wutos-performance.css';
 
 const asset = (name: string) => import.meta.env.BASE_URL + 'wutos-assets/' + name;
 
@@ -127,7 +137,23 @@ function signalCaptureLabel(status: PLCProcessStatus | null, analysis: SignalCap
   return '等待数据';
 }
 
+function detectorStartupLabel(unit: FlameDetectorUnitState | undefined): string | null {
+  const state = unit?.startup?.state;
+  if (!state || state === 'TEST_READY') return null;
+  const labels: Record<string, string> = {
+    DISCONNECTED: '未连接',
+    POWER_ON: '已上电',
+    COMMUNICATION_READY: '通信就绪',
+    MODE_SWITCHING: '模式切换中',
+    MODE_SWITCH_OK: '模式切换成功，等待首帧',
+    FIRST_FRAME_RECEIVED: '等待通道同步',
+    FAILED: '启动失败',
+  };
+  return labels[state] ?? state;
+}
+
 function verdictLabel(verdict: FieldFinalVerdict | null): string {
+  if (verdict?.reason === 'TEST_INVALID_RETEST_REQUIRED') return '需复测';
   if (verdict?.grade === 'A_PASS') return 'A类合格';
   if (verdict?.grade === 'B_PASS') return 'B类合格';
   if (verdict?.grade === 'FAIL' || verdict?.verdict === 'FAIL') return '不合格';
@@ -135,9 +161,9 @@ function verdictLabel(verdict: FieldFinalVerdict | null): string {
   return '等待工序完成';
 }
 
-function finalResultSummary(verdict: FieldFinalVerdict | null, aPassCount: number, bPassCount: number, failCount: number): string {
+function finalResultSummary(verdict: FieldFinalVerdict | null, aPassCount: number, bPassCount: number, failCount: number, retestCount: number): string {
   if (!verdict || verdict.verdict === 'PENDING') return verdictLabel(verdict);
-  return `${aPassCount}A类合格/${bPassCount}B类合格/${failCount}NG`;
+  return `${aPassCount}A类合格/${bPassCount}B类合格/${failCount}NG/${retestCount}需复测`;
 }
 
 function pad(value: number): string {
@@ -151,6 +177,20 @@ function formatDate(value: Date): string {
 function formatTime(value: Date): string {
   return pad(value.getHours()) + ':' + pad(value.getMinutes()) + ':' + pad(value.getSeconds());
 }
+
+const DashboardClock: FC = () => {
+  const [clock, setClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <>
+    <span><CalendarDays />{formatDate(clock)}</span>
+    <span><Clock3 />{formatTime(clock)}</span>
+  </>;
+};
 
 function workflowIndex(status: PLCProcessStatus | null): number {
   if (!status) return -1;
@@ -187,13 +227,19 @@ function alarmRows(
   const safetyAlarm = status?.io && (!inputs?.safetyInput || !internal?.safetyOk);
   const stopAlarm = !isPLCProcessComplete(status) && Boolean(internal?.stopLatch || internal?.stopRequest);
   const limitAlarm = Boolean(internal?.safetyLimit);
-  const gradeDetail = detectorVerdict?.grade === 'A_PASS'
-    ? '全部 A类合格'
-    : detectorVerdict?.grade === 'B_PASS'
-      ? '含 B类合格，无不合格'
-      : detectorVerdict?.grade === 'FAIL'
-        ? `${detectorVerdict.units.filter((unit) => unit.grade === 'FAIL').length} 台不合格`
-        : '等待定量指标完成';
+  const invalidCount = detectorVerdict?.testInvalidCount ?? 0;
+  const productFailCount = detectorVerdict?.productFailCount
+    ?? detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length
+    ?? 0;
+  const gradeDetail = invalidCount > 0 && productFailCount === 0
+    ? `${invalidCount} 台测试链路异常，需复测`
+    : detectorVerdict?.grade === 'A_PASS'
+      ? '全部 A类合格'
+      : detectorVerdict?.grade === 'B_PASS'
+        ? '含 B类合格，无不合格'
+        : detectorVerdict?.grade === 'FAIL'
+          ? `${productFailCount} 台产品不合格${invalidCount ? ` / ${invalidCount} 台需复测` : ''}`
+          : '等待定量指标完成';
   return [
     {
       time: current,
@@ -260,19 +306,20 @@ const FinalResultCards: FC<{
   aPassCount: number;
   bPassCount: number;
   failCount: number;
-}> = ({ finalVerdict, aPassCount, bPassCount, failCount }) => {
+  retestCount: number;
+}> = ({ finalVerdict, aPassCount, bPassCount, failCount, retestCount }) => {
   const cards = [
-    { key: 'a-pass', label: 'A类合格', value: aPassCount },
-    { key: 'b-pass', label: 'B类合格', value: bPassCount },
-    { key: 'fail', label: '不合格', value: failCount },
+    { key: 'a-pass', label: 'A类合格', value: String(aPassCount) },
+    { key: 'b-pass', label: 'B类合格', value: String(bPassCount) },
+    { key: 'fail', label: 'NG / 复测', value: `${failCount} / ${retestCount}` },
   ];
   return (
     <div
       className="wutos-final-result-cards"
-      aria-label={`最终结果：${finalResultSummary(finalVerdict, aPassCount, bPassCount, failCount)}`}
+      aria-label={`最终结果：${finalResultSummary(finalVerdict, aPassCount, bPassCount, failCount, retestCount)}`}
     >
       {cards.map((card) => (
-        <div className={`wutos-final-result-card is-${card.key}`} key={card.key} title={`${card.label}：${card.value} 台`}>
+        <div className={`wutos-final-result-card is-${card.key}`} key={card.key} title={`${card.label}：${card.value}`}>
           <small>{card.label}</small>
           <b>{card.value}</b>
         </div>
@@ -358,6 +405,7 @@ function failureProcess(reason: string | undefined): ProcessLampKey | undefined 
 
 function failureReasonLabel(reason: string | undefined): string {
   if (!reason) return '检测指标未通过';
+  if (reason === 'TEST_INVALID_RETEST_REQUIRED') return '测试链路异常，本轮结果无效，需复测';
   const stage = reason.includes('NOISE_') ? ''
     : reason.startsWith('HEAT_') ? '移动热源干扰测试 '
       : reason.startsWith('FLASH_') ? '爆闪灯干扰测试 '
@@ -413,6 +461,7 @@ const DetectorCard: FC<{
 }> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits }) => {
   const [openLamp, setOpenLamp] = useState<ProcessLampKey | null>(null);
   const grade = detectorResult?.grade;
+  const testInvalid = detectorResult?.classification === 'TEST_INVALID';
   const tone = detectorTone(unit, grade);
   const fail = Boolean(unit?.fault || grade === 'FAIL');
   const noiseRatios = maximumConfiguredRatio(detectorResult?.metrics, configuredRatios);
@@ -431,7 +480,7 @@ const DetectorCard: FC<{
     <article className={'wutos-detector-card ' + tone + (isNoisePhase ? ' is-noise' : '')} aria-label={`探测器${index}检测结果`}>
       <header>
         <strong>探测器{index}</strong>
-        <span>{gradeLabel(grade)}</span>
+        <span>{testInvalid ? '需复测' : gradeLabel(grade)}</span>
       </header>
       <div className="wutos-detector-card__metrics">
         {([
@@ -474,7 +523,7 @@ const DetectorCard: FC<{
           </button>;
         })}
       </div>
-      {fail && <small className="wutos-detector-card__failure" title={failureReasonLabel(detectorResult?.reason)}>不合格原因：{failureReasonLabel(detectorResult?.reason)}</small>}
+      {fail && <small className="wutos-detector-card__failure" title={failureReasonLabel(detectorResult?.reason)}>{testInvalid ? '需复测原因' : '不合格原因'}：{failureReasonLabel(detectorResult?.reason)}</small>}
     </article>
   );
 };
@@ -554,21 +603,16 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
   const probes = waveformKeys(samples, unit);
   const domain = waveformDomain(samples, probes);
   const state = unit?.fault ? 'fault' : unit?.fire ? 'fire' : unit?.online ? 'online' : 'offline';
-  const stateLabel = signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
-  const p1 = probeFluctuation(unit, 'probe1');
+  const stateLabel = detectorStartupLabel(unit) ?? signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
   const p2 = probeFluctuation(unit, 'probe2');
   const p3 = probeFluctuation(unit, 'probe3');
   const ratio = (reported: number | undefined, numerator: number, denominator: number) => Number.isFinite(reported) && Number(reported) > 0 ? Number(reported) : denominator > 0 ? numerator / denominator : NaN;
-  const ratios = [
-    ['P2/P1', ratio(unit?.snr21, p2, p1)],
-    ['P2/P3', ratio(unit?.snr23, p2, p3)],
-    ['P3/P1', ratio(unit?.snr31, p3, p1)],
-  ] as const;
+  const ratio23 = ratio(unit?.snr23, p2, p3);
 
   return <article className={`wutos-sensor-card is-${state}`} aria-label={`探测器${index}实时状态`}>
     <header>
       <div><span><i />探测器 {index}</span><small>地址 {unit?.address ?? index} · {probes.length === 4 ? '四波长' : '三波长'} · {probes.length} 路探头</small></div>
-      <b>{stateLabel}</b>
+      <b title={stateLabel}>{stateLabel}</b>
     </header>
     <div className="wutos-sensor-caption"><strong>实时波形预览</strong><span>{waveformDisplayMode === 'raw' ? '原始值' : '归一化值'} · {samples.length} 点</span></div>
     <div className="wutos-sensor-wave">
@@ -586,17 +630,11 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
       {probes.map((key, channel) => {
         const fluctuation = probeFluctuation(unit, key);
         const absolute = probeAbsolute(unit, key);
-        return <span key={key}>探头{channel + 1}<b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b><small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small></span>;
+        return <span key={key}><label>探头{channel + 1}</label><b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b><small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small></span>;
       })}
     </div>
-    <div className="wutos-sensor-section-title"><b>探头比值</b><span>实时 SNR</span></div>
     <div className="wutos-sensor-values wutos-sensor-values--ratios">
-      {ratios.map(([label, value]) => <span key={label}>{label}<b>{Number.isFinite(value) ? value.toFixed(2) : '--'}</b><small>×</small></span>)}
-    </div>
-    <div className="wutos-sensor-quality">
-      <span>噪声 RMS<b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span>
-      <span>干扰比<b>{analysis?.interferenceRatio == null ? '--' : `${analysis.interferenceRatio.toFixed(2)}×`}</b></span>
-      <span>样本<b>{analysis ? `${analysis.noiseSampleCount}/${analysis.interferenceSampleCount}` : '--'}</b></span>
+      <span><label>探头比值 <em>P2/P3</em></label><b>{Number.isFinite(ratio23) ? ratio23.toFixed(2) : '--'}</b><small>×</small></span>
     </div>
     <footer><span><i />{unit?.online ? '实时波形流正常' : '等待探测器通讯'}</span></footer>
   </article>;
@@ -608,7 +646,11 @@ const LiveWaveformPanel: FC<{
   waveformAnalysis: FieldWaveformAnalysisSnapshot | null;
   waveformDisplayMode: WaveformDisplayMode;
   waveformMaxSamples: number;
-}> = ({ units, status, waveformAnalysis, waveformDisplayMode, waveformMaxSamples }) => {
+  productPrecheck: ProductPrecheckReport | null;
+  productPrecheckBusy: boolean;
+  relayTest: RelayFunctionalTestProgress | null;
+  onSubmitIndicatorVision?: (report: IndicatorVisionReport) => Promise<void>;
+}> = ({ units, status, waveformAnalysis, waveformDisplayMode, waveformMaxSamples, productPrecheck, productPrecheckBusy, relayTest, onSubmitIndicatorVision }) => {
   const [expanded, setExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const selectedUnit = selectedIndex === null
@@ -618,85 +660,160 @@ const LiveWaveformPanel: FC<{
   const samples = activeUnit?.online
     ? waveformSamples(activeUnit, waveformDisplayMode, waveformMaxSamples)
     : [];
-  const probes = waveformKeys(samples, activeUnit);
-  const domain = waveformDomain(samples, probes);
   const activeIndex = activeUnit?.index ?? selectedIndex ?? 1;
   const isLive = Boolean(activeUnit?.online && samples.length >= 2);
   const activeAnalysis = waveformAnalysis?.units.find((unit) => unit.index === activeIndex);
   const stateLabel = activeUnit?.online ? signalCaptureLabel(status, waveformAnalysis ?? activeAnalysis, true) : '等待探测器通讯';
 
-  return (
-    <section className={`wutos-live-waveform ${expanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="实时波形监视">
+  useEffect(() => {
+    if (!expanded) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setExpanded(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expanded]);
+
+  const liveWaveformPanel = (
+    <section
+      className={`wutos-live-waveform ${expanded ? 'is-expanded' : 'is-collapsed'}`}
+      role={expanded ? 'dialog' : undefined}
+      aria-modal={expanded || undefined}
+      aria-label={expanded ? '指示灯视觉取证全屏窗口' : '实时波形监视'}
+    >
       <button
         type="button"
         className="wutos-live-waveform__header wutos-live-waveform__toggle"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         aria-label={`${expanded ? '收起' : '展开'}实时波形监视`}
+        aria-keyshortcuts={expanded ? 'Escape' : undefined}
       >
         <div>
           <span className="wutos-live-waveform__eyebrow"><Activity />实时波形监视</span>
           <strong>探测器 {activeIndex}</strong>
         </div>
         <div className="wutos-live-waveform__status">
-          <span>{waveformDisplayMode === 'raw' ? '原始值' : '归一化值'} · {samples.length} 点</span>
-          <b className={isLive ? 'is-live' : ''}>{stateLabel}</b>
+          <span>{productPrecheckBusy ? `相机自动采样 · ${relayTest?.phase ?? '继电器测试'}` : `${waveformDisplayMode === 'raw' ? '原始值' : '归一化值'} · ${samples.length} 点`}</span>
+          <b className={isLive || productPrecheckBusy ? 'is-live' : ''}>{productPrecheckBusy ? '视觉取证中' : stateLabel}</b>
         </div>
+        {expanded && <span className="wutos-live-waveform__collapse-hint">收起 · Esc</span>}
         {expanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
       </button>
-      {expanded && <>
-        <div className="wutos-live-waveform__chart">
-          {samples.length >= 2 ? (
-            <svg viewBox="0 0 240 90" preserveAspectRatio="none" role="img" aria-label={`探测器${activeIndex}实时波形监视`}>
-              <path className="wutos-live-waveform__grid" d="M0 22.5H240 M0 45H240 M0 67.5H240 M48 0V90 M96 0V90 M144 0V90 M192 0V90" />
-              {probes.map((key, channel) => {
-                const path = miniWavePath(samples, key, domain, 240, 90);
-                return path ? <path key={key} className={`wutos-live-waveform__line channel-${channel + 1}`} d={path} /> : null;
-              })}
-            </svg>
-          ) : (
-            <span className="wutos-live-waveform__empty">{stateLabel}</span>
-          )}
-        </div>
-        <div className="wutos-live-waveform__data">
-          <div className="wutos-live-waveform__values-title"><b>探头数据</b><span>波动 / 绝对 · mV</span></div>
-          <div className="wutos-live-waveform__values" aria-label="实时探头数值">
-            {probes.map((key, channel) => {
-              const fluctuation = probeFluctuation(activeUnit, key);
-              const absolute = probeAbsolute(activeUnit, key);
-              return <span key={key}>
-                <i className={`channel-${channel + 1}`} />
-                <label>探头{channel + 1}</label>
-                <b>{Number.isFinite(fluctuation) ? fluctuation.toFixed(0) : '--'}</b>
-                <small>绝对 {Number.isFinite(absolute) ? absolute.toFixed(0) : '--'}</small>
-              </span>;
-            })}
-            {probes.length === 0 && <span className="is-empty">等待探头数据</span>}
-          </div>
-        </div>
-        <footer className="wutos-live-waveform__footer">
-          <div className="wutos-live-waveform__legend">
-            {probes.map((key, channel) => <span key={key}><i className={`channel-${channel + 1}`} />探头{channel + 1}</span>)}
-            {probes.length === 0 && <span><i />等待通道</span>}
-          </div>
-          <div className="wutos-live-waveform__devices" aria-label="选择探测器">
-            {units.map((unit, index) => {
-              const deviceIndex = index + 1;
-              return <button
-                key={deviceIndex}
-                type="button"
-                className={deviceIndex === activeIndex ? 'is-selected' : ''}
-                onClick={() => setSelectedIndex(deviceIndex)}
-                aria-label={`查看探测器${deviceIndex}波形`}
-                aria-pressed={deviceIndex === activeIndex}
-              >
-                <i className={unit?.online ? 'is-online' : ''} />{deviceIndex}
-              </button>;
-            })}
-          </div>
-        </footer>
-      </>}
+      <IndicatorCameraPanel
+        expanded={expanded}
+        batchId={productPrecheck?.batchId ?? waveformAnalysis?.batchId ?? relayTest?.batchId ?? null}
+        precheckBusy={productPrecheckBusy}
+        relayTest={relayTest}
+        relayFunctionalTest={productPrecheck?.relayFunctionalTest}
+        onSubmitEvidence={onSubmitIndicatorVision}
+      />
     </section>
+  );
+
+  return liveWaveformPanel;
+};
+
+const SIMULATION_COMMAND_ORDER: FlameDetectorSimulationCommand[] = ['simulateFire', 'simulateFault', 'systemReset'];
+
+function detectorNames(indices: number[]): string {
+  return indices.length > 0 ? indices.map((index) => `D${index}`).join('、') : '无';
+}
+
+const DetectorSimulationDialog: FC<{
+  units: Array<FlameDetectorUnitState | undefined>;
+  onSend?: (command: FlameDetectorSimulationCommand) => Promise<FlameDetectorSimulationCommandResult>;
+  onClose: () => void;
+}> = ({ units, onSend, onClose }) => {
+  const [busyCommand, setBusyCommand] = useState<FlameDetectorSimulationCommand | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; text: string; detail?: string } | null>(null);
+  const onlineUnits = units.filter((unit): unit is FlameDetectorUnitState => Boolean(unit?.online)).map((unit) => unit.index);
+
+  const sendCommand = async (command: FlameDetectorSimulationCommand) => {
+    if (!onSend) {
+      setFeedback({ tone: 'error', text: '当前运行环境不支持探测器指令发送。' });
+      return;
+    }
+    setBusyCommand(command);
+    setFeedback(null);
+    try {
+      const result = await onSend(command);
+      const failedNames = result.failedUnits.map((unit) => `D${unit.index}`);
+      const sentText = `已发送至 ${detectorNames(result.sentUnits)}`;
+      const text = failedNames.length > 0
+        ? `${sentText}；${detectorNames(result.failedUnits.map((unit) => unit.index))} 未发送`
+        : sentText;
+      const detail = failedNames.length > 0
+        ? result.failedUnits.map((unit) => `D${unit.index}：${unit.error}`).join(' · ')
+        : `${result.label} · ${result.frameHex}`;
+      setFeedback({ tone: failedNames.length > 0 ? 'error' : 'success', text, detail });
+    } catch (error) {
+      setFeedback({ tone: 'error', text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusyCommand(null);
+    }
+  };
+
+  return (
+    <div className="wutos-simulation-backdrop" role="presentation">
+      <section className="wutos-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="wutos-simulation-title">
+        <header className="wutos-simulation-dialog__header">
+          <div>
+            <span className="wutos-simulation-eyebrow"><Send /> DETECTOR COMMAND LINK</span>
+            <h2 id="wutos-simulation-title">探测器模拟指令</h2>
+            <p>使用现场广播帧，直接对 6 台探测器进行状态联动验证</p>
+          </div>
+          <button type="button" className="wutos-simulation-close" onClick={onClose} aria-label="关闭探测器模拟指令"><X size={17} /></button>
+        </header>
+
+        <div className="wutos-simulation-dialog__body">
+          <div className="wutos-simulation-targets">
+            <div>
+              <span className="wutos-simulation-label">广播目标</span>
+              <strong>D1 — D6</strong>
+              <small>FF 地址 · 一次写入覆盖 6 台</small>
+            </div>
+            <div className="wutos-simulation-target-lights" aria-label={`六台探测器在线 ${onlineUnits.length} 台`}>
+              {Array.from({ length: 6 }, (_, index) => {
+                const detectorIndex = index + 1;
+                const isOnline = onlineUnits.includes(detectorIndex);
+                return <span className={isOnline ? 'is-online' : ''} key={detectorIndex}><i />D{detectorIndex}</span>;
+              })}
+            </div>
+          </div>
+
+          <div className="wutos-simulation-command-grid">
+            {SIMULATION_COMMAND_ORDER.map((command) => {
+              const definition = FLAME_DETECTOR_SIMULATION_COMMANDS[command];
+              const isBusy = busyCommand === command;
+              return (
+                <button
+                  type="button"
+                  key={command}
+                  className={`wutos-simulation-command wutos-simulation-command--${command}`}
+                  onClick={() => void sendCommand(command)}
+                  disabled={busyCommand !== null || !onSend}
+                  aria-label={`${definition.label}：${definition.description}`}
+                >
+                  <span className="wutos-simulation-command__mark">{command === 'simulateFire' ? '火' : command === 'simulateFault' ? '障' : '复'}</span>
+                  <span className="wutos-simulation-command__copy">
+                    <strong>{isBusy ? '发送中…' : definition.label}</strong>
+                    <small>{definition.description}</small>
+                    <code>{definition.frameHex}</code>
+                  </span>
+                  <span className="wutos-simulation-command__send"><Send size={13} /> 广播</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {feedback && <div className={`wutos-simulation-feedback is-${feedback.tone}`} role="status"><strong>{feedback.text}</strong>{feedback.detail && <code>{feedback.detail}</code>}</div>}
+          <p className="wutos-simulation-note"><TriangleAlert size={13} /> 仅建议在工序空闲或完成后使用；系统会按当前已建立的探测器通信连接发送，未连接设备会明确列出。</p>
+        </div>
+      </section>
+    </div>
   );
 };
 
@@ -708,10 +825,17 @@ export interface WutosDashboardProps {
   finalVerdict: FieldFinalVerdict | null;
   channelOnline: boolean;
   notice: string;
-  onRefresh: () => void;
+  resultTitleMeta?: ReactNode;
+  onClearWaveform: () => void | Promise<void>;
+  waveformClearing?: boolean;
   onOpenDetails?: () => void;
   waveformDisplayMode?: WaveformDisplayMode;
   waveformMaxSamples?: number;
+  productPrecheck?: ProductPrecheckReport | null;
+  productPrecheckBusy?: boolean;
+  relayTest?: RelayFunctionalTestProgress | null;
+  onSubmitIndicatorVision?: (report: IndicatorVisionReport) => Promise<void>;
+  onSendSimulationCommand?: (command: FlameDetectorSimulationCommand) => Promise<FlameDetectorSimulationCommandResult>;
 }
 
 export function WutosDashboard({
@@ -722,36 +846,52 @@ export function WutosDashboard({
   finalVerdict,
   channelOnline,
   notice,
-  onRefresh,
+  resultTitleMeta,
+  onClearWaveform,
+  waveformClearing = false,
   onOpenDetails,
   waveformDisplayMode = 'normalized',
   waveformMaxSamples = DEFAULT_WAVEFORM_MAX_SAMPLES,
+  productPrecheck = null,
+  productPrecheckBusy = false,
+  relayTest = null,
+  onSubmitIndicatorVision,
+  onSendSimulationCommand,
 }: WutosDashboardProps) {
-  const [clock, setClock] = useState(() => new Date());
+  const [simulationOpen, setSimulationOpen] = useState(false);
+  const { theme, toggleTheme } = useAppTheme();
+
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    if (!simulationOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setSimulationOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [simulationOpen]);
 
   const units = useMemo(
     () => Array.from({ length: 6 }, (_, index) => detectors?.units.find((unit) => unit.index === index + 1)),
     [detectors],
   );
   const activeWorkflowIndex = workflowIndex(status);
-  const alarms = alarmRows(clock, status, detectors, detectorVerdict, finalVerdict, channelOnline);
+  const alarms = alarmRows(new Date(), status, detectors, detectorVerdict, finalVerdict, channelOnline);
   const onlineCount = detectors?.onlineCount ?? units.filter((unit) => unit?.online).length;
   const faultCount = detectors?.faultCount ?? units.filter((unit) => unit?.fault).length;
   const fireCount = detectors?.fireCount ?? units.filter((unit) => unit?.fire).length;
   const aPassCount = detectorVerdict?.units.filter((unit) => unit.grade === 'A_PASS').length ?? 0;
   const bPassCount = detectorVerdict?.units.filter((unit) => unit.grade === 'B_PASS').length ?? 0;
-  const failCount = detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL').length ?? faultCount;
+  const retestCount = detectorVerdict?.units.filter((unit) => unit.classification === 'TEST_INVALID').length ?? 0;
+  const failCount = detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length ?? faultCount;
   const configuredRatios = configuredRatioMetrics(waveformAnalysis);
   const noiseLimits = configuredNoiseLimits(waveformAnalysis);
   const stageText = processLabel(status);
   const isAlarm = Boolean(hasActivePLCProcessAlarm(status) || finalVerdict?.verdict === 'FAIL' || detectorVerdict?.grade === 'FAIL');
 
   return (
-    <main className="wutos-dashboard">
+    <main className="wutos-dashboard" data-theme={theme}>
       <div className="wutos-frame">
         <div className="wutos-backdrop" aria-hidden="true" />
 
@@ -768,9 +908,10 @@ export function WutosDashboard({
               {channelOnline ? <Wifi /> : <WifiOff />}
               {channelOnline ? '通信正常' : '等待连接'}
             </span>
-            <span><CalendarDays />{formatDate(clock)}</span>
-            <span><Clock3 />{formatTime(clock)}</span>
-            <button type="button" className="wutos-icon-button" onClick={onRefresh} title="刷新状态" aria-label="刷新状态"><RefreshCw /></button>
+            <DashboardClock />
+            <ThemeToggleButton theme={theme} onToggle={toggleTheme} compact className="wutos-theme-button" />
+            <button type="button" className={`wutos-icon-button ${waveformClearing ? 'is-clearing' : ''}`} onClick={() => void onClearWaveform()} disabled={waveformClearing} title="清除实时波形缓存" aria-label="清除实时波形缓存" aria-busy={waveformClearing}><RefreshCw /></button>
+            <button type="button" className="wutos-command-button" onClick={() => setSimulationOpen(true)}><Send />模拟指令</button>
             {onOpenDetails && <button type="button" className="wutos-detail-button" onClick={onOpenDetails}><Settings2 />详情</button>}
           </div>
         </header>
@@ -788,7 +929,7 @@ export function WutosDashboard({
             {units.slice(0, 3).map((unit, index) => <SensorLiveCard key={index + 1} index={index + 1} unit={unit} status={status} analysis={waveformAnalysis?.units.find((item) => item.index === index + 1)} captureAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} />)}
           </div>
           <img src={asset('machine-real.png')} className="wutos-machine wutos-machine--real" alt="火焰探测器检测台" />
-          <LiveWaveformPanel units={units} status={status} waveformAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} />
+          <LiveWaveformPanel units={units} status={status} waveformAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} productPrecheck={productPrecheck} productPrecheckBusy={productPrecheckBusy} relayTest={relayTest} onSubmitIndicatorVision={onSubmitIndicatorVision} />
           <div className="wutos-stage__sensors wutos-stage__sensors--right">
             {units.slice(3, 6).map((unit, index) => <SensorLiveCard key={index + 4} index={index + 4} unit={unit} status={status} analysis={waveformAnalysis?.units.find((item) => item.index === index + 4)} captureAnalysis={waveformAnalysis} waveformDisplayMode={waveformDisplayMode} waveformMaxSamples={waveformMaxSamples} />)}
           </div>
@@ -814,6 +955,7 @@ export function WutosDashboard({
 
         <Panel
           title="检测结果"
+          titleMeta={resultTitleMeta}
           className="wutos-panel--result"
         >
           <div className="wutos-detector-grid">
@@ -830,7 +972,7 @@ export function WutosDashboard({
               />
             ))}
           </div>
-          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} />
+          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} />
         </Panel>
 
         <Panel title="工序流程" className="wutos-panel--flow">
@@ -858,6 +1000,8 @@ export function WutosDashboard({
           </div>
           <div className="wutos-flow-note"><span>{status?.valid ? 'PLC 工序已同步' : 'PLC 未接入：工序待同步'}</span><code>{status ? 'VW600=' + status.stageCode + ' · VW602=' + status.stepCode : 'READ ONLY'}</code><span>{onlineCount}/6 在线 · 火警 {fireCount} · 故障 {faultCount}</span></div>
         </Panel>
+
+        {simulationOpen && <DetectorSimulationDialog units={units} onSend={onSendSimulationCommand} onClose={() => setSimulationOpen(false)} />}
       </div>
     </main>
   );

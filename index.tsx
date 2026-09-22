@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import { OfflineClosureApp } from './components/OfflineClosureApp';
 import { FieldProcessStatusApp } from './components/FieldProcessStatusApp';
 import { TestProgramApp } from './components/TestProgramApp';
+import './components/app-theme.css';
+import { readAppTheme } from './components/theme-toggle';
+import './components/detector-status-lights-live-runtime';
+import './components/mes-status-live-runtime';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -100,6 +104,10 @@ const getIsTestProgram = () => {
 
 const isTestProgram = getIsTestProgram();
 const isOffline = import.meta.env.VITE_RUNTIME_MODE === 'offline' || (typeof window !== 'undefined' && window.location.port === '3000');
+
+if (typeof document !== 'undefined') {
+  document.documentElement.dataset.appTheme = readAppTheme();
+}
 
 root.render(
   <React.StrictMode>

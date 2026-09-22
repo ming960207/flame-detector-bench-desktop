@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "火焰探测器检测台｜时间横轴 PLC 全流程",
+    "locale": "zh-CN",
+    "output": "flame-detector-bench.time-workflow.workflow.html",
+    "quality_profile": "showcase",
+    "viewBox": [900, 800],
+    "views": [
+      { "id": "time-axis", "label": "时间轴总览", "focus": ["start", "home", "heat", "zone2", "flash", "finish", "record"], "note": "横轴从启动向完成推进；每列对应一个真实工序时间段。" },
+      { "id": "quality-window", "label": "采集与判定窗口", "focus": ["heat", "zone2", "flash", "finish", "record"], "note": "产品预检、噪声和三阶段干扰指标写在对应阶段卡片中。" },
+      { "id": "stop-branch", "label": "任意阶段中止", "focus": ["stop", "abort", "start", "finish"], "note": "STOP 或安全链断开会清除动作、保持停止并阻止当前批次放行。" }
+    ]
+  },
+  "lanes": [
+    { "id": "process", "label": "检测主流程" },
+    { "id": "record", "label": "记录与报告" },
+    { "id": "exception", "label": "异常分支", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "t0", "label": "t=0", "fromCol": 0, "toCol": 0 },
+    { "id": "home", "label": "0–22s", "fromCol": 1, "toCol": 1, "variant": "emphasis" },
+    { "id": "heat", "label": "22–82s", "fromCol": 2, "toCol": 2, "variant": "emphasis" },
+    { "id": "zone2", "label": "82s+", "fromCol": 3, "toCol": 3 },
+    { "id": "flash", "label": "+9s", "fromCol": 4, "toCol": 4, "variant": "emphasis" },
+    { "id": "finish", "label": "+10s+", "fromCol": 5, "toCol": 5, "variant": "security" }
+  ],
+  "groups": [
+    { "id": "safety-group", "label": "任意阶段中止", "lane": "exception", "fromCol": 0, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["start", "home", "heat", "zone2", "flash", "finish", "record"],
+  "nodes": [
+    { "id": "start", "lane": "process", "col": 0, "type": "security", "label": "启动", "width": 50, "height": 56 },
+    { "id": "home", "lane": "process", "col": 1, "type": "external", "label": "归零", "width": 50, "height": 56 },
+    { "id": "heat", "lane": "process", "col": 2, "type": "external", "label": "热源", "width": 50, "height": 56 },
+    { "id": "zone2", "lane": "process", "col": 3, "type": "external", "label": "区2", "width": 50, "height": 56 },
+    { "id": "flash", "lane": "process", "col": 4, "type": "external", "label": "爆闪", "width": 50, "height": 56 },
+    { "id": "finish", "lane": "process", "col": 5, "type": "external", "label": "回位", "width": 50, "height": 56 },
+    { "id": "record", "lane": "record", "col": 5, "type": "database", "label": "记录", "width": 50, "height": 56 },
+    { "id": "stop", "lane": "exception", "col": 0, "type": "security", "label": "急停", "width": 50, "height": 56 },
+    { "id": "abort", "lane": "exception", "col": 5, "type": "security", "label": "中止", "width": 50, "height": 56 }
+  ],
+  "edges": [
+    { "id": "start-home", "from": "start", "to": "home", "role": "main" },
+    { "id": "home-heat", "from": "home", "to": "heat", "role": "main" },
+    { "id": "heat-zone2", "from": "heat", "to": "zone2", "role": "main" },
+    { "id": "zone2-flash", "from": "zone2", "to": "flash", "role": "main", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "flash-finish", "from": "flash", "to": "finish", "role": "main" },
+    { "id": "finish-record", "from": "finish", "to": "record", "role": "main", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "stop-abort", "from": "stop", "to": "abort", "role": "error", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "PLC 固定节奏", "items": ["归零：T44=2s、T48=8s、T49=1s；热源下压：T50=1s、T45=10s", "热源稳定30s + 噪声30s；挥手5×1s；爆闪9×1s；EMC10s", "T62=2s 后允许升降与水平移动重叠，实际总时长受 I0.0/I0.1/I0.2 到位影响"] },
+    { "dot": "emerald", "title": "产品预检与判定", "items": ["检测位1稳定窗口约800ms后，六台并行读取版本、探头数、灵敏度、火警/故障；版本始终读取但可按配置跳过判定", "噪声≥400样本；干扰阶段≥80样本；干扰比≤1.5；绝对值≤1000", "一致性趋势 A≥0.8、B≥0.75；SNR23 按产品配置；故障/失败=不合格，未齐=待检测"] },
+    { "dot": "rose", "title": "最终放行与异常", "items": ["预检通过、PLC COMPLETE、分析 PASS 且六台无待检测，才生成正式结果", "STOP/急停清除动作、保持停止并阻止当前批次放行", "软件监测不替代现场 HMI、实体急停、安全回路和 FAT/SAT"] }
+  ]
+}

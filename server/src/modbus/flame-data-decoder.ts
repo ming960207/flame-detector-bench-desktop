@@ -146,17 +146,51 @@ export function extractCustomWaveformFrames(
     if (header > 0) buffer = buffer.subarray(header);
 
     // The device tail byte is firmware-defined and is not a reliable checksum.
-    // Prefer a length whose following bytes are the next frame header; otherwise
-    // wait until a complete candidate is available.
+    // Prefer a length whose following bytes are the next frame header. Field
+    // gateways can insert startup text/garbage between frames, so also recover
+    // from the next later header instead of holding a misaligned partial frame
+    // forever.
     const boundary = lengths.find((length) => buffer.length >= length + 2 && buffer[length] === 0x5A && buffer[length + 1] === 0xA5);
+    let recoveredLength: number | undefined;
+    if (!boundary) {
+      let nextHeader = buffer.indexOf(Buffer.from([0x5A, 0xA5]), 2);
+      while (nextHeader >= 0 && recoveredLength === undefined) {
+        const candidates = lengths.filter((length) => length < nextHeader).sort((left, right) => right - left);
+        const valid29 = candidates.includes(29) && isValid29ByteFrame(buffer.subarray(0, 29));
+        if (valid29) {
+          recoveredLength = 29;
+        } else if (nextHeader >= 150 && candidates.includes(170)) {
+          recoveredLength = 170;
+        } else if (candidates.includes(27)) {
+          recoveredLength = 27;
+        } else if (candidates.length > 0) {
+          recoveredLength = candidates[0];
+        } else {
+          nextHeader = buffer.indexOf(Buffer.from([0x5A, 0xA5]), nextHeader + 2);
+        }
+      }
+    }
     const exact = lengths.find((length) => buffer.length === length);
-    const length = boundary ?? exact ?? (buffer.length >= lengths[lengths.length - 1]! ? lengths[lengths.length - 1] : undefined);
+    const length = boundary ?? exact ?? recoveredLength ?? (buffer.length >= lengths[lengths.length - 1]! ? lengths[lengths.length - 1] : undefined);
     if (!length) break;
     frames.push(Buffer.from(buffer.subarray(0, length)));
     buffer = buffer.subarray(length);
   }
 
   return { frames, remainder: Buffer.from(buffer) };
+}
+
+function isValid29ByteFrame(frame: ArrayLike<number>): boolean {
+  if (frame.length !== 29 || Number(frame[0]) !== 0x5A || Number(frame[1]) !== 0xA5) return false;
+  const trailing = Number(frame[28]) & 0xFF;
+  for (let removeOffset = 0; removeOffset <= 24; removeOffset += 2) {
+    const candidate = [
+      ...Array.from(frame).slice(0, 2 + removeOffset),
+      ...Array.from(frame).slice(4 + removeOffset, 28),
+    ];
+    if (checksum8(candidate) === trailing) return true;
+  }
+  return false;
 }
 
 export interface WaveformChannelMetrics {

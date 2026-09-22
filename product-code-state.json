@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "counters": {
+    "GHT-1050-02@202609": 12
+  },
+  "allocations": {
+    "field-waveform-1788752375536-1": {
+      "batchId": "field-waveform-1788752375536-1",
+      "status": "GENERATED",
+      "productModel": "GHT-1050-02",
+      "monthKey": "GHT-1050-02@202609",
+      "productionDate": 1788752375536,
+      "items": [
+        {
+          "slot": 1,
+          "serial": 1,
+          "productCode": "410205901010100001"
+        },
+        {
+          "slot": 2,
+          "serial": 2,
+          "productCode": "410205901010100002"
+        },
+        {
+          "slot": 3,
+          "serial": 3,
+          "productCode": "410205901010100003"
+        },
+        {
+          "slot": 4,
+          "serial": 4,
+          "productCode": "410205901010100004"
+        },
+        {
+          "slot": 5,
+          "serial": 5,
+          "productCode": "410205901010100005"
+        },
+        {
+          "slot": 6,
+          "serial": 6,
+          "productCode": "410205901010100006"
+        }
+      ],
+      "allocatedAt": 1788752375542
+    },
+    "field-waveform-1788752580708-2": {
+      "batchId": "field-waveform-1788752580708-2",
+      "status": "GENERATED",
+      "productModel": "GHT-1050-02",
+      "monthKey": "GHT-1050-02@202609",
+      "productionDate": 1788752580708,
+      "items": [
+        {
+          "slot": 1,
+          "serial": 7,
+          "productCode": "410205901010100007"
+        },
+        {
+          "slot": 2,
+          "serial": 8,
+          "productCode": "410205901010100008"
+        },
+        {
+          "slot": 3,
+          "serial": 9,
+          "productCode": "410205901010100009"
+        },
+        {
+          "slot": 4,
+          "serial": 10,
+          "productCode": "410205901010100010"
+        },
+        {
+          "slot": 5,
+          "serial": 11,
+          "productCode": "410205901010100011"
+        },
+        {
+          "slot": 6,
+          "serial": 12,
+          "productCode": "410205901010100012"
+        }
+      ],
+      "allocatedAt": 1788752580711
+    }
+  },
+  "updatedAt": 1788752580711
+}

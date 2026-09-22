@@ -1,15 +1,25 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import type { FieldDetectorBatchVerdict, FieldDetectorMetrics, FieldDetectorResult } from './field-detector-verdict.js';
+import type { FieldDetectorBatchVerdict, FieldDetectorResult } from './field-detector-verdict.js';
 import type { FieldFinalVerdict } from './field-final-verdict.js';
 import type { FlameDetectorState } from '../types.js';
 import {
+  expectedProbeChannels,
+  formatSoftwareVersion,
+  selectedProductProfile,
+  type ProductDetectionConfig,
+  type ProductPrecheckReport,
+  type ProductPrecheckUnitResult,
+} from '../product-profile.js';
+import {
   DEFAULT_DETECTION_QUALITY_CONFIG,
   normalizeDetectionQualityConfig,
-  type DetectionQualityConfig,
+  type ChannelKey,
   type FieldWaveformAnalysisSnapshot,
   type WaveformAnalysisConfig,
+  type WaveformAnalysisUnitResult,
 } from './field-waveform-analysis.js';
+import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
 
 export interface CompletedFieldTest {
   batchId: string;
@@ -20,6 +30,8 @@ export interface CompletedFieldTest {
   thresholds: WaveformAnalysisConfig;
   waveformAnalysis?: FieldWaveformAnalysisSnapshot;
   inspectionPositions: InspectionPositionResult[];
+  productConfig?: ProductDetectionConfig;
+  productPrecheck?: ProductPrecheckReport | null;
 }
 
 export type InspectionPositionId = 'DETECTION_POSITION_1_HEAT' | 'DETECTION_POSITION_2_FLASH';
@@ -83,19 +95,15 @@ export interface FieldTestResultLogger {
   record(test: CompletedFieldTest): string | void;
 }
 
-interface NumericFailureDetail {
-  code: string;
-  metric: keyof FieldDetectorMetrics;
-  value: number;
-  operator: '<=' | '>=';
-  limit: number;
-  thresholdGrade: 'A' | 'B';
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const SHANGHAI_TIMEZONE_LABEL = 'Asia/Shanghai (UTC+8)';
+
+function shanghaiDate(timestamp: number): Date {
+  return new Date(timestamp + SHANGHAI_OFFSET_MS);
 }
 
 function datePart(timestamp: number): string {
-  const date = new Date(timestamp);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
+  return shanghaiDate(timestamp).toISOString().slice(0, 10);
 }
 
 function rotateCorruptLog(file: string): void {
@@ -124,8 +132,29 @@ const REASON_TEXT: Record<string, string> = {
   DETECTOR_OFFLINE: '探测器离线',
   DETECTOR_SOURCE_NOT_READY: '光源未就绪',
   DETECTOR_SYNC_NOT_OK: '同步异常',
+  SOFTWARE_VERSION_NOT_CONFIGURED: '未配置软件版本基准',
+  SOFTWARE_VERSION_READ_FAILED: '软件版本读取失败',
+  SOFTWARE_VERSION_MISMATCH: '软件版本不一致',
+  PROBE_COUNT_READ_FAILED: '探头数量读取失败',
+  PROBE_COUNT_MISMATCH: '探头数量不一致',
+  SENSITIVITY_READ_FAILED: '灵敏度读取失败',
+  DETECTOR_FAULT_AT_PRECHECK: '产品预检时探测器故障',
+  PRECHECK_READ_FAILED: '产品预检读取失败',
+  PRODUCT_PRECHECK_NOT_COMPLETED: '产品预检未完成',
+  TEST_INFRASTRUCTURE_INVALID: '测试链路异常，需复测',
+  TEST_INVALID_RETEST_REQUIRED: '测试无效，需复测',
+  DETECTOR_STARTUP_FAILED: '探测器启动失败',
+  DETECTOR_STARTUP_TIMEOUT: '探测器启动超时',
+  DETECTOR_STARTUP_DISCONNECTED: '探测器启动时未连接',
+  DETECTOR_STARTUP_POWER_ON: '探测器已上电，等待通信',
+  DETECTOR_STARTUP_COMMUNICATION_READY: '通信已建立，等待模式切换',
+  DETECTOR_STARTUP_MODE_SWITCHING: '模式切换未确认',
+  DETECTOR_STARTUP_MODE_SWITCH_OK: '模式已切换，等待首帧同步',
+  DETECTOR_STARTUP_FIRST_FRAME_RECEIVED: '首帧已收到，等待通道同步',
+  MODE_SWITCH_TIMEOUT: '模式切换等待 ACK 超时',
   NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
-  NOISE_RMS_EXCEEDS_LIMIT: '噪声 RMS 超过上限',
+  NOISE_RMS_EXCEEDS_LIMIT: '噪声波动值超过上限',
+  NOISE_ROLLING_WINDOW_MISSING: '不足完整10秒 RAW 滚动窗口',
   NOISE_ABSOLUTE_EXCEEDS_LIMIT: '噪声绝对值超过上限',
   INTERFERENCE_RATIO_EXCEEDS_LIMIT: '干扰比超过上限',
   CONSISTENCY_TREND_BELOW_LIMIT: '一致性低于下限',
@@ -138,8 +167,26 @@ const REASON_TEXT: Record<string, string> = {
   SNR31_ABOVE_LIMIT: 'P3/P1 信噪比高于上限',
 };
 
+const PRODUCT_TYPE_LABELS: Record<string, string> = {
+  DUAL_WAVELENGTH: '双波长',
+  THREE_WAVELENGTH: '三波长',
+  FOUR_WAVELENGTH: '四波长',
+  IMAGE_DETECTOR: '图探型',
+};
+
+function channelLabel(key: ChannelKey): string {
+  return key.replace('probe', 'P');
+}
+
 function reasonText(unit: FieldDetectorResult): string {
   const reason = unit.reason ?? '';
+  if (reason.endsWith('_SIGNAL_NO_DATA')) return '探头疑似无有效数据（高绝对值/低波动）';
+  const fluctuationMatch = reason.match(/PROBE(\d+)_NOISE_RMS_(BELOW|EXCEEDS)_LIMIT$/);
+  if (fluctuationMatch) {
+    return `P${fluctuationMatch[1]} 噪声波动值${fluctuationMatch[2] === 'BELOW' ? '低于下限' : '超过上限'}`;
+  }
+  const absoluteMatch = reason.match(/PROBE(\d+)_NOISE_ABSOLUTE_EXCEEDS_LIMIT$/);
+  if (absoluteMatch) return `P${absoluteMatch[1]} 噪声绝对值超过上限`;
   const direct = REASON_TEXT[reason];
   if (direct) return direct;
   const suffix = Object.keys(REASON_TEXT).find((code) => reason.endsWith(code));
@@ -150,15 +197,56 @@ function resultText(verdict: 'PASS' | 'FAIL' | 'PENDING'): string {
   return verdict === 'PASS' ? '合格' : verdict === 'FAIL' ? '不合格' : '待检测';
 }
 
+function precheckReasonText(reason: string): string {
+  return REASON_TEXT[reason] ?? reason;
+}
+
+function precheckHasProductFailure(unit: ProductPrecheckUnitResult): boolean {
+  return unit.reasons.some((reason) => reason === 'SOFTWARE_VERSION_MISMATCH'
+    || reason === 'PROBE_COUNT_MISMATCH'
+    || reason === 'DETECTOR_FAULT_AT_PRECHECK'
+    || reason === 'RELAY_FUNCTIONAL_TEST_FAILED');
+}
+
+function precheckNeedsRetest(unit: ProductPrecheckUnitResult): boolean {
+  return unit.verdict === 'FAIL'
+    && !precheckHasProductFailure(unit)
+    && (unit.reasons.includes('TEST_INFRASTRUCTURE_INVALID')
+      || unit.reasons.includes('SOFTWARE_VERSION_NOT_CONFIGURED')
+      || unit.reasons.includes('SOFTWARE_VERSION_READ_FAILED')
+      || unit.reasons.includes('PROBE_COUNT_READ_FAILED')
+      || unit.reasons.includes('SENSITIVITY_READ_FAILED'));
+}
+
 function valueText(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : '-';
 }
 
-function localDateTime(timestamp: number): string {
-  const date = new Date(timestamp);
+function roundedValueText(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(Number(value.toFixed(3))) : '-';
+}
+
+function localDateTime(timestamp: number | null): string {
+  if (timestamp === null) return '-';
+  const date = shanghaiDate(timestamp);
   if (!Number.isFinite(date.getTime())) return '-';
   const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
+function startupStateText(state: string | undefined): string {
+  const labels: Record<string, string> = {
+    DISCONNECTED: '未连接',
+    POWER_ON: '已上电',
+    COMMUNICATION_READY: '通信就绪',
+    MODE_SWITCHING: '模式切换中',
+    MODE_SWITCH_OK: '模式切换成功',
+    FIRST_FRAME_RECEIVED: '已收到首帧',
+    CHANNEL_SYNC_OK: '通道同步',
+    TEST_READY: '测试就绪',
+    FAILED: '失败',
+  };
+  return state ? labels[state] ?? state : '-';
 }
 
 function table(headers: string[], rows: string[][]): string[] {
@@ -184,6 +272,15 @@ function stageReason(reason: string | undefined): string {
   return reason;
 }
 
+function noiseReason(reason: string | undefined): string {
+  if (!reason) return '未采集';
+  if (reason === 'NOISE_WITHIN_LIMIT') return 'RAW 10秒滚动最大波动值/RAW绝对值在限值内';
+  if (reason === 'NOISE_SAMPLES_MISSING') return '噪声采样不足';
+  if (reason === 'WAITING_FOR_NOISE_SAMPLES') return '等待噪声采样';
+  if (reason === 'WAITING_FOR_NOISE_WINDOW_COMPLETE') return '等待噪声采集窗口结束';
+  return REASON_TEXT[reason] ?? reason;
+}
+
 function positionState(device: InspectionPositionResult['devices'][number]): string {
   return [
     device.online ? '在线' : '离线',
@@ -195,35 +292,56 @@ function positionState(device: InspectionPositionResult['devices'][number]): str
   ].join('、');
 }
 
-function numericFailures(unit: FieldDetectorResult, quality: DetectionQualityConfig): NumericFailureDetail[] {
-  if (unit.grade !== 'FAIL') return [];
-  const thresholdGrade = 'B' as const;
-  const limits = quality.b;
-  const ratios = quality.ratios.b;
-  const failures: NumericFailureDetail[] = [];
-  const upper = (metric: keyof FieldDetectorMetrics, limit: number | undefined, code: string) => {
-    const value = unit.metrics[metric];
-    if (value !== null && limit != null && limit > 0 && value > limit) {
-      failures.push({ code, metric, value, operator: '<=', limit, thresholdGrade });
+function noiseMetric(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  key: ChannelKey,
+  metric: 'fluctuation' | 'absolute',
+): number | null {
+  const value = analysis?.noiseTest?.metrics?.[key]?.[metric];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function noiseDiagnosticMetric(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  key: ChannelKey,
+  field: 'currentRolling10s' | 'maxRolling10s' | 'fullStageRawFluctuation' | 'rawAbsoluteMax',
+): number | null {
+  const value = analysis?.noiseTest?.[field]?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function noiseMetricSummary(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  channels: ChannelKey[],
+  metric: 'fluctuation' | 'absolute',
+): string {
+  return channels.map((key) => `${channelLabel(key)}:${roundedValueText(noiseMetric(analysis, key, metric))}`).join(' / ');
+}
+
+function formalNoiseFailureDetails(
+  unit: FieldDetectorResult,
+  analysis: WaveformAnalysisUnitResult | undefined,
+  channels: ChannelKey[],
+  minFluctuation: number,
+  maxFluctuation: number,
+  maxAbsolute: number | undefined,
+): string[] {
+  if (unit.classification === 'TEST_INVALID' || unit.grade !== 'FAIL' || !analysis?.noiseTest) return [];
+  const details: string[] = [];
+  for (const key of channels) {
+    const fluctuation = noiseMetric(analysis, key, 'fluctuation');
+    const absolute = noiseMetric(analysis, key, 'absolute');
+    if (fluctuation !== null && minFluctuation > 0 && fluctuation < minFluctuation) {
+      details.push(`${channelLabel(key)}RAW滚动10秒波动 ${roundedValueText(fluctuation)} < 下限 ${roundedValueText(minFluctuation)}`);
     }
-  };
-  const lower = (metric: keyof FieldDetectorMetrics, limit: number | undefined, code: string) => {
-    const value = unit.metrics[metric];
-    if (value !== null && limit != null && limit > 0 && value < limit) {
-      failures.push({ code, metric, value, operator: '>=', limit, thresholdGrade });
+    if (fluctuation !== null && maxFluctuation > 0 && fluctuation > maxFluctuation) {
+      details.push(`${channelLabel(key)}RAW滚动10秒波动 ${roundedValueText(fluctuation)} > B上限 ${roundedValueText(maxFluctuation)}`);
     }
-  };
-  upper('noiseRms', limits.maxNoiseRms, 'NOISE_RMS_EXCEEDS_LIMIT');
-  upper('noiseAbsolute', limits.maxNoiseAbsolute, 'NOISE_ABSOLUTE_EXCEEDS_LIMIT');
-  upper('interferenceRatio', limits.maxInterferenceRatio, 'INTERFERENCE_RATIO_EXCEEDS_LIMIT');
-  lower('consistencyTrend', limits.minConsistencyTrend, 'CONSISTENCY_TREND_BELOW_LIMIT');
-  if (ratios) {
-    lower('snr21', ratios.snr21.min, 'SNR21_BELOW_LIMIT'); upper('snr21', ratios.snr21.max, 'SNR21_ABOVE_LIMIT');
-    lower('snr23', ratios.snr23.min, 'SNR23_BELOW_LIMIT'); upper('snr23', ratios.snr23.max, 'SNR23_ABOVE_LIMIT');
-    lower('snr31', ratios.snr31.min, 'SNR31_BELOW_LIMIT'); upper('snr31', ratios.snr31.max, 'SNR31_ABOVE_LIMIT');
+    if (absolute !== null && maxAbsolute != null && maxAbsolute > 0 && absolute > maxAbsolute) {
+      details.push(`${channelLabel(key)}RAW绝对值 ${roundedValueText(absolute)} > B上限 ${roundedValueText(maxAbsolute)}`);
+    }
   }
-  lower('sensitivity', limits.minSensitivity, 'SENSITIVITY_BELOW_LIMIT');
-  return failures;
+  return details;
 }
 
 export class FileFieldTestResultLogger implements FieldTestResultLogger {
@@ -231,38 +349,144 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
   record(test: CompletedFieldTest): string {
     mkdirSync(this.directory, { recursive: true });
-    const quality = normalizeDetectionQualityConfig(
+    const quality = applyAutomaticBGradePolicy(normalizeDetectionQualityConfig(
       test.thresholds.quality,
       DEFAULT_DETECTION_QUALITY_CONFIG,
-    );
+    ));
     const file = join(this.directory, `test-results-${datePart(test.completedAt)}.log`);
     rotateCorruptLog(file);
     const units = test.detectorVerdict.units;
+    const embeddedPrecheckUnits = units.flatMap((unit) => unit.precheck ? [unit.precheck] : []);
+    const precheckUnits = test.productPrecheck?.units?.length ? test.productPrecheck.units : embeddedPrecheckUnits;
+    const firstPrecheck = precheckUnits[0];
     const analysisByIndex = new Map((test.waveformAnalysis?.units ?? []).map((unit) => [unit.index, unit]));
     const durationMs = test.startedAt === null ? null : Math.max(0, test.completedAt - test.startedAt);
-    const finalResult = resultText(test.finalVerdict.verdict);
-    const finalGrade = gradeText(test.finalVerdict.grade);
+    const retestRequired = test.finalVerdict.reason === 'TEST_INVALID_RETEST_REQUIRED';
+    const finalResult = retestRequired ? '需复测' : resultText(test.finalVerdict.verdict);
+    const finalGrade = retestRequired ? '需复测' : gradeText(test.finalVerdict.grade);
+    const profile = test.productConfig ? selectedProductProfile(test.productConfig) : null;
+    const productType = test.productConfig?.selectedType
+      ?? test.detectorVerdict.productType
+      ?? test.productPrecheck?.productType
+      ?? firstPrecheck?.productType;
+    const productLabel = profile?.label ?? test.productPrecheck?.productLabel ?? (productType ? PRODUCT_TYPE_LABELS[productType] ?? productType : null);
+    const expectedSoftwareVersion = profile?.expectedSoftwareVersion
+      ?? test.detectorVerdict.expectedSoftwareVersion
+      ?? test.productPrecheck?.expectedSoftwareVersion
+      ?? firstPrecheck?.expectedSoftwareVersion
+      ?? '';
+    const expectedProbeCount = profile?.expectedProbeCount
+      ?? test.detectorVerdict.expectedProbeCount
+      ?? test.productPrecheck?.expectedProbeCount
+      ?? firstPrecheck?.expectedProbeCount
+      ?? null;
+    const expectedChannels = expectedProbeChannels(expectedProbeCount ?? 3);
+    const noiseWindowStart = test.waveformAnalysis?.noiseStartedAt ?? null;
+    const noiseWindowEnd = test.waveformAnalysis?.noiseEndedAt ?? null;
+    const noiseWindowDurationMs = noiseWindowStart !== null && noiseWindowEnd !== null
+      ? Math.max(0, noiseWindowEnd - noiseWindowStart)
+      : null;
+    const aCount = units.filter((unit) => unit.grade === 'A_PASS').length;
+    const bCount = units.filter((unit) => unit.grade === 'B_PASS').length;
+    const retestCount = units.filter((unit) => unit.classification === 'TEST_INVALID').length;
+    const ngCount = units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length;
+    const pendingCount = units.filter((unit) => unit.grade === 'PENDING').length;
     const summary = [
       `批次：${test.batchId}`,
+      ...(productLabel ? [`产品：${productLabel}`] : []),
+      ...(productType ? [`产品类型：${productType}`] : []),
+      ...(productType ? [`版本基准：${expectedSoftwareVersion ? formatSoftwareVersion(expectedSoftwareVersion) : '未配置'}`] : []),
+      ...(expectedProbeCount !== null ? [`探头基准：${expectedProbeCount}`] : []),
       `结果：${finalResult}`,
       `等级：${finalGrade}`,
       `耗时：${durationMs === null ? '未知' : `${(durationMs / 1000).toFixed(1)}秒`}`,
-      `设备：${units.length}（A ${units.filter((unit) => unit.grade === 'A_PASS').length} / B ${units.filter((unit) => unit.grade === 'B_PASS').length} / NG ${units.filter((unit) => unit.grade === 'FAIL').length} / 待检 ${units.filter((unit) => unit.grade === 'PENDING').length}）`,
+      `设备：${units.length}（A ${aCount} / B ${bCount} / NG ${ngCount} / 复测 ${retestCount} / 待检 ${pendingCount}）`,
     ].join(' | ');
+
+    const precheckRows = precheckUnits.map((unit) => [
+      String(unit.index),
+      String(unit.address),
+      unit.actualSoftwareVersion ?? '读取失败',
+      unit.expectedSoftwareVersion ? formatSoftwareVersion(unit.expectedSoftwareVersion) : '未配置',
+      valueText(unit.actualProbeCount),
+      String(unit.expectedProbeCount),
+      unit.fireAlarm === null ? '-' : unit.fireAlarm ? '有火警' : '无火警',
+      unit.fault === null ? '-' : unit.fault ? '故障' : '无故障',
+      unit.verdict === 'PASS' ? '通过' : precheckNeedsRetest(unit) ? '需复测' : unit.verdict === 'FAIL' ? '异常' : '待检',
+      unit.reasons.length ? unit.reasons.map(precheckReasonText).join('；') : '-',
+    ]);
 
     const deviceRows = units.map((unit) => {
       const metrics = unit.metrics;
-      const failures = numericFailures(unit, quality);
-      const detail = failures.length
-        ? failures.map((failure) => `${valueText(failure.value)} ${failure.operator === '<=' ? '≤' : '≥'} ${valueText(failure.limit)}`).join('；')
-        : '';
-      const explanation = [reasonText(unit), detail && `（${detail}）`].filter(Boolean).join('');
+      const analysis = analysisByIndex.get(unit.index);
+      const formalNoiseDetails = formalNoiseFailureDetails(
+        unit,
+        analysis,
+        expectedChannels,
+        test.thresholds.minNoiseRms,
+        quality.b.maxNoiseRms,
+        quality.b.maxNoiseAbsolute,
+      );
+      const noData = unit.noDataProbes?.length ? `无数据探头：${unit.noDataProbes.map(channelLabel).join('/')}` : '';
+      const explanation = [reasonText(unit), noData, ...formalNoiseDetails].filter(Boolean).join('；');
       return [
-        String(unit.index), String(unit.address), gradeText(unit.grade),
+        String(unit.index), String(unit.address), unit.classification === 'TEST_INVALID' ? '需复测' : gradeText(unit.grade),
+        noiseMetricSummary(analysis, expectedChannels, 'fluctuation'),
+        noiseMetricSummary(analysis, expectedChannels, 'absolute'),
         valueText(metrics.noiseRms), valueText(metrics.noisePeakToPeak), valueText(metrics.noiseAbsolute),
         valueText(metrics.interferenceRatio), valueText(metrics.consistencyTrend),
         valueText(metrics.snr21), valueText(metrics.snr23), valueText(metrics.snr31), valueText(metrics.sensitivity),
         explanation || '-',
+      ];
+    });
+
+    const noiseHeaders = [
+      '设备', '采样数',
+      ...expectedChannels.flatMap((key) => [`${channelLabel(key)} RAW滚动10秒最大波动`, `${channelLabel(key)} RAW绝对值`]),
+      '结果', '说明',
+    ];
+    const noiseRows = units.map((unit) => {
+      const analysis = analysisByIndex.get(unit.index);
+      return [
+        String(unit.index),
+        valueText(analysis?.noiseTest?.sampleCount),
+        ...expectedChannels.flatMap((key) => [
+          roundedValueText(noiseMetric(analysis, key, 'fluctuation')),
+          roundedValueText(noiseMetric(analysis, key, 'absolute')),
+        ]),
+        analysis?.noiseTest ? resultText(analysis.noiseTest.verdict) : '未采集',
+        noiseReason(analysis?.noiseTest?.reason),
+      ];
+    });
+
+    const noiseRollingRows = units.flatMap((unit) => {
+      const analysis = analysisByIndex.get(unit.index);
+      return expectedChannels.map((key) => [
+        String(unit.index), channelLabel(key),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'currentRolling10s')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'maxRolling10s')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'fullStageRawFluctuation')),
+        roundedValueText(noiseDiagnosticMetric(analysis, key, 'rawAbsoluteMax')),
+      ]);
+    });
+
+    const startupRows = units.map((unit) => {
+      const startup = analysisByIndex.get(unit.index)?.startup;
+      return [
+        String(unit.index),
+        startupStateText(startup?.state),
+        localDateTime(startup?.powerOnAt ?? null),
+        localDateTime(startup?.communicationReadyAt ?? null),
+        localDateTime(startup?.modeSwitchOkAt ?? null),
+        localDateTime(startup?.firstFrameAt ?? null),
+        localDateTime(startup?.firstValidSampleAt ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe1 ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe2 ?? null),
+        localDateTime(startup?.channelFirstValidAt.probe3 ?? null),
+        localDateTime(startup?.channelSyncAt ?? null),
+        localDateTime(startup?.testReadyAt ?? null),
+        String(startup?.modeSwitchAttempts ?? 0),
+        startup?.failureReason ?? '-',
       ];
     });
 
@@ -288,13 +512,36 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
     const lines = [
       '='.repeat(96),
-      `完成时间：${localDateTime(test.completedAt)}`,
+      `完成时间：${localDateTime(test.completedAt)}（${SHANGHAI_TIMEZONE_LABEL}）`,
       summary,
       '',
+      '产品预检',
+      ...(precheckRows.length
+        ? table(['设备', '地址', '实际版本', '期望版本', '实际探头数', '期望探头数', '报警', '故障', '结果', '说明'], precheckRows)
+        : ['未记录产品预检结果']),
+      '',
       '设备结果明细',
+      '说明：正式噪声判定使用有效探头 RAW 最近10秒滚动窗口波动值=(max-min)/2 的全过程最大值与 RAW 绝对值；窗口按样本时间戳滚动。',
+      '说明：归一化 RMS、全阶段 RAW 波动等仅作为分析辅助参数或追溯证据，不参与正式波动判定。',
+      '说明：测试链路/读取/命令类持续异常标记为“需复测”，不计入产品 NG；仍阻止本轮放行。',
+      '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为 RAW滚动10秒波动值下限/上限；A=200、B=220 的正式阈值由质量配置统一派生。',
       ...table(
-        ['设备', '地址', '结果', '噪声RMS', '噪声峰峰值', '绝对值', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
+        ['设备', '地址', '结果', '噪声波动值(RAW 10秒滚动最大)', '噪声绝对值(RAW)', 'RMS(归一化辅助)', '最大波动(归一化辅助)', '最大绝对值(RAW辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
         deviceRows,
+      ),
+      '',
+      '噪声采集诊断',
+      `窗口开始：${localDateTime(noiseWindowStart)} | 窗口结束：${localDateTime(noiseWindowEnd)} | 有效采集时长：${noiseWindowDurationMs === null ? '-' : `${(noiseWindowDurationMs / 1000).toFixed(1)}秒`} | 最低采样数：${test.thresholds.minNoiseSamples}`,
+      `判定通道：${expectedChannels.map(channelLabel).join('/')} | RAW滚动10秒波动下限：${valueText(test.thresholds.minNoiseRms)} | A类RAW滚动10秒波动上限：${valueText(quality.a.maxNoiseRms)} | B类RAW滚动10秒波动上限：${valueText(quality.b.maxNoiseRms)} | RAW绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
+      ...table(noiseHeaders, noiseRows),
+      '',
+      '噪声滚动窗口诊断',
+      ...table(['设备', '通道', '当前10秒RAW波动', '全过程最大10秒RAW波动', '全阶段RAW波动', 'RAW绝对峰值'], noiseRollingRows),
+      '',
+      '探测器启动诊断',
+      ...table(
+        ['设备', '状态', '上电', '通信回包', '模式切换成功', '首帧', '首个有效样本', 'P1 首值', 'P2 首值', 'P3 首值', '通道同步', '测试就绪', '模式尝试次数', '失败原因'],
+        startupRows,
       ),
       '',
       '工序检测明细',

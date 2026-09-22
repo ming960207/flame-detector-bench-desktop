@@ -1,0 +1,430 @@
+{
+  "schemaVersion": 1,
+  "batchId": "field-waveform-1788752375536-1",
+  "productModel": "GHT-1050-02",
+  "productionDate": 1788752375536,
+  "inspector": "",
+  "standard": "GB15631－2008",
+  "formNumber": "WUTOS/IMS-JL836",
+  "formVersion": "A/0",
+  "quantity": 6,
+  "products": [
+    {
+      "slot": 1,
+      "productCode": "410205901010100001",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          32767,
+          257
+        ],
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "AMPLITUDE_OR_NOISE_TEST_FAILED"
+      },
+      "softwareVersion": {
+        "value": "90.22.09.15",
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_NOT_CONFIGURED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": 2,
+          "sensitivityLevel": 2
+        },
+        "status": "合格",
+        "source": "AUTO"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    },
+    {
+      "slot": 2,
+      "productCode": "410205901010100002",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          497,
+          465
+        ],
+        "status": "合格",
+        "source": "AUTO"
+      },
+      "softwareVersion": {
+        "value": "90.22.09.16",
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_NOT_CONFIGURED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": 3,
+          "sensitivityLevel": 2
+        },
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "PRODUCT_INFO_READ_OR_MATCH_FAILED"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    },
+    {
+      "slot": 3,
+      "productCode": "410205901010100003",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          32767,
+          289
+        ],
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "AMPLITUDE_OR_NOISE_TEST_FAILED"
+      },
+      "softwareVersion": {
+        "value": "90.22.09.15",
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_NOT_CONFIGURED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": 2,
+          "sensitivityLevel": 2
+        },
+        "status": "合格",
+        "source": "AUTO"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    },
+    {
+      "slot": 4,
+      "productCode": "410205901010100004",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          0,
+          0
+        ],
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "AMPLITUDE_OR_NOISE_TEST_FAILED"
+      },
+      "softwareVersion": {
+        "value": null,
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_READ_FAILED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": null,
+          "sensitivityLevel": 0
+        },
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "PRODUCT_INFO_READ_OR_MATCH_FAILED"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    },
+    {
+      "slot": 5,
+      "productCode": "410205901010100005",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          32767,
+          369
+        ],
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "AMPLITUDE_OR_NOISE_TEST_FAILED"
+      },
+      "softwareVersion": {
+        "value": "90.22.09.15",
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_NOT_CONFIGURED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": 2,
+          "sensitivityLevel": 2
+        },
+        "status": "合格",
+        "source": "AUTO"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    },
+    {
+      "slot": 6,
+      "productCode": "410205901010100006",
+      "productCodeStatus": "GENERATED",
+      "workCurrent": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_WORK_CURRENT"
+      },
+      "ledDisplay": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LED_DISPLAY"
+      },
+      "powerFluctuation": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_POWER_FLUCTUATION"
+      },
+      "highTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_HIGH_TEMPERATURE"
+      },
+      "lowTemp": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "BENCH_DOES_NOT_MEASURE_LOW_TEMPERATURE"
+      },
+      "fireAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "faultAction": {
+        "status": "合格",
+        "source": "DEFAULT_PASS",
+        "reason": "RELAY_TEST_DISABLED"
+      },
+      "amplitude": {
+        "values": [
+          32767,
+          513
+        ],
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "AMPLITUDE_OR_NOISE_TEST_FAILED"
+      },
+      "softwareVersion": {
+        "value": "90.22.09.15",
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "SOFTWARE_VERSION_NOT_CONFIGURED"
+      },
+      "productInfo": {
+        "value": {
+          "probeCount": 2,
+          "sensitivityLevel": 2
+        },
+        "status": "合格",
+        "source": "AUTO"
+      },
+      "interferenceResistance": {
+        "status": "不合格",
+        "source": "AUTO",
+        "reason": "INTERFERENCE_TEST_FAILED"
+      },
+      "verdict": "不合格"
+    }
+  ],
+  "conclusion": "不合格",
+  "generatedAt": 1788752519094
+}
