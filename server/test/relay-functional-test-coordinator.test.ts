@@ -286,7 +286,7 @@ test('emergency cleanup failure is explicit and forces the relay test to fail', 
   assert.ok(report.units[0]?.fault.reasons.includes('EMERGENCY_RESET_COMMAND_FAILED'));
 });
 
-test('transient relay baseline read failures are retried instead of forcing a retest', async () => {
+test('DIAGNOSTIC retries transient internal baseline reads instead of forcing a retest', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   let readLatchedCalls = 0;
@@ -310,7 +310,7 @@ test('transient relay baseline read failures are retried instead of forcing a re
   };
   const config = normalizeRelayFunctionalTestConfig({
     enabled: true,
-    mode: 'FAST_BATCH',
+    mode: 'DIAGNOSTIC',
     stableSamples: 1,
     sampleIntervalMs: 20,
     feedbackTimeoutMs: 300,
@@ -366,4 +366,133 @@ test('transient relay DI baseline read failures are retried instead of forcing a
   assert.ok(readInputsCalls >= 3);
   assert.equal(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:')), false);
   assert.equal(report.units[0]?.fault.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:')), false);
+});
+
+function fixture(options: { slowDiagnostic?: boolean; droppedCommands?: boolean; transientFeedback?: boolean; stuck?: boolean; slowFeedback?: boolean; missingFeedback?: boolean; bouncing?: boolean; resetFeedbackFailure?: boolean; slowRescueCallback?: boolean } = {}) {
+  const inputs: Record<string, boolean> = {};
+  const commands = new Map<string, number>();
+  const elapsed = new Map<string, number>();
+  let phase: RelayFunctionalTestPhase = 'BASELINE';
+  let phaseStarted = Date.now();
+  let diagnosticReads = 0;
+  let feedbackReads = 0;
+  for (let index = 1; index <= 6; index++) {
+    inputs[`X${2 * index - 1}`] = false;
+    inputs[`X${2 * index}`] = true;
+  }
+  const config = normalizeRelayFunctionalTestConfig({ feedbackTimeoutMs: 400, resetTimeoutMs: 400, stableSamples: 3, sampleIntervalMs: 50 });
+  const coordinator = new RelayFunctionalTestCoordinator({
+    enabledDetectorIndexes: () => [1, 2, 3, 4, 5, 6],
+    async simulate(index, state) {
+      const key = `${index}:${state.fire ? 'alarm' : 'fault'}`;
+      const count = (commands.get(key) ?? 0) + 1;
+      commands.set(key, count);
+      if (index === 2 && (options.stuck || (options.droppedCommands && count <= 3))) return;
+      inputs[`X${2 * index - 1}`] = state.fire;
+      inputs[`X${2 * index}`] = !state.fault;
+      if (options.slowRescueCallback && index === 2 && count === 4) await new Promise((resolve) => setTimeout(resolve, 700));
+    },
+    async reset(index) {
+      inputs[`X${2 * index - 1}`] = false;
+      inputs[`X${2 * index}`] = true;
+    },
+    async readLatched(index) {
+      diagnosticReads++;
+      if (options.slowDiagnostic && index === 2 && phase === 'ALARM_VERIFY') await new Promise((resolve) => setTimeout(resolve, 700));
+      return { fire: inputs[`X${2 * index - 1}`]!, fault: !inputs[`X${2 * index}`] };
+    },
+  }, {
+    async readInputs() {
+      feedbackReads++;
+      if (phase === 'ALARM_VERIFY' && options.slowFeedback) await new Promise((resolve) => setTimeout(resolve, 700));
+      if ((options.transientFeedback && phase === 'ALARM_VERIFY' && Date.now() - phaseStarted < 170)
+        || (options.resetFeedbackFailure && phase === 'ALARM_RESET_VERIFY' && Date.now() - phaseStarted < 170)) {
+        throw Object.assign(new Error('temporary disconnect'), { code: 'DIO_CONNECTION_FAILED' });
+      }
+      if (options.missingFeedback && phase === 'ALARM_VERIFY') return {};
+      if (options.bouncing && phase === 'ALARM_VERIFY') return { ...inputs, X3: feedbackReads % 2 === 0 };
+      return { ...inputs };
+    },
+  }, config, (event) => {
+    elapsed.set(phase, Date.now() - phaseStarted);
+    phase = event.phase;
+    phaseStarted = Date.now();
+  });
+  return { coordinator, commands, elapsed, diagnosticReads: () => diagnosticReads };
+}
+
+test('one slow internal diagnostic cannot invalidate six healthy relays or extend the production window', async () => {
+  const { coordinator, elapsed, diagnosticReads } = fixture({ slowDiagnostic: true });
+  const report = await coordinator.run('six-relay-slow-diagnostic');
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  assert.equal(diagnosticReads(), 0, 'production must not enqueue slow internal diagnostic reads');
+});
+
+test('only unconfirmed relays receive one rescue command within the original window', async () => {
+  const { coordinator, commands, elapsed } = fixture({ droppedCommands: true });
+  const report = await coordinator.run('dropped-broadcasts');
+  assert.equal(report.verdict, 'PASS');
+  assert.equal(commands.get('2:alarm'), 4);
+  assert.equal(commands.get('2:fault'), 4);
+  assert.equal(commands.get('1:alarm'), 3);
+  assert.equal(commands.get('1:fault'), 3);
+  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
+});
+
+test('feedback can recover after a failed read burst without retaining a false relay failure', async () => {
+  const { coordinator } = fixture({ transientFeedback: true });
+  const report = await coordinator.run('feedback-recovery');
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(report.units.every((unit) => unit.alarm.reasons.length === 0));
+});
+
+test('a real stuck relay still fails after the bounded rescue command', async () => {
+  const { coordinator, elapsed } = fixture({ stuck: true });
+  const report = await coordinator.run('stuck-contact');
+  assert.equal(report.verdict, 'FAIL');
+  assert.equal(report.units.filter((unit) => unit.verdict === 'FAIL').length, 1);
+  assert.ok(report.units[1]!.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
+  assert.ok(report.units[1]!.fault.reasons.includes('FAULT_RELAY_NOT_ACTUATED'));
+  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+});
+
+test('a slow DIO read ends at the existing deadline and remains a communication failure', async () => {
+  const { coordinator, elapsed } = fixture({ slowFeedback: true });
+  const report = await coordinator.run('slow-dio');
+  assert.equal(report.verdict, 'FAIL');
+  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  assert.ok(report.units.every((unit) => unit.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))));
+  assert.ok(report.units.every((unit) => !unit.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED')));
+});
+
+test('an incomplete DIO snapshot cannot pass or masquerade as six defective relays', async () => {
+  const { coordinator } = fixture({ missingFeedback: true });
+  const report = await coordinator.run('missing-dio-channels');
+  assert.equal(report.verdict, 'FAIL');
+  assert.ok(report.units.every((unit) => unit.alarm.reasons.includes('RELAY_FEEDBACK_READ_FAILED:DIO_RESPONSE_INVALID')));
+});
+
+test('rescue does not relax the consecutive stable sample requirement', async () => {
+  const { coordinator } = fixture({ bouncing: true });
+  const report = await coordinator.run('bouncing-contact');
+  assert.equal(report.units[1]!.alarm.verdict, 'FAIL');
+  assert.equal(report.units[1]!.alarm.physicalStateReached, false);
+  assert.equal(report.units[1]!.fault.verdict, 'PASS');
+});
+
+test('reset feedback recovers within its original window without a sticky error', async () => {
+  const { coordinator, elapsed } = fixture({ resetFeedbackFailure: true });
+  const report = await coordinator.run('reset-feedback-recovery');
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(elapsed.get('ALARM_RESET_VERIFY')! < 450);
+});
+
+test('a slow rescue write callback leaves enough time for all stable DIO samples', async () => {
+  const { coordinator, elapsed } = fixture({ droppedCommands: true, slowRescueCallback: true });
+  const report = await coordinator.run('slow-rescue-callback');
+  assert.equal(report.verdict, 'PASS');
+  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
 });

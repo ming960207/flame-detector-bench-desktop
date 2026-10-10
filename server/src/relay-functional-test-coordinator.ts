@@ -148,6 +148,9 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async diagnosticInternalState(index: number): Promise<{ fire: boolean; fault: boolean } | null> {
+    // Production sampling must not enqueue diagnostic reads on detector command
+    // links: one slow link would consume the shared DIO confirmation window.
+    if (this.config.mode === 'FAST_BATCH') return null;
     try {
       return await this.detectorReadWithRetry(() => this.detectors.readLatched(index));
     } catch {
@@ -155,7 +158,43 @@ export class RelayFunctionalTestCoordinator {
     }
   }
 
-  private async physicalState(index: number): Promise<{
+  private async withinDeadline<T>(operation: () => Promise<T>, deadline: number): Promise<T> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw Object.assign(new Error('relay sampling deadline exceeded'), { code: 'DIO_READ_TIMEOUT' });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(Object.assign(new Error('relay sampling deadline exceeded'), { code: 'DIO_READ_TIMEOUT' })), remaining);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async readFeedback(deadline: number): Promise<Record<string, boolean> | undefined> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= RELAY_READ_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.withinDeadline(() => Promise.resolve(this.feedback.readInputs()), deadline);
+      } catch (error) {
+        lastError = error;
+        const remaining = deadline - Date.now();
+        if (attempt === RELAY_READ_MAX_ATTEMPTS || remaining <= 0) break;
+        await sleep(Math.min(RELAY_READ_RETRY_DELAY_MS, remaining));
+      }
+    }
+    throw lastError;
+  }
+
+  private sharedSample(deadline: number): () => Promise<Record<string, boolean> | undefined> {
+    let sample: Promise<Record<string, boolean> | undefined> | undefined;
+    return () => sample ??= this.readFeedback(deadline);
+  }
+
+  private async physicalState(index: number, sample: () => Promise<Record<string, boolean> | undefined>): Promise<{
     alarm: boolean | null;
     fault: boolean | null;
     rawAlarm: boolean | null;
@@ -165,18 +204,19 @@ export class RelayFunctionalTestCoordinator {
     const mapping = relayFeedbackMappingFor(this.config, index);
     let inputs: Record<string, boolean> | undefined;
     try {
-      inputs = await this.detectorReadWithRetry(() => Promise.resolve(this.feedback.readInputs()));
+      inputs = await sample();
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
         ? error.code
         : error instanceof Error ? error.message : String(error);
       return { alarm: null, fault: null, rawAlarm: null, rawFault: null, error: code || 'DIO_READ_FAILED' };
     }
-    if (!mapping || !inputs) return { alarm: null, fault: null, rawAlarm: null, rawFault: null };
+    if (!mapping || !inputs) return { alarm: null, fault: null, rawAlarm: null, rawFault: null, error: 'DIO_RESPONSE_INVALID' };
     const alarmLevel = inputs[mapping.alarmInputAddress];
     const faultLevel = inputs[mapping.faultInputAddress];
     const rawAlarm = typeof alarmLevel === 'boolean' ? alarmLevel : null;
     const rawFault = typeof faultLevel === 'boolean' ? faultLevel : null;
+    if (rawAlarm === null || rawFault === null) return { alarm: null, fault: null, rawAlarm, rawFault, error: 'DIO_RESPONSE_INVALID' };
     return {
       alarm: relayInputIsActive(alarmLevel, mapping.alarmNormalLevel),
       fault: relayInputIsActive(faultLevel, mapping.faultNormalLevel),
@@ -186,10 +226,11 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
+    const sample = this.sharedSample(Date.now() + this.config.dio.requestTimeoutMs);
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const [internal, physical] = await Promise.all([
         this.diagnosticInternalState(index),
-        this.physicalState(index),
+        this.physicalState(index, sample),
       ]);
       state.baselineLevels = {
         alarm: physical.rawAlarm,
@@ -236,8 +277,14 @@ export class RelayFunctionalTestCoordinator {
   ): Promise<void> {
     const deadline = Date.now() + this.config.feedbackTimeoutMs;
     const stable = new Map<number, number>();
+    const feedbackErrors = new Map<number, string>();
+    const retried = new Set<number>();
+    const retryAt = deadline - this.config.feedbackTimeoutMs / 2;
+    const confirmationReserveMs = this.config.stableSamples * this.config.sampleIntervalMs;
 
-    while (Date.now() <= deadline) {
+    while (Date.now() < deadline) {
+      // All six contacts use one fresh DIO snapshot per round, including retries.
+      const sample = this.sharedSample(deadline);
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         const action = state.result[kind];
         if (!action.commandAccepted) return;
@@ -245,13 +292,14 @@ export class RelayFunctionalTestCoordinator {
 
         const [internal, physical] = await Promise.all([
           this.diagnosticInternalState(index),
-          this.physicalState(index),
+          this.physicalState(index, sample),
         ]);
         if (physical.error) {
-          uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          feedbackErrors.set(index, physical.error);
           stable.set(index, 0);
           return;
         }
+        feedbackErrors.delete(index);
 
         const ownPhysical = kind === 'alarm' ? physical.alarm : physical.fault;
         const oppositePhysical = kind === 'alarm' ? physical.fault : physical.alarm;
@@ -296,12 +344,39 @@ export class RelayFunctionalTestCoordinator {
           || (action.physicalStateReached && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
-      await sleep(this.config.sampleIntervalMs);
+      let rescueAttempted = false;
+      if (Date.now() >= retryAt && Date.now() < deadline - confirmationReserveMs) {
+        await Promise.all([...work.entries()].map(async ([index, state]) => {
+          const action = state.result[kind];
+          if (!action.commandAccepted || action.physicalStateReached || (stable.get(index) ?? 0) > 0
+            || retried.has(index) || feedbackErrors.has(index)) return;
+          retried.add(index);
+          rescueAttempted = true;
+          // One idempotent rescue frame only; keep the original baseline, stable
+          // sample requirement and deadline. Never repeat the whole action cycle.
+          try {
+            await this.withinDeadline(() => this.detectors.simulate(index, kind === 'alarm'
+              ? { fire: true, fault: false }
+              : { fire: false, fault: true }), deadline - confirmationReserveMs);
+          } catch {
+            // The original command was accepted. Physical evidence remains the
+            // authority, and lack of actuation still fails at the same deadline.
+          }
+        }));
+      }
+      // Start confirmation immediately after a rescue, including a slow write
+      // callback, so the reserved time contains all required spaced samples.
+      if (rescueAttempted) continue;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(this.config.sampleIntervalMs, remaining));
     }
 
     for (const state of work.values()) {
       const action = state.result[kind];
       if (!action.commandAccepted) continue;
+      const feedbackError = feedbackErrors.get(state.result.detectorIndex);
+      if (!action.physicalStateReached && feedbackError) uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${feedbackError}`);
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalStateReached && !feedbackReadFailed) {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_NOT_ACTUATED' : 'FAULT_RELAY_NOT_ACTUATED');
@@ -321,8 +396,10 @@ export class RelayFunctionalTestCoordinator {
   private async waitForReset(work: Map<number, UnitWorkState>, kind: 'alarm' | 'fault'): Promise<void> {
     const deadline = Date.now() + this.config.resetTimeoutMs;
     const stable = new Map<number, number>();
+    const feedbackErrors = new Map<number, string>();
 
-    while (Date.now() <= deadline) {
+    while (Date.now() < deadline) {
+      const sample = this.sharedSample(deadline);
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         const action = state.result[kind];
         if (!action.resetAccepted) return;
@@ -330,13 +407,14 @@ export class RelayFunctionalTestCoordinator {
 
         const [internal, physical] = await Promise.all([
           this.diagnosticInternalState(index),
-          this.physicalState(index),
+          this.physicalState(index, sample),
         ]);
         if (physical.error) {
-          uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
+          feedbackErrors.set(index, physical.error);
           stable.set(index, 0);
           return;
         }
+        feedbackErrors.delete(index);
 
         const ownLevel = kind === 'alarm' ? physical.rawAlarm : physical.rawFault;
         const ownBaseline = kind === 'alarm' ? state.baselineLevels.alarm : state.baselineLevels.fault;
@@ -361,12 +439,16 @@ export class RelayFunctionalTestCoordinator {
           || (action.physicalRecovered && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
-      await sleep(this.config.sampleIntervalMs);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(this.config.sampleIntervalMs, remaining));
     }
 
     for (const state of work.values()) {
       const action = state.result[kind];
       if (!action.resetAccepted) continue;
+      const feedbackError = feedbackErrors.get(state.result.detectorIndex);
+      if (!action.physicalRecovered && feedbackError) uniquePush(action.reasons, `RELAY_FEEDBACK_READ_FAILED:${feedbackError}`);
       const feedbackReadFailed = action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'));
       if (!action.physicalRecovered && !feedbackReadFailed) {
         uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_RELAY_STUCK_AFTER_RESET' : 'FAULT_RELAY_STUCK_AFTER_RESET');
@@ -418,18 +500,20 @@ export class RelayFunctionalTestCoordinator {
     const feedbackErrors = new Map<number, string>();
     const deadline = Date.now() + this.config.resetTimeoutMs;
 
-    while (Date.now() <= deadline) {
+    while (Date.now() < deadline) {
+      const sample = this.sharedSample(deadline);
       await Promise.all([...work.entries()].map(async ([index, state]) => {
         if (!resetAccepted.has(index)) return;
         if (alarmRecovered.has(index) && faultRecovered.has(index)) return;
 
-        const physical = await this.physicalState(index);
+        const physical = await this.physicalState(index, sample);
         if (physical.error) {
           feedbackErrors.set(index, physical.error);
           alarmStable.set(index, 0);
           faultStable.set(index, 0);
           return;
         }
+        feedbackErrors.delete(index);
 
         if (!alarmRecovered.has(index)) {
           const recovered = physical.rawAlarm !== null && state.baselineLevels.alarm !== null
@@ -451,7 +535,9 @@ export class RelayFunctionalTestCoordinator {
 
       const done = [...resetAccepted].every((index) => alarmRecovered.has(index) && faultRecovered.has(index));
       if (done) break;
-      await sleep(this.config.sampleIntervalMs);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(this.config.sampleIntervalMs, remaining));
     }
 
     for (const [index, state] of work.entries()) {
