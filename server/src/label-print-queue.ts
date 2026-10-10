@@ -274,6 +274,7 @@ export class LabelPrintQueueStore {
           .sort((a, b) => a.createdAt - b.createdAt);
       }
       await this.save();
+      console.info('[PrintDiag] enqueue-batch', JSON.stringify({ batchId: record.batchId, productCount: record.products.length, created: created.length, skippedDuplicates: record.products.length - created.length, jobs: created.map(job => ({ id: job.id, slot: job.slot, status: job.status, reason: job.lastError })) }));
       return created;
     });
   }
