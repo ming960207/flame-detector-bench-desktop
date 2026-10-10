@@ -588,6 +588,7 @@ class LabelPrinterRuntime {
     if (!backendHttpUrl) return;
     this.backendHttpUrl = backendHttpUrl.replace(/\/$/, '');
     if (this.timer !== null) return;
+    console.info('[PrintDiag] runtime-start', JSON.stringify({ backend: this.backendHttpUrl, autoPrint: this.state.config.autoPrint, autoPrintSince: this.state.config.autoPrintSince, connectionType: this.state.config.connectionType }));
     void this.initializePrinter();
     void this.tick();
     this.timer = window.setInterval(() => void this.tick(), 1200);
@@ -728,6 +729,7 @@ class LabelPrinterRuntime {
     config.wifiPrinterName = String(config.wifiPrinterName || '').trim();
     config.wifiPort = normalizePort(config.wifiPort);
     saveConfig(config);
+    console.info('[PrintDiag] config-changed', JSON.stringify({ autoPrint: config.autoPrint, autoPrintSince: config.autoPrintSince, connectionType: config.connectionType }));
     this.emit({ config });
   }
 
@@ -736,7 +738,9 @@ class LabelPrinterRuntime {
     const response = await fetch(`${this.backendHttpUrl}/api/label-print/jobs?limit=60`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`标签队列读取失败 HTTP ${response.status}`);
     const payload = await response.json() as { jobs: ProductLabelPrintJob[]; summary: LabelPrintQueueSummary };
-    this.emit({ jobs: payload.jobs || [], summary: payload.summary || this.state.summary });
+    const nextSummary = payload.summary || this.state.summary;
+    if (JSON.stringify(nextSummary) !== JSON.stringify(this.state.summary)) console.info('[PrintDiag] queue-summary', JSON.stringify(nextSummary));
+    this.emit({ jobs: payload.jobs || [], summary: nextSummary });
   }
 
   async retryJob(id: string): Promise<void> {
@@ -831,15 +835,18 @@ class LabelPrinterRuntime {
       }) as { jobs?: ProductLabelPrintJob[] };
       claimed = Array.isArray(payload.jobs) ? payload.jobs : [];
       if (claimed.length === 0) return;
+      console.info('[PrintDiag] claimed', JSON.stringify({ workerId: this.workerId, ids: claimed.map(job => job.id), slots: claimed.map(job => job.slot) }));
       this.emit({
         health: 'printing',
         detail: `正在打印 ${claimed.map((job) => `D${job.slot}`).join(' + ')} · 双列标签行`,
         currentJobId: claimed[0].id,
       });
       await this.drawAndPrint(claimed);
+      console.info('[PrintDiag] physical-print-ack', JSON.stringify({ ids: claimed.map(job => job.id) }));
       for (const job of claimed) {
         await this.post(`/api/label-print/jobs/${encodeURIComponent(job.id)}/printed`, { workerId: this.workerId });
       }
+      console.info('[PrintDiag] marked-printed', JSON.stringify({ ids: claimed.map(job => job.id) }));
       this.emit({ health: 'ready', detail: this.readyDetail(), currentJobId: null, lastPrintedJobId: claimed[claimed.length - 1].id });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -857,7 +864,10 @@ class LabelPrinterRuntime {
   private async tick(): Promise<void> {
     if (!this.backendHttpUrl) return;
     try { await this.refreshQueue(); } catch { return; }
-    if (!this.state.config.autoPrint) return;
+    if (!this.state.config.autoPrint) {
+      if (this.state.summary.waiting > 0) console.warn('[PrintDiag] pending-but-auto-print-disabled', JSON.stringify({ waiting: this.state.summary.waiting }));
+      return;
+    }
     if (this.state.health !== 'ready') {
       if (!this.busy) await this.initializePrinter();
       return;
