@@ -542,6 +542,7 @@ class LabelPrinterRuntime {
   private subscribers = new Set<() => void>();
   private busy = false;
   private lastRecoveryAt = 0;
+  private lastDisabledWarningAt = 0;
   private workerId = `label-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   private state: LabelPrinterRuntimeState = {
     health: 'idle', detail: '等待初始化标签打印服务', printers: [], config: loadConfig(), jobs: [],
@@ -865,7 +866,10 @@ class LabelPrinterRuntime {
     if (!this.backendHttpUrl) return;
     try { await this.refreshQueue(); } catch { return; }
     if (!this.state.config.autoPrint) {
-      if (this.state.summary.waiting > 0) console.warn('[PrintDiag] pending-but-auto-print-disabled', JSON.stringify({ waiting: this.state.summary.waiting }));
+      if (this.state.summary.waiting > 0 && Date.now() - this.lastDisabledWarningAt > 60_000) {
+        this.lastDisabledWarningAt = Date.now();
+        console.warn('[PrintDiag] pending-but-auto-print-disabled', JSON.stringify({ waiting: this.state.summary.waiting }));
+      }
       return;
     }
     if (this.state.health !== 'ready') {
