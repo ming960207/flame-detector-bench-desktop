@@ -21,33 +21,13 @@ import {
   sourceRoiToViewportRoi,
   viewportRoiToSourceRoi,
   type ContainMediaGeometry,
-  type NormalizedCameraRoi,
 } from './indicator-camera-geometry';
 import { displayResultsForCapture } from './indicator-camera-display-model';
+import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
+export { analyzeIndicatorFrame } from './indicator-camera-analysis';
+import type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, FrameSample } from './indicator-camera-analysis';
+export type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, IndicatorLightResult } from './indicator-camera-analysis';
 import './indicator-camera.css';
-
-export type IndicatorColor = 'green' | 'red' | 'yellow';
-export type IndicatorPhase = RelayFunctionalTestProgress['phase'] | 'MANUAL';
-export type IndicatorState = 'ON' | 'OFF' | 'UNKNOWN';
-export type IndicatorVerdict = 'PASS' | 'FAIL' | 'WAITING';
-
-export type IndicatorSlotRoi = NormalizedCameraRoi;
-
-export interface IndicatorLightResult {
-  color: IndicatorColor;
-  state: IndicatorState;
-  confidence: number;
-  matchRatio: number;
-  bounds: IndicatorSlotRoi | null;
-}
-
-export interface IndicatorSlotResult {
-  slot: number;
-  roi: IndicatorSlotRoi;
-  verdict: IndicatorVerdict;
-  lights: Record<IndicatorColor, IndicatorLightResult>;
-  frames: number;
-}
 
 export interface IndicatorCapture {
   id: string;
@@ -60,12 +40,6 @@ export interface IndicatorCapture {
   sampleCount: number;
   frameWidth: number;
   frameHeight: number;
-}
-
-interface FrameSample {
-  capturedAt: number;
-  phase: IndicatorPhase;
-  slots: IndicatorSlotResult[];
 }
 
 interface CameraDeviceOption {
@@ -81,7 +55,6 @@ const SLOT_ROI_SIZE = 0.1;
 const SOURCE_ROI_HEIGHT = 0.18;
 const SAMPLE_INTERVAL_MS = 240;
 const PHOTO_INTERVAL_MS = 720;
-const REQUIRED_STABLE_FRAMES = 2;
 const MAX_PHASE_SAMPLES = 12;
 const MAX_RUN_SAMPLES = 32;
 const MAX_CAPTURE_HISTORY = 8;
@@ -183,129 +156,6 @@ function roiDisplayStyle(roi: IndicatorSlotRoi, geometry: ContainMediaGeometry |
     width: `${displayRoi.width * 100}%`,
     height: `${displayRoi.height * 100}%`,
   };
-}
-
-function colorMatches(red: number, green: number, blue: number, color: IndicatorColor): boolean {
-  const max = Math.max(red, green, blue) / 255;
-  const min = Math.min(red, green, blue) / 255;
-  const chroma = max - min;
-  if (max < 0.32 || chroma < 0.12) return false;
-
-  let hue = 0;
-  if (chroma > 0) {
-    const r = red / 255;
-    const g = green / 255;
-    const b = blue / 255;
-    if (max === r) hue = ((g - b) / chroma) % 6;
-    else if (max === g) hue = (b - r) / chroma + 2;
-    else hue = (r - g) / chroma + 4;
-    hue *= 60;
-    if (hue < 0) hue += 360;
-  }
-
-  if (color === 'green') return hue >= 72 && hue <= 175 && green >= red * 1.12 && green >= blue * 0.92;
-  if (color === 'red') return (hue <= 28 || hue >= 335) && red >= green * 1.18 && red >= blue * 1.08;
-  return hue >= 30 && hue <= 78 && red >= blue * 1.16 && green >= blue * 1.1;
-}
-
-function analyzeColor(
-  image: ImageData,
-  roi: IndicatorSlotRoi,
-  color: IndicatorColor,
-): IndicatorLightResult {
-  const xStart = Math.floor(roi.x * image.width);
-  const yStart = Math.floor(roi.y * image.height);
-  const width = Math.max(1, Math.floor(roi.width * image.width));
-  const height = Math.max(1, Math.floor(roi.height * image.height));
-  const xEnd = Math.min(image.width, xStart + width);
-  const yEnd = Math.min(image.height, yStart + height);
-  const stride = Math.max(1, Math.floor(Math.min(width, height) / 34));
-  let pixels = 0;
-  let matches = 0;
-  let minX = xEnd;
-  let minY = yEnd;
-  let maxX = xStart;
-  let maxY = yStart;
-
-  for (let y = yStart; y < yEnd; y += stride) {
-    for (let x = xStart; x < xEnd; x += stride) {
-      const offset = (y * image.width + x) * 4;
-      const red = image.data[offset] ?? 0;
-      const green = image.data[offset + 1] ?? 0;
-      const blue = image.data[offset + 2] ?? 0;
-      pixels += 1;
-      if (!colorMatches(red, green, blue, color)) continue;
-      matches += 1;
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  const matchRatio = pixels > 0 ? matches / pixels : 0;
-  const threshold = Math.max(2, pixels * 0.009);
-  const state: IndicatorState = matches >= threshold ? 'ON' : 'OFF';
-  const confidence = clamp(matchRatio / 0.08, 0, 1);
-  const bounds = state === 'ON' && maxX >= minX && maxY >= minY
-    ? {
-      slot: roi.slot,
-      x: minX / image.width,
-      y: minY / image.height,
-      width: Math.max(0.008, (maxX - minX) / image.width),
-      height: Math.max(0.012, (maxY - minY) / image.height),
-    }
-    : null;
-
-  return { color, state, confidence, matchRatio, bounds };
-}
-
-export function analyzeIndicatorFrame(image: ImageData, rois: IndicatorSlotRoi[], phase: IndicatorPhase): IndicatorSlotResult[] {
-  return rois.map((roi) => {
-    const lights = Object.fromEntries(COLORS.map(({ key }) => [key, analyzeColor(image, roi, key)])) as Record<IndicatorColor, IndicatorLightResult>;
-    const expected = phase === 'ALARM_VERIFY' ? 'red' : phase === 'FAULT_VERIFY' ? 'yellow' : null;
-    return {
-      slot: roi.slot,
-      roi,
-      verdict: expected && lights[expected].state === 'ON' ? 'PASS' : 'WAITING',
-      lights,
-      frames: 1,
-    } satisfies IndicatorSlotResult;
-  });
-}
-
-function aggregateLight(samples: FrameSample[], slot: number, color: IndicatorColor): IndicatorLightResult {
-  const matches = samples
-    .map((sample) => sample.slots.find((item) => item.slot === slot)?.lights[color])
-    .filter((item): item is IndicatorLightResult => Boolean(item));
-  const onSamples = matches.filter((item) => item.state === 'ON');
-  const strongest = matches.slice().sort((left, right) => right.confidence - left.confidence)[0];
-  const state: IndicatorState = onSamples.length >= REQUIRED_STABLE_FRAMES ? 'ON' : matches.length >= REQUIRED_STABLE_FRAMES ? 'OFF' : 'UNKNOWN';
-  return {
-    color,
-    state,
-    confidence: strongest?.confidence ?? 0,
-    matchRatio: strongest?.matchRatio ?? 0,
-    bounds: onSamples.find((item) => item.bounds)?.bounds ?? null,
-  };
-}
-
-function aggregateSamples(samples: FrameSample[], phase: IndicatorPhase, rois: IndicatorSlotRoi[]): IndicatorSlotResult[] {
-  const scoped = samples.filter((sample) => sample.phase === phase);
-  return rois.map((roi) => {
-    const lights = Object.fromEntries(COLORS.map(({ key }) => [key, aggregateLight(scoped, roi.slot, key)])) as Record<IndicatorColor, IndicatorLightResult>;
-    const expected = phase === 'ALARM_VERIFY' ? 'red' : phase === 'FAULT_VERIFY' ? 'yellow' : null;
-    const expectedState = expected ? lights[expected].state : 'UNKNOWN';
-    return {
-      slot: roi.slot,
-      roi,
-      verdict: expected
-        ? expectedState === 'ON' ? 'PASS' : scoped.length >= REQUIRED_STABLE_FRAMES ? 'FAIL' : 'WAITING'
-        : 'WAITING',
-      lights,
-      frames: scoped.length,
-    } satisfies IndicatorSlotResult;
-  });
 }
 
 function expectedLightForPhase(phase: IndicatorPhase): IndicatorColor | null {

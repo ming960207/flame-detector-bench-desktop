@@ -10,6 +10,7 @@
     "build:web": "vite build --mode desktop",
     "build:web:test": "vite build --mode test",
     "build:server": "npm run build --prefix server",
+    "test:indicator-camera": "node server/node_modules/tsx/dist/cli.mjs --test server/test/indicator-camera-analysis.test.ts server/test/detector-status-lights.test.ts server/test/indicator-label-regression.test.ts",
     "desktop": "electron .",
     "build:latest": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\update-latest-release.ps1",
     "build:single-exe": "npm run build:latest",
