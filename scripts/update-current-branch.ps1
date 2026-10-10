@@ -170,11 +170,21 @@ function Complete-RollbackState([string]$SoftwareCommit, [string]$RepositoryComm
 function Test-ReleaseAccess([int]$Attempts = 3) {
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         Write-Host "Checking $($releaseConfig.Label) repository access (attempt $attempt/$Attempts)..."
-        & git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" *> $null
-        if ($LASTEXITCODE -eq 0) {
+        # Windows PowerShell 5.1 turns redirected native stderr into a terminating
+        # error under Stop. Let Git finish so its exit code controls the retry.
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $gitOutput = @(& git -c credential.helper= -c http.version=HTTP/1.1 ls-remote --exit-code $publicRemote "refs/heads/$targetBranch" 2>&1)
+            $gitExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($gitExitCode -eq 0) {
             Write-Host "$($releaseConfig.Label) access: OK" -ForegroundColor Green
             return $true
         }
+        foreach ($line in $gitOutput) { Write-Host ([string]$line) -ForegroundColor Yellow }
         if ($attempt -lt $Attempts) {
             $delay = $attempt * 3
             Write-Host "WARN: $($releaseConfig.Label) access check failed. Retrying in $delay seconds..." -ForegroundColor Yellow
@@ -187,8 +197,15 @@ function Test-ReleaseAccess([int]$Attempts = 3) {
 function Fetch-TargetBranch([switch]$BestEffort) {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Write-Host "Fetching target branch from $($releaseConfig.Label) (attempt $attempt/3)..."
-        & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
-        if ($LASTEXITCODE -eq 0) {
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & git -c credential.helper= -c http.version=HTTP/1.1 fetch --no-tags $remoteName $fetchRefspec
+            $gitExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($gitExitCode -eq 0) {
             & git rev-parse --verify $remoteRef *> $null
             if ($LASTEXITCODE -eq 0) { return $true }
         }

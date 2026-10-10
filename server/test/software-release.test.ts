@@ -86,6 +86,52 @@ test('software release PowerShell scripts pass parser validation', async () => {
   }
 });
 
+test('updater retries native Git stderr failures under Windows PowerShell Stop policy', async () => {
+  const scriptPath = join(projectRoot, 'scripts', 'update-current-branch.ps1').replace(/'/g, "''");
+  const command = `
+$ErrorActionPreference = 'Stop'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('${scriptPath}', [ref]$null, [ref]$null)
+$functions = $ast.FindAll({ param($item) $item -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -in @('Test-ReleaseAccess', 'Fetch-TargetBranch') }, $false)
+foreach ($definition in $functions) { . ([scriptblock]::Create($definition.Extent.Text)) }
+$releaseConfig = [pscustomobject]@{ Label = 'GitHub' }
+$publicRemote = 'https://example.invalid/repo.git'
+$targetBranch = 'test'
+$remoteName = 'origin'
+$remoteRef = 'refs/remotes/origin/test'
+$fetchRefspec = '+refs/heads/test:refs/remotes/origin/test'
+function Start-Sleep { param($Seconds) }
+function git {
+    if ($args[0] -eq 'rev-parse') { $global:LASTEXITCODE = 0; return }
+    $script:calls++
+    if ($script:calls -le $script:failures) {
+        & node.exe -e "process.stderr.write('Recv failure: Connection was reset\\n');process.exit(128)"
+    } else { & node.exe -e "process.exit(0)" }
+    $global:LASTEXITCODE = $LASTEXITCODE
+}
+foreach ($operation in @('access', 'fetch', 'best-effort', 'exhausted-fetch', 'exhausted-access')) {
+    $script:calls = 0
+    $script:failures = if ($operation -in @('access', 'fetch')) { 2 } else { 3 }
+    $result = switch ($operation) {
+        'access' { Test-ReleaseAccess 3 }
+        'fetch' { Fetch-TargetBranch }
+        'best-effort' { Fetch-TargetBranch -BestEffort }
+        'exhausted-access' { Test-ReleaseAccess 3 }
+        'exhausted-fetch' {
+            try { Fetch-TargetBranch; throw 'Expected fetch failure' }
+            catch { if ($_.Exception.Message -ne 'git fetch failed after 3 attempts. Retry after checking network stability.') { throw }; $false }
+        }
+    }
+    if ($script:calls -ne 3) { throw "$operation stopped after $script:calls calls" }
+    $expected = $operation -in @('access', 'fetch')
+    if ($result -ne $expected) { throw "$operation returned an unexpected result" }
+    if ($ErrorActionPreference -ne 'Stop') { throw "$operation leaked its error policy" }
+}
+Write-Output 'retry-regression-ok'
+`;
+  const result = await execFile('powershell.exe', ['-NoProfile', '-Command', command]);
+  assert.match(String(result.stdout), /retry-regression-ok/);
+});
+
 test('launches software release scripts through an independent cmd process', () => {
   assert.deepEqual(buildSoftwareReleaseLaunch('D:\\repo\\scripts\\update-current-branch.ps1', ['-StartAfterUpdate']), {
     command: 'cmd.exe',
