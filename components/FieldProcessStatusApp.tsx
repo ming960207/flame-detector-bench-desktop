@@ -123,8 +123,29 @@ export function FieldProcessStatusApp() {
   const dashboardRenderSchedulerRef = useRef<LatestValueScheduler<QueuedDashboardRender> | null>(null);
   const dashboardRenderQueueRef = useRef<QueuedDashboardRender>({});
   const dashboardRenderSequenceRef = useRef(0);
+  const completedSummaryRef = useRef<FieldSummaryPayload | null>(null);
 
-  const applySummary = useCallback((summary: FieldSummaryPayload) => {
+  const applySummary = useCallback((incoming: FieldSummaryPayload) => {
+    // PLC and detector snapshots arrive on separate WebSocket topics. During
+    // completion they may briefly disagree; never replace a latched completed
+    // result with an incomplete snapshot of the SAME batch (visible flashing).
+    const previous = completedSummaryRef.current;
+    const previousBatch = previous?.waveformAnalysis?.batchId;
+    const incomingBatch = incoming.waveformAnalysis?.batchId;
+    const previousComplete = previous?.waveformAnalysis?.phase === 'COMPLETE';
+    const sameBatch = Boolean(previousBatch && previousBatch === incomingBatch);
+    const missingBatch = !incomingBatch;
+    const staleCompletionFrame = previousComplete && (sameBatch || missingBatch)
+      && (incoming.waveformAnalysis?.phase !== 'COMPLETE'
+        || incoming.finalVerdict?.verdict === 'PENDING');
+    const summary = staleCompletionFrame ? previous! : incoming;
+    if (incoming.waveformAnalysis?.phase === 'COMPLETE' && incomingBatch
+      && incoming.finalVerdict?.verdict !== 'PENDING') {
+      completedSummaryRef.current = incoming;
+    } else if (incomingBatch && incomingBatch !== previousBatch) {
+      // A new concrete batch is the only event allowed to release the latch.
+      completedSummaryRef.current = null;
+    }
     setStatus(summary.process ?? null);
     setWaveformAnalysis(summary.waveformAnalysis ?? null);
     setDetectorVerdict(summary.detectorVerdict ?? null);
