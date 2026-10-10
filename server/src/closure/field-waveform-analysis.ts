@@ -13,6 +13,8 @@ export type WaveformAnalysisLogger = (message: string) => void;
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
 const NOISE_ROLLING_WINDOW_MS = 10_000;
+const SIGNAL_RATIO_WINDOW_MS = 1_000;
+const SIGNAL_RATIO_SETTLE_MS = 200;
 
 export interface DetectionSNRRange {
   min: number;
@@ -273,6 +275,7 @@ interface UnitAccumulator {
   rollingRawSamples: Array<{ timestamp: number; sample: FlameSample }>;
   rawStageRanges: Record<ChannelKey, RawChannelRange>;
   interferenceSamples: Record<InterferenceStage, FlameSample[]>;
+  ratioFrames: Record<InterferenceStage, Array<{ timestamp: number; samples: FlameSample[] }>>;
   latest: LatestUnitState;
   stageRatios: Record<InterferenceStage, { snr21: number | null; snr23: number | null; snr31: number | null }>;
   lastEventKey: string;
@@ -406,6 +409,28 @@ function channelAmplitude(samples: FlameSample[], key: ChannelKey): number | nul
   return (Math.max(...values) - Math.min(...values)) / 2;
 }
 
+/** Same-time RAW channels with linear DC drift removed; no adaptive baseline history. */
+function stableSignalRatios(frames: UnitAccumulator['ratioFrames'][InterferenceStage]): UnitAccumulator['stageRatios'][InterferenceStage] {
+  const samples = frames.flatMap((frame) => frame.samples);
+  const amplitudes = Object.fromEntries(CHANNEL_KEYS.map((key) => {
+    const points = samples.map((sample, index) => ({ x: index, y: Number(sample[key]) }))
+      .filter((point) => Number.isFinite(point.y));
+    if (points.length < 3) return [key, null];
+    const xMean = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const yMean = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    const variance = points.reduce((sum, point) => sum + (point.x - xMean) ** 2, 0);
+    const slope = points.reduce((sum, point) => sum + (point.x - xMean) * (point.y - yMean), 0) / variance;
+    const residuals = points.map((point) => point.y - yMean - slope * (point.x - xMean));
+    return [key, (Math.max(...residuals) - Math.min(...residuals)) / 2];
+  })) as Record<ChannelKey, number | null>;
+  const ratio = (numerator: ChannelKey, denominator: ChannelKey): number | null => {
+    const a = amplitudes[numerator];
+    const b = amplitudes[denominator];
+    return a !== null && b !== null && b > 1e-6 ? a / b : null;
+  };
+  return { snr21: ratio('probe2', 'probe1'), snr23: ratio('probe2', 'probe3'), snr31: ratio('probe3', 'probe1') };
+}
+
 function emptyChannelNumberMap(): Record<ChannelKey, number | null> {
   return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, null])) as Record<ChannelKey, number | null>;
 }
@@ -495,6 +520,7 @@ function newAccumulator(index: number, address = index): UnitAccumulator {
     rollingRawSamples: [],
     rawStageRanges: emptyRawChannelRanges(),
     interferenceSamples: { heat: [], flash: [], emc: [] },
+    ratioFrames: { heat: [], flash: [], emc: [] },
     latest: blankLatest(address),
     stageRatios: {
       heat: { snr21: null, snr23: null, snr31: null },
@@ -571,11 +597,6 @@ function compactRawStageSummary(
     ];
     return `${key.replace('probe', 'P')}{${fields.join(',')}}`;
   }).join(';');
-}
-
-function finiteRatio(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function sampleFingerprint(samples: FlameSample[]): string {
@@ -698,7 +719,8 @@ function publicUnitResult(
     const samples = stageSamples[stage];
     const stageNumerator = channelAmplitude(samples, ratioConfig.numerator);
     const stageDenominator = channelAmplitude(samples, ratioConfig.denominator);
-    const enough = samples.length >= config.minInterferenceSamples;
+    const enough = (stage === 'flash' ? samples.length > 0 : samples.length >= config.minInterferenceSamples)
+      && accumulator.ratioFrames[stage].length > 0;
     const interferenceRatio = stageNumerator !== null && stageDenominator !== null && stageDenominator > 0
       ? Number((stageNumerator / stageDenominator).toFixed(3)) : null;
     const stageMetrics = {
@@ -753,7 +775,8 @@ function publicUnitResult(
     return result;
   }
   const missingStage = (['heat', 'flash', 'emc'] as InterferenceStage[])
-    .find((stage) => stages[stage].sampleCount < config.minInterferenceSamples);
+    .find((stage) => (stage === 'flash' ? stages[stage].sampleCount === 0 : stages[stage].sampleCount < config.minInterferenceSamples)
+      || accumulator.ratioFrames[stage].length === 0);
   if (missingStage) {
     result.verdict = phase === 'COMPLETE' ? 'FAIL' : 'PENDING';
     result.reason = phase === 'COMPLETE' ? `${missingStage.toUpperCase()}_SAMPLES_MISSING` : 'WAITING_FOR_INTERFERENCE_SAMPLES';
@@ -789,6 +812,7 @@ export class FieldWaveformAnalysis {
   private updatedAt = 0;
   private capturePhase: Extract<WaveformAnalysisPhase, 'NOISE' | 'INTERFERENCE'> | null = null;
   private captureStage: InterferenceStage | null = null;
+  private captureStageStartedAt = 0;
   private readonly completedStages = new Set<InterferenceStage>();
   private noiseCaptureActive = false;
   private noiseStartedAt: number | null = null;
@@ -901,6 +925,7 @@ export class FieldWaveformAnalysis {
             ? 'SIGNAL_STABILIZATION'
             : status.heatSubstage ?? 'IDLE';
     const processComplete = isPLCProcessComplete(status);
+    if (activeInterferenceStage && activeInterferenceStage !== previousCaptureStage) this.captureStageStartedAt = status.timestamp;
     const noiseCaptureEnded = previousNoiseCaptureActive && !noiseCaptureActive;
     const plcWindowClosedWithoutCapture = !explicitNoiseCapture
       && previousNoiseWindowOpenedAt !== null
@@ -945,7 +970,19 @@ export class FieldWaveformAnalysis {
     if (plcWindowClosedWithoutCapture) {
       this.logPLCNoiseWindowBoundary('关闭', status.timestamp, 'CAPTURE_NOT_STARTED');
     }
-    if (previousCaptureStage && previousCaptureStage !== activeInterferenceStage) this.completedStages.add(previousCaptureStage);
+    if (previousCaptureStage && (processComplete || previousCaptureStage !== activeInterferenceStage)) {
+      this.completedStages.add(previousCaptureStage);
+      for (const accumulator of this.units.values()) {
+        const frames = accumulator.ratioFrames[previousCaptureStage]
+          .filter((frame) => frame.timestamp > status.timestamp - SIGNAL_RATIO_WINDOW_MS);
+        accumulator.ratioFrames[previousCaptureStage] = frames;
+        accumulator.stageRatios[previousCaptureStage] = stableSignalRatios(frames);
+        this.log(`[信噪比窗口] batch=${this.batchId ?? '-'} stage=${previousCaptureStage} D${accumulator.index} `
+          + `frames=${frames.length} samples=${frames.reduce((sum, frame) => sum + frame.samples.length, 0)} `
+          + `first=${compactTimestamp(frames[0]?.timestamp ?? null)} last=${compactTimestamp(frames.at(-1)?.timestamp ?? null)} `
+          + `snr23=${compactNumber(accumulator.stageRatios[previousCaptureStage].snr23 ?? NaN)}`);
+      }
+    }
     if (processComplete) {
       this.phase = 'COMPLETE';
       this.noiseCompleted = true;
@@ -989,6 +1026,7 @@ export class FieldWaveformAnalysis {
       const samples = normalizedSamples.length > 0 ? normalizedSamples : rawSamples;
       const capturedRawSamples = rawSamples.length > 0 ? rawSamples : samples;
       const frameAt = Number.isFinite(unit.lastUpdate) && unit.lastUpdate > 0 ? unit.lastUpdate : state.timestamp;
+      if (this.capturePhase === 'INTERFERENCE' && frameAt < this.captureStageStartedAt) continue;
       const eventKey = `${frameAt}:${samples.length}:${sampleFingerprint(samples)}:${capturedRawSamples.length}:${sampleFingerprint(capturedRawSamples)}`;
       if (eventKey === accumulator.lastEventKey) continue;
       accumulator.lastEventKey = eventKey;
@@ -1010,12 +1048,12 @@ export class FieldWaveformAnalysis {
       }
       if (this.capturePhase === 'INTERFERENCE' && this.captureStage) {
         accumulator.interferenceSamples[this.captureStage].push(...samples);
-        const feature = unit.features?.[0];
-        accumulator.stageRatios[this.captureStage] = {
-          snr21: finiteRatio(unit.snr21 ?? feature?.snr21),
-          snr23: finiteRatio(unit.snr23 ?? feature?.snr23),
-          snr31: finiteRatio(unit.snr31 ?? feature?.snr31),
-        };
+        if (frameAt - this.captureStageStartedAt >= SIGNAL_RATIO_SETTLE_MS && rawSamples.length > 0) {
+          const frames = accumulator.ratioFrames[this.captureStage];
+          frames.push({ timestamp: frameAt, samples: rawSamples });
+          accumulator.ratioFrames[this.captureStage] = frames.filter((frame) => frame.timestamp > frameAt - SIGNAL_RATIO_WINDOW_MS).slice(-100);
+          accumulator.stageRatios[this.captureStage] = stableSignalRatios(accumulator.ratioFrames[this.captureStage]);
+        }
       }
       accumulator.noiseSamples = accumulator.noiseSamples.slice(-2_000);
       for (const stage of ['heat', 'flash', 'emc'] as InterferenceStage[]) {

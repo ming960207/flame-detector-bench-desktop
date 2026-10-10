@@ -94,6 +94,100 @@ function closeNoiseWindow(analysis: FieldWaveformAnalysis, timestamp: number): v
   analysis.observeProcess(end);
 }
 
+function signalWindow(ratio: number, flash = false, flatDenominator = false) {
+  const analysis = new FieldWaveformAnalysis({ minInterferenceSamples: 1, quality: {
+    ...DEFAULT_DETECTION_QUALITY_CONFIG,
+    a: { ...DEFAULT_DETECTION_QUALITY_CONFIG.a, maxInterferenceRatio: 100 },
+    b: { ...DEFAULT_DETECTION_QUALITY_CONFIG.b, maxInterferenceRatio: 100 },
+  } });
+  analysis.observeProcess(status(1_000));
+  closeNoiseWindow(analysis, 12_000);
+  if (flash) {
+    const plc = status(12_000);
+    plc.io!.internal!.noiseCaptureWindow = false;
+    plc.io!.steps!.stepM11_0 = true;
+    analysis.observeProcess(plc);
+  }
+  // Reproduce a stale normalized-history ratio while actual RAW AC channels
+  // have the requested ratio plus unequal linear DC drift.
+  for (let frame = 0; frame < 16; frame++) {
+    const raw = [0, 1, 0, -1].map((wave, index) => {
+      const point = frame * 4 + index;
+      return { probe1: wave * 50, probe2: 1_000 + point * 8 + wave * 50 * ratio, probe3: 1_000 + point * 2 + wave * (flatDenominator ? 0 : 50) };
+    });
+    analysis.observeDetectors(detectorState(12_250 + frame * 50, { ...detectorUnit(12_250 + frame * 50, raw), snr23: 5.9 }));
+  }
+  const end = status(13_100);
+  end.io!.internal!.noiseCaptureWindow = false;
+  analysis.observeProcess(end);
+  return analysis.snapshot().units[0]!.stages![flash ? 'flash' : 'heat'];
+}
+
+test('formal stage ratio removes DC drift instead of trusting normalized history extrema', () => {
+  const heat = signalWindow(1);
+  assert.ok(Math.abs(heat.snr23! - 1) < 0.03);
+});
+
+test('stable window still rejects a real channel amplitude ratio above the B limit', () => {
+  const heat = signalWindow(2);
+  assert.ok(heat.snr23! > 1.65);
+  assert.equal(heat.reason, 'SNR23_ABOVE_LIMIT');
+});
+
+test('stable window preserves low-ratio and absent denominator failures', () => {
+  assert.equal(signalWindow(0.3).reason, 'SNR23_BELOW_LIMIT');
+  const flat = signalWindow(1, true, true);
+  assert.equal(flat.snr23, null);
+  assert.equal(flat.verdict, 'FAIL');
+});
+
+test('flash accepts actual waveform data below the former 80 sample gate', () => {
+  const flash = signalWindow(1, true);
+  assert.equal(flash.sampleCount, 64);
+  assert.equal(flash.verdict, 'PASS');
+});
+
+test('old frames and stage-start transients cannot supply formal heat ratios', () => {
+  const analysis = new FieldWaveformAnalysis();
+  analysis.observeProcess(status(1_000));
+  closeNoiseWindow(analysis, 12_000);
+  const raw = [{ probe1: 0, probe2: 10, probe3: 10 }, { probe1: 10, probe2: 20, probe3: 20 }];
+  analysis.observeDetectors(detectorState(12_010, detectorUnit(11_900, raw)));
+  analysis.observeDetectors(detectorState(12_050, detectorUnit(12_050, raw)));
+  assert.equal(analysis.snapshot().units[0]!.stages!.heat.snr23, null);
+});
+
+test('flash without waveform data still requires a retest after removing the count gate', () => {
+  const analysis = new FieldWaveformAnalysis();
+  analysis.observeProcess(status(1_000));
+  const flash = status(12_000);
+  flash.io!.internal!.noiseCaptureWindow = false;
+  flash.io!.steps!.stepM11_0 = true;
+  analysis.observeProcess(flash);
+  analysis.observeDetectors(detectorState(12_250, detectorUnit(12_250, [])));
+  const end = status(13_000);
+  end.io!.internal!.noiseCaptureWindow = false;
+  analysis.observeProcess(end);
+  const result = analysis.snapshot().units[0]!.stages!.flash;
+  assert.equal(result.sampleCount, 0);
+  assert.equal(result.verdict, 'FAIL');
+  assert.equal(result.reason, 'SAMPLES_MISSING');
+});
+
+test('stage completion cannot certify a signal window that stopped updating', () => {
+  const analysis = new FieldWaveformAnalysis({ minInterferenceSamples: 1 });
+  analysis.observeProcess(status(1_000));
+  closeNoiseWindow(analysis, 12_000);
+  const raw = [0, 1, 0, -1].map((wave) => ({ probe1: wave, probe2: wave * 50, probe3: wave * 50 }));
+  analysis.observeDetectors(detectorState(12_250, detectorUnit(12_250, raw)));
+  const end = status(14_000);
+  end.io!.internal!.noiseCaptureWindow = false;
+  analysis.observeProcess(end);
+  const heat = analysis.snapshot().units[0]!.stages!.heat;
+  assert.equal(heat.snr23, null);
+  assert.equal(heat.reason, 'SAMPLES_MISSING');
+});
+
 test('noise capture waits 10 seconds for signal stabilization before opening', () => {
   const analysis = new FieldWaveformAnalysis();
 
