@@ -314,12 +314,25 @@ type ResultDetail = {
 
 const FinalResultCards: FC<{
   finalVerdict: FieldFinalVerdict | null;
+  detectorVerdict: FieldDetectorBatchVerdict | null;
   aPassCount: number;
   bPassCount: number;
   failCount: number;
   retestCount: number;
   onOpenDetail: (detail: ResultDetail) => void;
-}> = ({ finalVerdict, aPassCount, bPassCount, failCount, retestCount, onOpenDetail }) => {
+}> = ({ finalVerdict, detectorVerdict, aPassCount, bPassCount, failCount, retestCount, onOpenDetail }) => {
+  const abnormalUnits = (detectorVerdict?.units ?? [])
+    .filter((unit) => unit.grade === 'FAIL' || unit.classification === 'TEST_INVALID')
+    .map((unit) => {
+      const reason = failureReasonLabel(unit.reason);
+      const precheck = unit.precheck?.reasons?.length
+        ? `；预检：${unit.precheck.reasons.join('、')}`
+        : '';
+      return `探测器${unit.index}：${unit.classification === 'TEST_INVALID' ? '需复测' : '不合格'}；${reason}${precheck}`;
+    });
+  const rawUnitReasons = (detectorVerdict?.units ?? [])
+    .filter((unit) => unit.grade === 'FAIL' || unit.classification === 'TEST_INVALID')
+    .map((unit) => `探测器${unit.index}：${[unit.reason, ...(unit.precheck?.reasons ?? [])].filter(Boolean).join(' / ') || '未提供故障编码'}`);
   const cards = [
     { key: 'a-pass', label: 'A类合格', value: String(aPassCount) },
     { key: 'b-pass', label: 'B类合格', value: String(bPassCount) },
@@ -349,8 +362,9 @@ const FinalResultCards: FC<{
                   ? 'PLC 工序状态无效，暂不能给出最终判定。'
                   : finalVerdict?.reason === 'WAITING_FOR_WAVEFORM_ANALYSIS'
                     ? '等待波形分析完成，当前结果尚未最终判定。'
-                    : `本轮检测：A类合格 ${aPassCount} 台，B类合格 ${bPassCount} 台，不合格 ${failCount} 台，需复测 ${retestCount} 台。`,
-            reasonCode: finalVerdict?.reason,
+                    : `本轮检测：A类合格 ${aPassCount} 台，B类合格 ${bPassCount} 台，不合格 ${failCount} 台，需复测 ${retestCount} 台。`
+                  + (abnormalUnits.length ? `\n\n故障 / 复测原因：\n${abnormalUnits.join('\n')}` : ''),
+            reasonCode: [finalVerdict?.reason, ...rawUnitReasons].filter(Boolean).join('\n') || undefined,
             items: [
               { label: 'A类合格', value: String(aPassCount) },
               { label: 'B类合格', value: String(bPassCount) },
@@ -516,14 +530,17 @@ const DetectorCard: FC<{
     title: `探测器${index} · 检测结果`,
     verdict: testInvalid ? '需复测' : gradeLabel(grade),
     tone,
-    message: fail ? fullReason : grade === 'A_PASS' || grade === 'B_PASS'
-      ? `探测器${index}检测合格，等级：${gradeLabel(grade)}。`
-      : '尚未获得本探测器的最终检测判定。',
+    message: fail
+      ? fullReason + (precheckReasons.length ? `\n\n预检异常：\n${precheckReasons.map((reason) => failureReasonLabel(reason)).join('\n')}` : '')
+      : grade === 'A_PASS' || grade === 'B_PASS'
+        ? `探测器${index}检测合格，等级：${gradeLabel(grade)}。`
+        : '尚未获得本探测器的最终检测判定。',
     reasonCode: [detectorResult?.reason, ...precheckReasons].filter(Boolean).join('\n') || undefined,
     items: [
       { label: '判定类型', value: testInvalid ? '测试链路无效，需复测' : '产品检测结果' },
       { label: '探测器状态', value: unit?.fault ? '故障' : unit?.online ? '在线' : '离线或未同步' },
       { label: '预检异常项数', value: String(precheckReasons.length) },
+      { label: '缺失信号探头', value: detectorResult?.noDataProbes?.length ? detectorResult.noDataProbes.join('、').toUpperCase() : '无' },
     ],
   });
   const lamps: Array<{ key: ProcessLampKey; label: string; testLabel: string; ratios: ReturnType<typeof maximumConfiguredRatio> }> = [
@@ -1059,7 +1076,7 @@ export function WutosDashboard({
               />
             ))}
           </div>
-          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} onOpenDetail={openResultDetail} />
+          <FinalResultCards finalVerdict={finalVerdict} detectorVerdict={detectorVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} onOpenDetail={openResultDetail} />
         </Panel>
 
         <Panel title="工序流程" className="wutos-panel--flow">
