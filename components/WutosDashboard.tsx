@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { FC, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -42,6 +43,7 @@ import { IndicatorCameraPanel } from './indicator-camera';
 import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './wutos-dashboard.css';
 import './wutos-performance.css';
+import './wutos-result-detail.css';
 
 const asset = (name: string) => import.meta.env.BASE_URL + 'wutos-assets/' + name;
 
@@ -301,13 +303,23 @@ function Panel({ title, titleMeta, className, children }: { title: string; title
   );
 }
 
+type ResultDetail = {
+  title: string;
+  verdict: string;
+  message: string;
+  tone: 'pass' | 'fail' | 'pending';
+  reasonCode?: string;
+  items: Array<{ label: string; value: string }>;
+};
+
 const FinalResultCards: FC<{
   finalVerdict: FieldFinalVerdict | null;
   aPassCount: number;
   bPassCount: number;
   failCount: number;
   retestCount: number;
-}> = ({ finalVerdict, aPassCount, bPassCount, failCount, retestCount }) => {
+  onOpenDetail: (detail: ResultDetail) => void;
+}> = ({ finalVerdict, aPassCount, bPassCount, failCount, retestCount, onOpenDetail }) => {
   const cards = [
     { key: 'a-pass', label: 'A类合格', value: String(aPassCount) },
     { key: 'b-pass', label: 'B类合格', value: String(bPassCount) },
@@ -319,10 +331,37 @@ const FinalResultCards: FC<{
       aria-label={`最终结果：${finalResultSummary(finalVerdict, aPassCount, bPassCount, failCount, retestCount)}`}
     >
       {cards.map((card) => (
-        <div className={`wutos-final-result-card is-${card.key}`} key={card.key} title={`${card.label}：${card.value}`}>
+        <button
+          type="button"
+          className={`wutos-final-result-card is-${card.key}`}
+          key={card.key}
+          title="点击查看完整检测结果"
+          aria-label={`${card.label}：${card.value}。点击查看完整检测结果`}
+          onClick={() => onOpenDetail({
+            title: '本轮最终检测结果',
+            verdict: verdictLabel(finalVerdict),
+            tone: finalVerdict?.verdict === 'FAIL' ? 'fail' : finalVerdict?.verdict === 'PASS' ? 'pass' : 'pending',
+            message: finalVerdict?.reason === 'TEST_INVALID_RETEST_REQUIRED'
+              ? '测试链路异常，本轮结果无效，需复测。'
+              : finalVerdict?.reason === 'WAITING_FOR_PLC_COMPLETE'
+                ? '等待 PLC 工序完成，当前结果尚未最终判定。'
+                : finalVerdict?.reason === 'PLC_PROCESS_STATUS_INVALID'
+                  ? 'PLC 工序状态无效，暂不能给出最终判定。'
+                  : finalVerdict?.reason === 'WAITING_FOR_WAVEFORM_ANALYSIS'
+                    ? '等待波形分析完成，当前结果尚未最终判定。'
+                    : `本轮检测：A类合格 ${aPassCount} 台，B类合格 ${bPassCount} 台，不合格 ${failCount} 台，需复测 ${retestCount} 台。`,
+            reasonCode: finalVerdict?.reason,
+            items: [
+              { label: 'A类合格', value: String(aPassCount) },
+              { label: 'B类合格', value: String(bPassCount) },
+              { label: '不合格 NG', value: String(failCount) },
+              { label: '需复测', value: String(retestCount) },
+            ],
+          })}
+        >
           <small>{card.label}</small>
           <b>{card.value}</b>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -458,7 +497,8 @@ const DetectorCard: FC<{
   minimumNoiseSamples: number;
   configuredRatios: RatioMetric[];
   noiseLimits: NoiseLimits;
-}> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits }) => {
+  onOpenDetail: (detail: ResultDetail) => void;
+}> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits, onOpenDetail }) => {
   const [openLamp, setOpenLamp] = useState<ProcessLampKey | null>(null);
   const grade = detectorResult?.grade;
   const testInvalid = detectorResult?.classification === 'TEST_INVALID';
@@ -470,6 +510,22 @@ const DetectorCard: FC<{
   const probeFluctuationSummary = probeMetricSummary(probeFluctuationValues);
   const probeAbsoluteSummary = probeMetricSummary(probeAbsoluteValues);
   const isNoisePhase = analysis?.phase === 'NOISE';
+  const fullReason = failureReasonLabel(detectorResult?.reason || (unit?.fault ? 'DETECTOR_FAULT' : undefined));
+  const precheckReasons = detectorResult?.precheck?.reasons ?? [];
+  const openDetectorResult = () => onOpenDetail({
+    title: `探测器${index} · 检测结果`,
+    verdict: testInvalid ? '需复测' : gradeLabel(grade),
+    tone,
+    message: fail ? fullReason : grade === 'A_PASS' || grade === 'B_PASS'
+      ? `探测器${index}检测合格，等级：${gradeLabel(grade)}。`
+      : '尚未获得本探测器的最终检测判定。',
+    reasonCode: [detectorResult?.reason, ...precheckReasons].filter(Boolean).join('\n') || undefined,
+    items: [
+      { label: '判定类型', value: testInvalid ? '测试链路无效，需复测' : '产品检测结果' },
+      { label: '探测器状态', value: unit?.fault ? '故障' : unit?.online ? '在线' : '离线或未同步' },
+      { label: '预检异常项数', value: String(precheckReasons.length) },
+    ],
+  });
   const lamps: Array<{ key: ProcessLampKey; label: string; testLabel: string; ratios: ReturnType<typeof maximumConfiguredRatio> }> = [
     { key: 'noise', label: '噪声测试', testLabel: '噪声测试', ratios: noiseRatios },
     { key: 'heat', label: '移动热源', testLabel: '移动热源干扰测试', ratios: maximumConfiguredRatio(analysis?.stages?.heat, configuredRatios) },
@@ -480,7 +536,7 @@ const DetectorCard: FC<{
     <article className={'wutos-detector-card ' + tone + (isNoisePhase ? ' is-noise' : '')} aria-label={`探测器${index}检测结果`}>
       <header>
         <strong>探测器{index}</strong>
-        <span>{testInvalid ? '需复测' : gradeLabel(grade)}</span>
+        <span><button type="button" className="wutos-result-grade-button" title="点击查看完整检测结果" aria-label={`探测器${index} ${testInvalid ? '需复测' : gradeLabel(grade)}，点击查看完整结果`} onClick={openDetectorResult}>{testInvalid ? '需复测' : gradeLabel(grade)}</button></span>
       </header>
       <div className="wutos-detector-card__metrics">
         {([
@@ -523,7 +579,7 @@ const DetectorCard: FC<{
           </button>;
         })}
       </div>
-      {fail && <small className="wutos-detector-card__failure" title={failureReasonLabel(detectorResult?.reason)}>{testInvalid ? '需复测原因' : '不合格原因'}：{failureReasonLabel(detectorResult?.reason)}</small>}
+      {fail && <button type="button" className="wutos-detector-card__failure" title="点击放大查看完整故障原因" aria-label={`探测器${index}，点击查看完整${testInvalid ? '需复测原因' : '不合格原因'}`} onClick={openDetectorResult}>{testInvalid ? '需复测原因' : '不合格原因'}：{fullReason}</button>}
     </article>
   );
 };
@@ -859,7 +915,37 @@ export function WutosDashboard({
   onSendSimulationCommand,
 }: WutosDashboardProps) {
   const [simulationOpen, setSimulationOpen] = useState(false);
+  const [resultDetail, setResultDetail] = useState<ResultDetail | null>(null);
+  const resultDialogRef = useRef<HTMLElement | null>(null);
+  const resultFocusReturnRef = useRef<HTMLElement | null>(null);
   const { theme, toggleTheme } = useAppTheme();
+
+  const openResultDetail = (detail: ResultDetail) => {
+    resultFocusReturnRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setResultDetail(detail);
+  };
+  const closeResultDetail = () => {
+    setResultDetail(null);
+    window.requestAnimationFrame(() => resultFocusReturnRef.current?.focus());
+  };
+  useEffect(() => {
+    if (!resultDetail) return;
+    resultDialogRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeResultDetail();
+      }
+      if (event.key === 'Tab') {
+        // Keep keyboard focus within the dialog until it is dismissed.
+        event.preventDefault();
+        resultDialogRef.current?.querySelector<HTMLButtonElement>('.wutos-result-detail-close')?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [resultDetail]);
 
   useEffect(() => {
     if (!simulationOpen) return;
@@ -969,10 +1055,11 @@ export function WutosDashboard({
                 minimumNoiseSamples={waveformAnalysis?.thresholds.minNoiseSamples ?? 1}
                 configuredRatios={configuredRatios}
                 noiseLimits={noiseLimits}
+                onOpenDetail={openResultDetail}
               />
             ))}
           </div>
-          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} />
+          <FinalResultCards finalVerdict={finalVerdict} aPassCount={aPassCount} bPassCount={bPassCount} failCount={failCount} retestCount={retestCount} onOpenDetail={openResultDetail} />
         </Panel>
 
         <Panel title="工序流程" className="wutos-panel--flow">
@@ -1003,6 +1090,35 @@ export function WutosDashboard({
 
         {simulationOpen && <DetectorSimulationDialog units={units} onSend={onSendSimulationCommand} onClose={() => setSimulationOpen(false)} />}
       </div>
+      {resultDetail && createPortal(
+        <div className="wutos-result-detail-backdrop" data-theme={theme} onMouseDown={(event) => { if (event.target === event.currentTarget) closeResultDetail(); }}>
+          <section
+            className={`wutos-result-detail-dialog is-${resultDetail.tone}`}
+            ref={resultDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wutos-result-detail-title"
+            aria-describedby="wutos-result-detail-message"
+          >
+            <header>
+              <div>
+                <h2 id="wutos-result-detail-title">{resultDetail.title}</h2>
+                <strong className="wutos-result-detail-verdict">{resultDetail.verdict}</strong>
+              </div>
+              <button type="button" className="wutos-result-detail-close" aria-label="关闭检测结果详情" onClick={closeResultDetail}><X size={24} /></button>
+            </header>
+            <p className="wutos-result-detail-label">完整检测说明 / 故障原因</p>
+            <p id="wutos-result-detail-message" className="wutos-result-detail-message">{resultDetail.message}</p>
+            <dl className="wutos-result-detail-items">
+              {resultDetail.items.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}
+            </dl>
+            {resultDetail.reasonCode && <pre className="wutos-result-detail-code">原始诊断信息：{'\n'}{resultDetail.reasonCode}</pre>}
+            <p className="wutos-result-detail-hint">按 Esc、点击遮罩或右上角 × 关闭；信息可选择复制。</p>
+          </section>
+        </div>,
+        document.body,
+      )}
     </main>
   );
 }
