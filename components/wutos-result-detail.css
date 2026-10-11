@@ -1,0 +1,176 @@
+/* A readable result detail layer, portaled outside the scaled 5:3 production frame. */
+.wutos-result-detail-backdrop,
+.wutos-result-detail-backdrop * {
+  box-sizing: border-box;
+}
+.wutos-result-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 4vw, 48px);
+  background: rgba(0, 7, 18, .82);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+}
+.wutos-result-detail-dialog {
+  width: min(760px, 100%);
+  max-height: min(86vh, 850px);
+  overflow: auto;
+  padding: clamp(22px, 3.5vw, 36px);
+  color: #eef8ff;
+  border: 1px solid #388fbe;
+  border-radius: 14px;
+  background: linear-gradient(150deg, #112d42, #081923);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, .65);
+  outline: none;
+}
+.wutos-result-detail-dialog:focus-visible {
+  outline: 2px solid #73d9ff;
+  outline-offset: 4px;
+}
+.wutos-result-detail-dialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(112, 178, 214, .32);
+  padding-bottom: 18px;
+}
+.wutos-result-detail-dialog h2 {
+  margin: 0 0 10px;
+  color: inherit;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.35;
+}
+.wutos-result-detail-verdict {
+  display: inline-block;
+  color: #f2ca67;
+  font-size: 21px;
+  font-weight: 800;
+}
+.wutos-result-detail-dialog.is-pass .wutos-result-detail-verdict { color: #75ecb8; }
+.wutos-result-detail-dialog.is-fail .wutos-result-detail-verdict { color: #ff9690; }
+.wutos-result-detail-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  color: #eef8ff;
+  border: 1px solid #597e99;
+  border-radius: 8px;
+  background: #193a4e;
+  cursor: pointer;
+}
+.wutos-result-detail-close:hover,
+.wutos-result-detail-close:focus-visible {
+  border-color: #72d9ff;
+  outline: 2px solid #72d9ff;
+}
+.wutos-result-detail-label {
+  margin: 22px 0 8px;
+  color: #95c8e0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.wutos-result-detail-message {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(22px, 2.65vw, 28px);
+  font-weight: 700;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.wutos-result-detail-dialog.is-fail .wutos-result-detail-message { color: #ffd2cc; }
+.wutos-result-detail-items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 0;
+}
+.wutos-result-detail-items div {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(112, 178, 214, .24);
+  border-radius: 6px;
+  background: rgba(0, 12, 25, .32);
+}
+.wutos-result-detail-items dt {
+  color: #9fc7d8;
+  font-size: 16px;
+}
+.wutos-result-detail-items dd {
+  margin: 6px 0 0;
+  color: #f4fcff;
+  font-size: 20px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+.wutos-result-detail-code {
+  margin: 20px 0 0;
+  padding: 12px 14px;
+  color: #c1dbe8;
+  border: 1px solid rgba(112, 178, 214, .25);
+  border-radius: 6px;
+  background: rgba(0, 11, 22, .56);
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.wutos-result-detail-hint { margin: 16px 0 0; color: #9ab9c9; font-size: 15px; }
+.wutos-result-grade-button,
+.wutos-detector-card__failure,
+.wutos-final-result-card {
+  cursor: pointer;
+}
+.wutos-result-grade-button {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: inherit;
+}
+.wutos-result-grade-button:focus-visible,
+.wutos-detector-card__failure:focus-visible,
+.wutos-final-result-card:focus-visible {
+  outline: 2px solid #7ce4ff;
+  outline-offset: 2px;
+}
+button.wutos-detector-card__failure {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+}
+button.wutos-final-result-card { font-family: inherit; }
+.wutos-result-detail-backdrop[data-theme="mint"] { background: rgba(20, 38, 29, .72); }
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-dialog {
+  color: #163c2a;
+  background: linear-gradient(150deg, #f6fff8, #e5f2e9);
+  border-color: #78ac89;
+}
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-message,
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-items dd {
+  color: #193e2b;
+}
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-dialog.is-fail .wutos-result-detail-message { color: #a52c2c; }
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-close { background: #dff0e5; color: #214d32; }
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-label,
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-items dt,
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-hint { color: #426c51; }
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-items div,
+.wutos-result-detail-backdrop[data-theme="mint"] .wutos-result-detail-code { background: #f3fbf5; color: #315b40; }
+@media (max-width: 520px) {
+  .wutos-result-detail-dialog { padding: 20px; }
+  .wutos-result-detail-items { grid-template-columns: 1fr; }
+}
