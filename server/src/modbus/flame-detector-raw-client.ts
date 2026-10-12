@@ -4,7 +4,7 @@ import { calculateModbusCRC16 } from './flame-data-decoder.js';
 const DEFAULT_REQUEST_TIMEOUT_MS = 700;
 // Each physical port carries single-wire RTU frames and replies, not independent
 // multiplexed requests. Avoid bursts faster than the downstream serial gateway.
-export const MIN_RTU_COMMAND_GAP_MS = 160;
+export const MIN_RTU_COMMAND_GAP_MS = 120;
 export const RTU_TIMEOUT_REPLY_QUIET_MS = 220;
 /** 现场 TCP 独立端口拓扑：每个端口仅挂一台探测器，所有探测器从站地址均为 0x01。 */
 const FIELD_TCP_DEVICE_ADDRESS = 0x01;
