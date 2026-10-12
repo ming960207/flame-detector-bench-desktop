@@ -277,7 +277,11 @@ export class RelayFunctionalTestCoordinator {
   ): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
-      if (action.reasons.includes('RELAY_BASELINE_NOT_NORMAL')) return;
+      // Never issue blind simulation to a detector without trustworthy DIO
+      // baseline feedback. The remaining stations continue in parallel.
+      if (action.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+        || action.reasons.includes('RELAY_BASELINE_READ_FAILED')
+        || action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))) return;
       state.commandStartedAt = Date.now();
       const accepted = await this.detectorSimulationBurst(
         () => this.detectors.simulate(index, kind === 'alarm'
