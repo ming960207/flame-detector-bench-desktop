@@ -171,6 +171,19 @@ function relayFailureIsInfrastructure(reason: string): boolean {
     || code === 'RELAY_FEEDBACK_MAPPING_MISSING';
 }
 
+/**
+ * Evidence safety boundary: no product action can be judged defective if a
+ * bad/missing baseline prevented us from safely issuing its test command.
+ */
+export function relayEvidenceIsInfrastructureInvalid(reasons: string[]): boolean {
+  const normalized = reasons.map((reason) => reason.replace(/^(ALARM|FAULT):/, ''));
+  return normalized.some((reason) =>
+    reason === 'RELAY_BASELINE_NOT_NORMAL'
+    || reason === 'RELAY_BASELINE_READ_FAILED'
+    || reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))
+    || (normalized.length > 0 && normalized.every(relayFailureIsInfrastructure));
+}
+
 export class ProductAwareFlameDetectorService extends FlameDetectorService implements RelayDetectorPort {
   private relayConfig: RelayFunctionalTestConfig = DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG;
   private relayFeedback: RelayFeedbackSource = { readInputs: () => undefined };
@@ -495,7 +508,10 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         const relayUnit = relayFunctionalTest?.units.find((item) => item.detectorIndex === index);
         if (relayUnit && relayUnit.verdict !== 'PASS') {
           const relayReasons = [...new Set([...relayUnit.alarm.reasons, ...relayUnit.fault.reasons])];
-          if (relayReasons.length > 0 && relayReasons.every(relayFailureIsInfrastructure)) {
+          // A blocked baseline never issued a functional action. Cleanup may
+          // subsequently report a stuck contact, but that does not prove a
+          // failed product response to a command that was never sent.
+          if (relayEvidenceIsInfrastructureInvalid(relayReasons)) {
             uniquePush(reasons, 'TEST_INFRASTRUCTURE_INVALID');
           } else {
             uniquePush(reasons, 'RELAY_FUNCTIONAL_TEST_FAILED');

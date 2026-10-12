@@ -23,7 +23,7 @@ import {
   type ContainMediaGeometry,
 } from './indicator-camera-geometry';
 import { displayResultsForCapture } from './indicator-camera-display-model';
-import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
+import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, completedIndicatorResults, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
 export { analyzeIndicatorFrame } from './indicator-camera-analysis';
 import type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, FrameSample } from './indicator-camera-analysis';
 export type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, IndicatorLightResult } from './indicator-camera-analysis';
@@ -293,23 +293,10 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const expectedColor = expectedLightForPhase(activePhase);
   const summary = useMemo(() => visualSummary(liveResults, relayFunctionalTest), [liveResults, relayFunctionalTest]);
 
-  const completedResults = useCallback((): IndicatorSlotResult[] => slotRoisRef.current.map((roi) => {
-    const alarm = phaseResultsRef.current.get('ALARM_VERIFY')?.find((item) => item.slot === roi.slot);
-    const fault = phaseResultsRef.current.get('FAULT_VERIFY')?.find((item) => item.slot === roi.slot);
-    const green = runSamplesRef.current.length >= REQUIRED_STABLE_FRAMES
-      ? aggregateLight(runSamplesRef.current, roi.slot, 'green')
-      : { color: 'green' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const red = alarm?.lights.red ?? { color: 'red' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const yellow = fault?.lights.yellow ?? { color: 'yellow' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const lights = { green, red, yellow };
-    const states = [green.state, red.state];
-    const verdict: IndicatorVerdict = states.every((state) => state === 'ON')
-      ? 'PASS'
-      : states.some((state) => state === 'OFF')
-        ? 'FAIL'
-        : 'WAITING';
-    return { slot: roi.slot, roi, verdict, lights, frames: Math.max(runSamplesRef.current.length, alarm?.frames ?? 0, fault?.frames ?? 0) };
-  }), []);
+  const completedResults = useCallback(
+    (): IndicatorSlotResult[] => completedIndicatorResults(phaseResultsRef.current, slotRoisRef.current),
+    [],
+  );
 
   const submitCompletedEvidence = useCallback(async () => {
     if (
@@ -318,7 +305,6 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       || !relayFunctionalTest
       || relayTest?.phase !== 'COMPLETE'
       || precheckBusy
-      || captures.length === 0
       || submittedBatchRef.current === batchId
     ) return;
     const lightVerdict = (state: IndicatorState): 'PASS' | 'FAIL' | 'PENDING' => state === 'ON' ? 'PASS' : state === 'OFF' ? 'FAIL' : 'PENDING';
@@ -342,7 +328,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
         capturedAt: Date.now(),
         source: 'UVC_HSV',
         captureCount: captures.length,
-        phases: [...new Set(captures.map((capture) => capture.phase))],
+        // Report sampled phases, not only photos that happened to be saved.
+        // A missing red/green phase is PENDING, never inferred from other frames.
+        phases: [...phaseResultsRef.current.keys()].filter((phase) => phase !== 'MANUAL'),
         verdict,
         units,
       });
@@ -625,9 +613,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     setRecognitionPending(false);
 
     const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
-    const shouldSave = savePhoto || automaticPhotoAllowed && automaticEvidenceReady(phase, frame.slots, relayTest?.detectorIndexes) && (
+    // Save the first frame even when an expected LED is absent, so failed
+    // inspections retain visual evidence. Keep follow-up photos bounded.
+    const shouldSave = savePhoto || automaticPhotoAllowed && (
       lastAutomaticPhotoPhaseRef.current !== phase
-      || frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS
+      || (automaticEvidenceReady(phase, frame.slots, relayTest?.detectorIndexes)
+        && frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS)
     );
     if (!shouldSave) return;
     lastPhotoAtRef.current = frame.capturedAt;
