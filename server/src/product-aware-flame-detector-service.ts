@@ -162,6 +162,7 @@ function relayFailureIsInfrastructure(reason: string): boolean {
     || code === 'FAULT_RESET_COMMAND_FAILED'
     || code === 'EMERGENCY_RESET_COMMAND_FAILED'
     || code === 'RELAY_BASELINE_READ_FAILED'
+    || code === 'RELAY_BASELINE_NOT_NORMAL'
     || code === 'RELAY_FEEDBACK_READ_FAILED'
     || code === 'EMERGENCY_RESET_FEEDBACK_READ_FAILED'
     || code === 'RELAY_TEST_ABORTED'

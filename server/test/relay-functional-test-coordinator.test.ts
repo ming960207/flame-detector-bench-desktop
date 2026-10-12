@@ -421,6 +421,57 @@ function fixture(options: { slowDiagnostic?: boolean; droppedCommands?: boolean;
   return { coordinator, commands, elapsed, diagnosticReads: () => diagnosticReads };
 }
 
+
+test('healthy relay commands capture transport writes and physical confirmations without a new phase', async () => {
+  const { coordinator, commands } = fixture({});
+  const report = await coordinator.run('command-delivery-evidence');
+  assert.equal(report.verdict, 'PASS');
+  for (const unit of report.units) {
+    for (const kind of ['alarm', 'fault'] as const) {
+      const action = unit[kind];
+      assert.equal(action.commandWriteAttempts, 3);
+      assert.equal(action.commandWriteAccepted, 3);
+      assert.equal(action.rescueWriteAttempts ?? 0, 0);
+      assert.equal(action.physicalStateReached, true);
+      assert.ok(typeof action.physicalConfirmedAt === 'number');
+      assert.ok(typeof action.resetConfirmedAt === 'number');
+      assert.equal(action.emergencyRecovered, true);
+    }
+  }
+  assert.equal(commands.get('6:alarm'), 3);
+});
+
+test('already-active DIO baseline isolates unsafe slot, leaves peers and PLC phases untouched', async () => {
+  const inputs: Record<string, boolean> = { X1: false, X2: false, X3: true, X4: false };
+  const writes: number[] = [];
+  const config = normalizeRelayFunctionalTestConfig({
+    mode: 'FAST_BATCH',
+    stableSamples: 1, sampleIntervalMs: 50, feedbackTimeoutMs: 250, resetTimeoutMs: 250,
+    mappings: createMapping([1, 2]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator({
+    enabledDetectorIndexes: () => [1, 2],
+    async simulate(index, state) {
+      writes.push(index);
+      inputs[`X${index * 2 - 1}`] = state.fire;
+      inputs[`X${index * 2}`] = state.fault;
+    },
+    async reset(index) {
+      inputs[`X${index * 2 - 1}`] = false;
+      inputs[`X${index * 2}`] = false;
+    },
+    async readLatched() { return { fire: false, fault: false }; },
+  }, { readInputs: () => ({ ...inputs }) }, config);
+  const report = await coordinator.run('abnormal-initial-contact');
+  assert.equal(report.units[0]?.verdict, 'PASS');
+  assert.equal(report.units[1]?.verdict, 'FAIL');
+  assert.ok(report.units[1]?.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
+  assert.ok(report.units[1]?.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
+  assert.equal(writes.filter((index) => index === 2).length, 0);
+  assert.equal(writes.filter((index) => index === 1).length, 6);
+  assert.equal(report.units[1]?.alarm.emergencyRecovered, true);
+});
+
 test('one slow internal diagnostic cannot invalidate six healthy relays or extend the production window', async () => {
   const { coordinator, elapsed, diagnosticReads } = fixture({ slowDiagnostic: true });
   const report = await coordinator.run('six-relay-slow-diagnostic');

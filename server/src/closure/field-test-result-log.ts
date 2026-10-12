@@ -423,11 +423,14 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       const action = (kind: 'alarm' | 'fault') => {
         const step = unit[kind];
         return [
-          step.commandAccepted ? '是' : '否',
-          step.physicalStateReached ? '是' : '否',
+          step.commandAccepted ? '本地发送成功' : '本地发送失败',
+          `发送成功/尝试=${step.commandWriteAccepted ?? 0}/${step.commandWriteAttempts ?? 0}`,
+          `窗口内补发=${step.rescueWriteAttempts ?? 0}`,
+          step.physicalStateReached ? 'DIO稳定确认' : 'DIO未确认',
           step.responseTimeMs == null ? '-' : `${step.responseTimeMs}ms`,
           step.resetAccepted ? '是' : '否',
-          step.physicalRecovered ? '是' : '否',
+          step.physicalRecovered ? '时限内恢复' : '时限内未恢复',
+          step.emergencyRecovered === true ? '紧急清理后恢复' : step.emergencyRecovered === false ? '紧急清理后未恢复' : '紧急清理无证据',
           step.reasons.join('、') || '-',
         ].join(' / ');
       };
