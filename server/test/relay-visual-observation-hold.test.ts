@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   RELAY_SIMULATION_BURST_INTERVAL_MS,
+  ALARM_INDICATOR_OBSERVATION_MS,
   RelayFunctionalTestCoordinator,
   type RelayDetectorPort,
 } from '../src/relay-functional-test-coordinator.js';
 import { normalizeRelayFunctionalTestConfig, type RelayFunctionalTestPhase } from '../src/relay-functional-test.js';
 
-test('alarm and fault simulation sends a short command burst without visual wait', async () => {
+test('alarm remains active for UVC evidence before reset; fault keeps the fast cycle', async () => {
   let internal = { fire: false, fault: false };
   const inputs: Record<string, boolean> = { X1: false, X2: false };
   const phaseAt = new Map<RelayFunctionalTestPhase, number>();
@@ -15,6 +16,7 @@ test('alarm and fault simulation sends a short command burst without visual wait
   const simulationAt = { alarm: [] as number[], fault: [] as number[] };
   let alarmCommandAt = 0;
   let faultCommandAt = 0;
+  let alarmResetAt = 0;
 
   const detectors: RelayDetectorPort = {
     enabledDetectorIndexes: () => [1],
@@ -35,6 +37,7 @@ test('alarm and fault simulation sends a short command burst without visual wait
       inputs.X2 = state.fault;
     },
     async reset() {
+      if (internal.fire) alarmResetAt = Date.now();
       internal = { fire: false, fault: false };
       inputs.X1 = false;
       inputs.X2 = false;
@@ -83,6 +86,8 @@ test('alarm and fault simulation sends a short command burst without visual wait
   assert.ok(simulationAt.fault[2]! - simulationAt.fault[1]! >= RELAY_SIMULATION_BURST_INTERVAL_MS - 20);
   assert.ok(alarmVerify - alarmCommandAt < 500, 'alarm simulation should enter verification promptly');
   assert.ok(faultVerify - faultCommandAt < 500, 'fault simulation should enter verification promptly');
-  assert.ok(alarmReset - alarmVerify < 1000, 'alarm verification should not add a visual hold');
+  assert.ok(alarmReset - alarmVerify >= ALARM_INDICATOR_OBSERVATION_MS - 20, 'alarm verification must preserve the two-frame camera window');
+  assert.ok(alarmResetAt - alarmVerify >= ALARM_INDICATOR_OBSERVATION_MS - 20, 'physical reset must wait until the camera window ends');
+  assert.ok(alarmReset - alarmVerify < ALARM_INDICATOR_OBSERVATION_MS + 1000, 'alarm observation must stay bounded');
   assert.ok(faultReset - faultVerify < 1000, 'fault verification should not add a visual hold');
 });

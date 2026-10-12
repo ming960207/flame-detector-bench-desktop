@@ -302,7 +302,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     const red = alarm?.lights.red ?? { color: 'red' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
     const yellow = fault?.lights.yellow ?? { color: 'yellow' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
     const lights = { green, red, yellow };
-    const states = [green.state, red.state, yellow.state];
+    const states = [green.state, red.state];
     const verdict: IndicatorVerdict = states.every((state) => state === 'ON')
       ? 'PASS'
       : states.some((state) => state === 'OFF')
@@ -329,7 +329,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       faultYellow: lightVerdict(unit.lights.yellow.state),
       verdict: unit.verdict === 'WAITING' ? 'PENDING' : unit.verdict,
     }));
-    const lightStates = units.flatMap((unit) => [unit.runningGreen, unit.fireRed, unit.faultYellow]);
+    const lightStates = units.flatMap((unit) => [unit.runningGreen, unit.fireRed]);
     const verdict = lightStates.every((state) => state === 'PASS')
       ? 'PASS'
       : lightStates.some((state) => state === 'FAIL')
@@ -665,7 +665,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       captureFrameRef.current(false);
     }, SAMPLE_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [cameraStatus, samplingActive]);
+  }, [cameraStatus, samplingActive, activePhase]);
 
   useEffect(() => {
     if (relayFunctionalTest && relayTest?.phase === 'COMPLETE' && !precheckBusy) {

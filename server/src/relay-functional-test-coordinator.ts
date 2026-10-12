@@ -35,6 +35,9 @@ const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
 const RELAY_SIMULATION_BURST_COUNT = 3;
 export const RELAY_SIMULATION_BURST_INTERVAL_MS = 100;
+// UVC samples every 240 ms and needs two frames. Keep the confirmed alarm
+// active long enough for phase delivery, camera exposure and stable evidence.
+export const ALARM_INDICATOR_OBSERVATION_MS = 1000;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
 
@@ -461,6 +464,9 @@ export class RelayFunctionalTestCoordinator {
     await this.sendCommand(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_VERIFY' : 'FAULT_VERIFY', work);
     await this.waitForAction(work, kind);
+    if (kind === 'alarm' && [...work.values()].some((state) => state.result.alarm.commandAccepted)) {
+      await sleep(ALARM_INDICATOR_OBSERVATION_MS);
+    }
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET' : 'FAULT_RESET', work);
     await this.resetBatch(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET_VERIFY' : 'FAULT_RESET_VERIFY', work);

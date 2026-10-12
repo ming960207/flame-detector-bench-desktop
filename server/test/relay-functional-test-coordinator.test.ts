@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
+import { ALARM_INDICATOR_OBSERVATION_MS, RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
 import {
   normalizeRelayFunctionalTestConfig,
   relayFunctionalTestMissingMappings,
@@ -425,7 +425,8 @@ test('one slow internal diagnostic cannot invalidate six healthy relays or exten
   const { coordinator, elapsed, diagnosticReads } = fixture({ slowDiagnostic: true });
   const report = await coordinator.run('six-relay-slow-diagnostic');
   assert.equal(report.verdict, 'PASS');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.equal(diagnosticReads(), 0, 'production must not enqueue slow internal diagnostic reads');
 });
 
@@ -437,7 +438,8 @@ test('only unconfirmed relays receive one rescue command within the original win
   assert.equal(commands.get('2:fault'), 4);
   assert.equal(commands.get('1:alarm'), 3);
   assert.equal(commands.get('1:fault'), 3);
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
 });
 
@@ -455,14 +457,16 @@ test('a real stuck relay still fails after the bounded rescue command', async ()
   assert.equal(report.units.filter((unit) => unit.verdict === 'FAIL').length, 1);
   assert.ok(report.units[1]!.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
   assert.ok(report.units[1]!.fault.reasons.includes('FAULT_RELAY_NOT_ACTUATED'));
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
 });
 
 test('a slow DIO read ends at the existing deadline and remains a communication failure', async () => {
   const { coordinator, elapsed } = fixture({ slowFeedback: true });
   const report = await coordinator.run('slow-dio');
   assert.equal(report.verdict, 'FAIL');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(report.units.every((unit) => unit.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))));
   assert.ok(report.units.every((unit) => !unit.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED')));
 });
@@ -493,6 +497,7 @@ test('a slow rescue write callback leaves enough time for all stable DIO samples
   const { coordinator, elapsed } = fixture({ droppedCommands: true, slowRescueCallback: true });
   const report = await coordinator.run('slow-rescue-callback');
   assert.equal(report.verdict, 'PASS');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
 });
