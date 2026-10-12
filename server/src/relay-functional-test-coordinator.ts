@@ -309,7 +309,12 @@ export class RelayFunctionalTestCoordinator {
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
-    const deadline = Date.now() + this.config.feedbackTimeoutMs;
+    let deadline = Date.now() + this.config.feedbackTimeoutMs;
+    // A slow but awaited rescue write must leave enough wall-clock time for
+    // physical DIO stable samples. Extend *confirmation only*, bounded by
+    // one extra second; do not issue more than one rescue or rerun the PLC.
+    const hardDeadline = deadline + Math.min(1000,
+      this.config.stableSamples * this.config.sampleIntervalMs + this.config.sampleIntervalMs);
     const stable = new Map<number, number>();
     const feedbackErrors = new Map<number, string>();
     const retried = new Set<number>();
@@ -407,9 +412,13 @@ export class RelayFunctionalTestCoordinator {
           }
         }));
       }
-      // Start confirmation immediately after a rescue, including a slow write
-      // callback, so the reserved time contains all required spaced samples.
-      if (rescueAttempted) continue;
+      // Only the physical confirmation deadline may extend: a write can finish
+      // late, but the following reset must wait until it has actually settled.
+      if (rescueAttempted) {
+        deadline = Math.min(hardDeadline, Math.max(deadline,
+          Date.now() + confirmationReserveMs + this.config.sampleIntervalMs));
+        continue;
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       await sleep(Math.min(this.config.sampleIntervalMs, remaining));
