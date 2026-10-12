@@ -53,7 +53,9 @@ const LEGACY_CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
 const CAMERA_WIDTH = 960;
 const SLOT_ROI_SIZE = 0.1;
 const SOURCE_ROI_HEIGHT = 0.18;
-const SAMPLE_INTERVAL_MS = 240;
+// Six to eight actual frames/second while PLC is at position 1, including
+// stabilization, command dispatch and recovery gaps (not just ALARM_VERIFY).
+const SAMPLE_INTERVAL_MS = 160;
 const PHOTO_INTERVAL_MS = 720;
 const MAX_PHASE_SAMPLES = 12;
 const MAX_RUN_SAMPLES = 32;
@@ -211,6 +213,7 @@ export interface IndicatorCameraPanelProps {
   expanded: boolean;
   batchId: string | null;
   precheckBusy: boolean;
+  positionOneReady: boolean;
   relayTest: RelayFunctionalTestProgress | null | undefined;
   relayFunctionalTest: ProductPrecheckReport['relayFunctionalTest'] | null | undefined;
   onSubmitEvidence?: (report: IndicatorVisionReport) => Promise<void>;
@@ -220,6 +223,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   expanded,
   batchId,
   precheckBusy,
+  positionOneReady,
   relayTest,
   relayFunctionalTest,
   onSubmitEvidence,
@@ -247,7 +251,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const wasBusyRef = useRef(false);
   const lastBatchKeyRef = useRef<string | null>(batchId);
   const submittedBatchRef = useRef<string | null>(null);
-  const autoStartAttemptRef = useRef<string | null>(null);
+  const cameraRecoveryAttemptRef = useRef(0);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const photoFrameRef = useRef<HTMLDivElement | null>(null);
 
@@ -269,13 +273,14 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const relayTestBelongsToBatch = Boolean(relayTest?.batchId && batchId && relayTest.batchId === batchId);
   const activePhase: IndicatorPhase = relayTest?.active === true && relayTestBelongsToBatch
     ? relayTest.phase
-    : precheckBusy
+    : (precheckBusy || positionOneReady)
       ? 'BASELINE'
-      : relayTest
+      : relayTestBelongsToBatch && relayTest
         ? relayTest.phase
         : 'MANUAL';
   const relayTestCompletedForBatch = relayTestBelongsToBatch && relayTest?.active === false && relayTest.phase === 'COMPLETE';
-  const samplingActive = (precheckBusy || relayTest?.active === true)
+  const samplingActive = Boolean(batchId)
+    && (positionOneReady || precheckBusy || (relayTest?.active === true && relayTestBelongsToBatch))
     && !relayTestCompletedForBatch
     && activePhase !== 'COMPLETE';
   const autoStartKey = batchId ?? relayTest?.batchId ?? 'active';
@@ -414,21 +419,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     lastBatchKeyRef.current = batchId;
   }, [batchId]);
 
+  // Position-one BASELINE samples are already being collected before precheck.
+  // Clearing them when precheckBusy becomes true used to erase the strongest
+  // green-light evidence and could leave zero baseline frames in the result.
   useEffect(() => {
-    if (precheckBusy && !wasBusyRef.current) {
-      phaseSamplesRef.current = [];
-      runSamplesRef.current = [];
-      phaseResultsRef.current.clear();
-      submittedBatchRef.current = null;
-      lastAutomaticPhotoPhaseRef.current = null;
-      setCaptures([]);
-      setSelectedCaptureId(null);
-      setLiveResults([]);
-      setAnnotationsVisible(false);
-      lastPhaseRef.current = activePhase;
-    }
     wasBusyRef.current = precheckBusy;
-  }, [activePhase, precheckBusy]);
+  }, [precheckBusy]);
 
   useEffect(() => {
     if (!samplingActive) return;
@@ -526,13 +522,22 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
 
   useEffect(() => {
     if (!samplingActive) {
-      autoStartAttemptRef.current = null;
+      cameraRecoveryAttemptRef.current = 0;
+      return;
+    }
+    if (cameraStatus === 'ready') {
+      cameraRecoveryAttemptRef.current = 0;
       return;
     }
     if (cameraStatus !== 'idle' && cameraStatus !== 'error') return;
-    if (autoStartAttemptRef.current === autoStartKey) return;
-    autoStartAttemptRef.current = autoStartKey;
-    void startCamera();
+    // A camera opening/USB glitch gets bounded automatic retries in the SAME
+    // batch. Never generate a PASS when the camera remains unavailable.
+    if (cameraStatus === 'error' && cameraRecoveryAttemptRef.current >= 3) return;
+    const delay = cameraStatus === 'error'
+      ? 350 * 2 ** cameraRecoveryAttemptRef.current++
+      : 0;
+    const timer = window.setTimeout(() => { void startCamera(); }, delay);
+    return () => window.clearTimeout(timer);
   }, [autoStartKey, cameraStatus, samplingActive, startCamera]);
 
   useEffect(() => () => {
@@ -636,8 +641,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       window.cancelAnimationFrame(captureFrameRequestRef.current);
       captureFrameRequestRef.current = null;
     }
-    setLiveResults([]);
-    setAnnotationsVisible(false);
+    // Do not blank the six LEDs on every automatic frame; that caused visual
+    // flashing while the camera was continuously scanning.
+    if (savePhoto) {
+      setLiveResults([]);
+      setAnnotationsVisible(false);
+    }
     setRecognitionPending(true);
     captureFrameRequestRef.current = window.requestAnimationFrame(() => {
       captureFrameRequestRef.current = null;
