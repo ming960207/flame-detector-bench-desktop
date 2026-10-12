@@ -479,6 +479,12 @@ export function createFieldStatusRuntime(
           thresholds: waveformAnalysisState.thresholds,
           waveformAnalysis: waveformAnalysisState,
           inspectionPositions: Array.from(inspectionPositions.values()),
+          productConfig,
+          // Preserve structured relay DIO samples and camera LED evidence in
+          // the same file that the field auto-upload task sends to GitHub.
+          productPrecheck: productPrecheck?.batchId === waveformAnalysisState.batchId
+            ? productPrecheck
+            : null,
         });
         loggedBatchId = waveformAnalysisState.batchId;
       } catch (error) {
