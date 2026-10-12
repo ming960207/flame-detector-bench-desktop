@@ -31,7 +31,9 @@ test('relay FF frame waits for prior port write and does not use detector index 
   assert.equal(frames[0]?.toString('hex'), '123456');
   writeCallbacks.shift()?.();
   await first;
-  await setImmediate();
+  // The FF command is deliberately rate-limited at the serial gateway
+  // boundary. It must remain ordered, but cannot be expected immediately.
+  await new Promise<void>((resolve) => setTimeout(resolve, MIN_RTU_COMMAND_GAP_MS + 20));
   assert.equal(frames.length, 2);
   assert.equal(frames[1]?.[0], 0xff, 'independent port uses FF even when persisted device address is 6');
   assert.equal(frames[1]?.[1], 0x10);
