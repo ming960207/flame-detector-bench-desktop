@@ -65,6 +65,13 @@ export interface RelayFunctionalTestConfig {
 
 export interface RelayActionResult {
   commandAccepted: boolean;
+  /** Local transport writes are not device acknowledgements; physical DIO still decides PASS. */
+  commandWriteAttempts?: number;
+  commandWriteAccepted?: number;
+  rescueWriteAttempts?: number;
+  physicalConfirmedAt?: number | null;
+  resetConfirmedAt?: number | null;
+  emergencyRecovered?: boolean;
   internalStateReached: boolean;
   physicalStateReached: boolean;
   oppositeRelayStayedNormal: boolean;
