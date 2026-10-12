@@ -88,6 +88,15 @@ export interface RelayFunctionalTestUnitResult {
   alarm: RelayActionResult;
   fault: RelayActionResult;
   verdict: RelayFunctionalTestVerdict;
+  /** Raw physical contact evidence, independent of configured normal polarity. */
+  diagnostics?: {
+    baselineRawAlarm: boolean | null;
+    baselineRawFault: boolean | null;
+    alarmSampleRawAlarm: boolean | null;
+    alarmSampleRawFault: boolean | null;
+    faultSampleRawAlarm: boolean | null;
+    faultSampleRawFault: boolean | null;
+  };
 }
 
 export interface RelayFunctionalTestReport {

@@ -129,6 +129,28 @@ test('result log reports rolling RAW fluctuation as formal and keeps diagnostics
       inspectionPositions: [],
     } as unknown as CompletedFieldTest;
 
+    (fixture as any).productPrecheck = {
+      relayFunctionalTest: {
+        mode: 'FAST_BATCH', verdict: 'FAIL', startedAt: completedAt - 2000, completedAt,
+        units: [{
+          detectorIndex: 1, verdict: 'FAIL',
+          diagnostics: {
+            baselineRawAlarm: false, baselineRawFault: true,
+            alarmSampleRawAlarm: true, alarmSampleRawFault: true,
+            faultSampleRawAlarm: false, faultSampleRawFault: true,
+          },
+          alarm: { commandAccepted: true, physicalStateReached: true, responseTimeMs: 120,
+            resetAccepted: true, physicalRecovered: true, reasons: [] },
+          fault: { commandAccepted: true, physicalStateReached: false, responseTimeMs: null,
+            resetAccepted: false, physicalRecovered: false, reasons: ['FAULT_RELAY_NOT_ACTUATED'] },
+        }],
+      },
+      indicatorVision: {
+        source: 'UVC_HSV', captureCount: 5, phases: ['RUNNING', 'ALARM_VERIFY'], verdict: 'FAIL',
+        units: [{ slot: 1, runningGreen: 'PASS', fireRed: 'FAIL', faultYellow: 'PENDING', verdict: 'FAIL' }],
+      },
+    };
+
     const output = logger.record(fixture);
     assert.ok(output);
     const content = readFileSync(output, 'utf8');
@@ -138,6 +160,10 @@ test('result log reports rolling RAW fluctuation as formal and keeps diagnostics
     assert.match(content, /噪声绝对值\(RAW\)/);
     assert.match(content, /RMS\(归一化辅助\)/);
     assert.match(content, /噪声滚动窗口诊断/);
+    assert.match(content, /继电器原始反馈与动作诊断/);
+    assert.match(content, /FAULT_RELAY_NOT_ACTUATED/);
+    assert.match(content, /火警红灯/);
+    assert.match(content, /RUNNING,ALARM_VERIFY/);
     assert.match(content, /窗口按样本时间戳滚动/);
     assert.match(content, /归一化 RMS、全阶段 RAW 波动等仅作为分析辅助参数/);
     assert.doesNotMatch(content, /正式噪声判定使用有效探头自适应基线归一化波动值/);

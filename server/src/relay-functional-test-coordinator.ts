@@ -29,6 +29,8 @@ interface UnitWorkState {
     alarm: boolean | null;
     fault: boolean | null;
   };
+  /** Last sampled DIO levels during each actuation, before the reset phase. */
+  actionLevels: Record<'alarm' | 'fault', { alarm: boolean | null; fault: boolean | null } | null>;
 }
 
 const RELAY_COMMAND_MAX_ATTEMPTS = 3;
@@ -303,6 +305,7 @@ export class RelayFunctionalTestCoordinator {
           return;
         }
         feedbackErrors.delete(index);
+        state.actionLevels[kind] = { alarm: physical.rawAlarm, fault: physical.rawFault };
 
         const ownPhysical = kind === 'alarm' ? physical.alarm : physical.fault;
         const oppositePhysical = kind === 'alarm' ? physical.fault : physical.alarm;
@@ -591,6 +594,7 @@ export class RelayFunctionalTestCoordinator {
         result: emptyUnit(index),
         commandStartedAt: null,
         baselineLevels: { alarm: null, fault: null },
+        actionLevels: { alarm: null, fault: null },
       }]),
     );
 
@@ -606,12 +610,35 @@ export class RelayFunctionalTestCoordinator {
       await this.emergencyCleanup(work);
     }
 
-    const units = [...work.values()].map(({ result }) => {
+    const units = [...work.values()].map(({ result, baselineLevels, actionLevels }) => {
       this.finalizeAction(result.alarm);
       this.finalizeAction(result.fault);
       result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      result.diagnostics = {
+        baselineRawAlarm: baselineLevels.alarm,
+        baselineRawFault: baselineLevels.fault,
+        alarmSampleRawAlarm: actionLevels.alarm?.alarm ?? null,
+        alarmSampleRawFault: actionLevels.alarm?.fault ?? null,
+        faultSampleRawAlarm: actionLevels.fault?.alarm ?? null,
+        faultSampleRawFault: actionLevels.fault?.fault ?? null,
+      };
       return result;
     });
+
+    // Field failure evidence must expose the actual DIO baseline and sampled
+    // transition. A command write being accepted does not prove that a contact
+    // moved, especially when all six TCP ports have recently disconnected.
+    for (const [index, state] of work) {
+      const { result, baselineLevels, actionLevels } = state;
+      if (result.verdict !== 'FAIL') continue;
+      const print = (value: boolean | null | undefined) => value === null || value === undefined ? '?' : Number(value);
+      const describe = (kind: 'alarm' | 'fault') => {
+        const action = result[kind];
+        const sampled = actionLevels[kind];
+        return `${kind}{dio=${print(sampled?.alarm)}/${print(sampled?.fault)},write=${Number(action.commandAccepted)},moved=${Number(action.physicalStateReached)},resetWrite=${Number(action.resetAccepted)},recovered=${Number(action.physicalRecovered)},reasons=${action.reasons.join(',') || '-'}}`;
+      };
+      console.warn(`[RelayDiag] batch=${batchId ?? '-'} D${index} baselineDio=${print(baselineLevels.alarm)}/${print(baselineLevels.fault)} ${describe('alarm')} ${describe('fault')}`);
+    }
 
     this.emitPhase('COMPLETE', work);
 
