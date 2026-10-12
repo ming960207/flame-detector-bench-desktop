@@ -124,13 +124,18 @@ export class RelayFunctionalTestCoordinator {
     return false;
   }
 
-  private async detectorSimulationBurst(operation: () => Promise<void>): Promise<boolean> {
+  private async detectorSimulationBurst(
+    operation: () => Promise<void>,
+    onWrite?: (success: boolean) => void,
+  ): Promise<boolean> {
     let accepted = false;
     for (let attempt = 1; attempt <= RELAY_SIMULATION_BURST_COUNT; attempt += 1) {
       try {
         await operation();
         accepted = true;
+        onWrite?.(true);
       } catch {
+        onWrite?.(false);
         // Simulation commands are idempotent; keep sending the remaining frames.
       }
       if (attempt < RELAY_SIMULATION_BURST_COUNT) await sleep(RELAY_SIMULATION_BURST_INTERVAL_MS);
@@ -257,6 +262,11 @@ export class RelayFunctionalTestCoordinator {
       } else if (physical.rawAlarm === null || physical.rawFault === null) {
         uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
         uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
+      } else if (physical.alarm === true || physical.fault === true) {
+        // A pre-energized contact cannot prove a new command transition.
+        // Isolate this slot without extending the PLC window or affecting peers.
+        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_NOT_NORMAL');
+        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_NOT_NORMAL');
       }
     }));
   }
@@ -267,10 +277,17 @@ export class RelayFunctionalTestCoordinator {
   ): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
+      if (action.reasons.includes('RELAY_BASELINE_NOT_NORMAL')) return;
       state.commandStartedAt = Date.now();
-      const accepted = await this.detectorSimulationBurst(() => this.detectors.simulate(index, kind === 'alarm'
-        ? { fire: true, fault: false }
-        : { fire: false, fault: true }));
+      const accepted = await this.detectorSimulationBurst(
+        () => this.detectors.simulate(index, kind === 'alarm'
+          ? { fire: true, fault: false }
+          : { fire: false, fault: true }),
+        (success) => {
+          action.commandWriteAttempts = (action.commandWriteAttempts ?? 0) + 1;
+          if (success) action.commandWriteAccepted = (action.commandWriteAccepted ?? 0) + 1;
+        },
+      );
       if (accepted) action.commandAccepted = true;
       else uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
     }));
@@ -335,6 +352,7 @@ export class RelayFunctionalTestCoordinator {
           stable.set(index, next);
           if (next >= this.config.stableSamples) {
             action.physicalStateReached = true;
+            action.physicalConfirmedAt ??= Date.now();
             if (action.responseTimeMs === null) {
               action.responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
             }
@@ -360,10 +378,13 @@ export class RelayFunctionalTestCoordinator {
           rescueAttempted = true;
           // One idempotent rescue frame only; keep the original baseline, stable
           // sample requirement and deadline. Never repeat the whole action cycle.
+          action.commandWriteAttempts = (action.commandWriteAttempts ?? 0) + 1;
+          action.rescueWriteAttempts = (action.rescueWriteAttempts ?? 0) + 1;
           try {
             await this.withinDeadline(() => this.detectors.simulate(index, kind === 'alarm'
               ? { fire: true, fault: false }
               : { fire: false, fault: true }), deadline - confirmationReserveMs);
+            action.commandWriteAccepted = (action.commandWriteAccepted ?? 0) + 1;
           } catch {
             // The original command was accepted. Physical evidence remains the
             // authority, and lack of actuation still fails at the same deadline.
@@ -433,7 +454,10 @@ export class RelayFunctionalTestCoordinator {
         if (ownRecovered) {
           const next = (stable.get(index) ?? 0) + 1;
           stable.set(index, next);
-          if (next >= this.config.stableSamples) action.physicalRecovered = true;
+          if (next >= this.config.stableSamples) {
+            action.physicalRecovered = true;
+            action.resetConfirmedAt ??= Date.now();
+          }
         } else {
           stable.set(index, 0);
         }
@@ -525,7 +549,8 @@ export class RelayFunctionalTestCoordinator {
         feedbackErrors.delete(index);
 
         if (!alarmRecovered.has(index)) {
-          const recovered = physical.rawAlarm !== null && state.baselineLevels.alarm !== null
+          const recovered = !state.result.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+            && physical.rawAlarm !== null && state.baselineLevels.alarm !== null
             ? physical.rawAlarm === state.baselineLevels.alarm
             : physical.alarm === false;
           const next = recovered ? (alarmStable.get(index) ?? 0) + 1 : 0;
@@ -533,7 +558,8 @@ export class RelayFunctionalTestCoordinator {
           if (next >= this.config.stableSamples) alarmRecovered.add(index);
         }
         if (!faultRecovered.has(index)) {
-          const recovered = physical.rawFault !== null && state.baselineLevels.fault !== null
+          const recovered = !state.result.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+            && physical.rawFault !== null && state.baselineLevels.fault !== null
             ? physical.rawFault === state.baselineLevels.fault
             : physical.fault === false;
           const next = recovered ? (faultStable.get(index) ?? 0) + 1 : 0;
@@ -551,6 +577,8 @@ export class RelayFunctionalTestCoordinator {
 
     for (const [index, state] of work.entries()) {
       if (!resetAccepted.has(index)) continue;
+      state.result.alarm.emergencyRecovered = alarmRecovered.has(index);
+      state.result.fault.emergencyRecovered = faultRecovered.has(index);
       const feedbackError = feedbackErrors.get(index);
       if (feedbackError) {
         this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
@@ -635,7 +663,7 @@ export class RelayFunctionalTestCoordinator {
       const describe = (kind: 'alarm' | 'fault') => {
         const action = result[kind];
         const sampled = actionLevels[kind];
-        return `${kind}{dio=${print(sampled?.alarm)}/${print(sampled?.fault)},write=${Number(action.commandAccepted)},moved=${Number(action.physicalStateReached)},resetWrite=${Number(action.resetAccepted)},recovered=${Number(action.physicalRecovered)},reasons=${action.reasons.join(',') || '-'}}`;
+        return `${kind}{dio=${print(sampled?.alarm)}/${print(sampled?.fault)},tcpWrites=${action.commandWriteAccepted ?? 0}/${action.commandWriteAttempts ?? 0},rescue=${action.rescueWriteAttempts ?? 0},physicalConfirmed=${Number(action.physicalStateReached)},resetAck=${Number(action.resetAccepted)},inWindowRecovered=${Number(action.physicalRecovered)},cleanupRecovered=${Number(action.emergencyRecovered ?? false)},reasons=${action.reasons.join(',') || '-'}}`;
       };
       console.warn(`[RelayDiag] batch=${batchId ?? '-'} D${index} baselineDio=${print(baselineLevels.alarm)}/${print(baselineLevels.fault)} ${describe('alarm')} ${describe('fault')}`);
     }
