@@ -313,8 +313,10 @@ export class RelayFunctionalTestCoordinator {
     // A slow but awaited rescue write must leave enough wall-clock time for
     // physical DIO stable samples. Extend *confirmation only*, bounded by
     // one extra second; do not issue more than one rescue or rerun the PLC.
-    const hardDeadline = deadline + Math.min(1000,
-      this.config.stableSamples * this.config.sampleIntervalMs + this.config.sampleIntervalMs);
+    // Rare slow socket callback (e.g. 700ms) must finish before reset. Allow
+    // bounded extra confirmation only when a rescue actually occurs, not during
+    // normal relay testing or at all for an already-confirmed contact.
+    const hardDeadline = deadline + 900;
     const stable = new Map<number, number>();
     const feedbackErrors = new Map<number, string>();
     const retried = new Set<number>();
