@@ -429,6 +429,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
           step.physicalStateReached ? 'DIO稳定确认' : 'DIO未确认',
           step.responseTimeMs == null ? '-' : `${step.responseTimeMs}ms`,
           step.resetAccepted ? '是' : '否',
+          `复位补发=${step.resetRescueWriteAttempts ?? 0}`,
           step.physicalRecovered ? '时限内恢复' : '时限内未恢复',
           step.emergencyRecovered === true ? '紧急清理后恢复' : step.emergencyRecovered === false ? '紧急清理后未恢复' : '紧急清理无证据',
           step.reasons.join('、') || '-',
