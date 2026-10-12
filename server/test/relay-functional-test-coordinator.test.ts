@@ -544,13 +544,14 @@ test('reset feedback recovers within its original window without a sticky error'
   assert.ok(elapsed.get('ALARM_RESET_VERIFY')! < 450);
 });
 
-test('a slow rescue write callback leaves enough time for all stable DIO samples', async () => {
+test('a slow rescue write remains serialized and gets bounded DIO confirmation grace', async () => {
   const { coordinator, elapsed } = fixture({ droppedCommands: true, slowRescueCallback: true });
   const report = await coordinator.run('slow-rescue-callback');
   assert.equal(report.verdict, 'PASS');
-  // Feedback still has its original deadline; the camera window follows it.
-  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
-  assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
+  // A slow callback must be awaited to avoid the F000 reset overtaking it.
+  // Exceptional rescue may need a bounded extra window, never a PLC rerun.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 1300);
+  assert.ok(elapsed.get('FAULT_VERIFY')! < 1300);
 });
 
 test('one-pass reset rescue reissues F000 only when physical DIO fails to recover', async () => {
