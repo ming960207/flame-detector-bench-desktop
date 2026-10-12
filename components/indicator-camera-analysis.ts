@@ -183,3 +183,38 @@ export function aggregateSamples(samples: FrameSample[], phase: IndicatorPhase, 
   });
 }
 
+
+/**
+ * Final LED evidence must come from its own physical test phase. In particular,
+ * an illuminated green LED in ALARM_VERIFY is not proof that the BASELINE
+ * running-light inspection was observed. Missing/short phases stay UNKNOWN.
+ */
+export function completedIndicatorResults(
+  phaseResults: ReadonlyMap<IndicatorPhase, IndicatorSlotResult[]>,
+  rois: IndicatorSlotRoi[],
+): IndicatorSlotResult[] {
+  const unknown = (color: IndicatorColor): IndicatorLightResult => ({
+    color, state: 'UNKNOWN', confidence: 0, matchRatio: 0, bounds: null,
+  });
+  return rois.map((roi) => {
+    const baseline = phaseResults.get('BASELINE')?.find((item) => item.slot === roi.slot);
+    const alarm = phaseResults.get('ALARM_VERIFY')?.find((item) => item.slot === roi.slot);
+    const fault = phaseResults.get('FAULT_VERIFY')?.find((item) => item.slot === roi.slot);
+    const green = (baseline?.frames ?? 0) >= REQUIRED_STABLE_FRAMES
+      ? baseline!.lights.green : unknown('green');
+    const red = (alarm?.frames ?? 0) >= REQUIRED_STABLE_FRAMES
+      ? alarm!.lights.red : unknown('red');
+    const yellow = (fault?.frames ?? 0) >= REQUIRED_STABLE_FRAMES
+      ? fault!.lights.yellow : unknown('yellow');
+    const states = [green.state, red.state];
+    return {
+      slot: roi.slot,
+      roi,
+      verdict: states.every((state) => state === 'ON')
+        ? 'PASS'
+        : states.some((state) => state === 'OFF') ? 'FAIL' : 'WAITING',
+      lights: { green, red, yellow },
+      frames: Math.max(baseline?.frames ?? 0, alarm?.frames ?? 0, fault?.frames ?? 0),
+    };
+  });
+}
