@@ -20,6 +20,7 @@ import { TestObserverPanel } from './TestObserverPanel';
 import { SoftwareReleasePanel } from './SoftwareReleasePanel';
 import { labelPrinterRuntime } from './label-printer-runtime';
 import { WutosDashboard } from './WutosDashboard';
+import { createCompletedResultHold, hasCompletedResult } from '../utils/completed-result-hold';
 import './field-process-status.css';
 import './wutos-main-overrides.css';
 
@@ -102,6 +103,7 @@ function logWaveformUiDiagnostic(
 }
 
 export function FieldProcessStatusApp() {
+  const [resultComplete, setResultComplete] = useState(false);
   const [status, setStatus] = useState<PLCProcessStatus | null>(null);
   const [detectors, setDetectors] = useState<FlameDetectorState | null>(null);
   const [waveformAnalysis, setWaveformAnalysis] = useState<FieldWaveformAnalysisSnapshot | null>(null);
@@ -123,29 +125,10 @@ export function FieldProcessStatusApp() {
   const dashboardRenderSchedulerRef = useRef<LatestValueScheduler<QueuedDashboardRender> | null>(null);
   const dashboardRenderQueueRef = useRef<QueuedDashboardRender>({});
   const dashboardRenderSequenceRef = useRef(0);
-  const completedSummaryRef = useRef<FieldSummaryPayload | null>(null);
+  const resultHoldRef = useRef(createCompletedResultHold<FieldSummaryPayload>());
 
-  const applySummary = useCallback((incoming: FieldSummaryPayload) => {
-    // PLC and detector snapshots arrive on separate WebSocket topics. During
-    // completion they may briefly disagree; never replace a latched completed
-    // result with an incomplete snapshot of the SAME batch (visible flashing).
-    const previous = completedSummaryRef.current;
-    const previousBatch = previous?.waveformAnalysis?.batchId;
-    const incomingBatch = incoming.waveformAnalysis?.batchId;
-    const previousComplete = previous?.waveformAnalysis?.phase === 'COMPLETE';
-    const sameBatch = Boolean(previousBatch && previousBatch === incomingBatch);
-    const missingBatch = !incomingBatch;
-    const staleCompletionFrame = previousComplete && (sameBatch || missingBatch)
-      && (incoming.waveformAnalysis?.phase !== 'COMPLETE'
-        || incoming.finalVerdict?.verdict === 'PENDING');
-    const summary = staleCompletionFrame ? previous! : incoming;
-    if (incoming.waveformAnalysis?.phase === 'COMPLETE' && incomingBatch
-      && incoming.finalVerdict?.verdict !== 'PENDING') {
-      completedSummaryRef.current = incoming;
-    } else if (incomingBatch && incomingBatch !== previousBatch) {
-      // A new concrete batch is the only event allowed to release the latch.
-      completedSummaryRef.current = null;
-    }
+  const applySummary = useCallback((summary: FieldSummaryPayload) => {
+    setResultComplete(hasCompletedResult(summary));
     setStatus(summary.process ?? null);
     setWaveformAnalysis(summary.waveformAnalysis ?? null);
     setDetectorVerdict(summary.detectorVerdict ?? null);
@@ -163,7 +146,11 @@ export function FieldProcessStatusApp() {
     const next: QueuedDashboardRender = { ...current };
     if ('status' in patch) next.status = { sequence, value: patch.status ?? null };
     if ('detectors' in patch && patch.detectors) next.detectors = { sequence, value: patch.detectors };
-    if ('summary' in patch && patch.summary) next.summary = { sequence, value: patch.summary };
+    if ('summary' in patch && patch.summary) {
+      // Latch at ingestion: an 80ms coalescing window must not discard COMPLETE
+      // when it is immediately followed by a stale/PENDING snapshot.
+      next.summary = { sequence, value: resultHoldRef.current.accept(patch.summary) };
+    }
     if ('notice' in patch && patch.notice !== undefined) next.notice = { sequence, value: patch.notice };
     dashboardRenderQueueRef.current = next;
     dashboardRenderSchedulerRef.current?.push(next);
@@ -390,6 +377,7 @@ export function FieldProcessStatusApp() {
   return <>
     <WutosDashboard
       status={status}
+      resultComplete={resultComplete}
       detectors={detectors}
       waveformAnalysis={waveformAnalysis}
       detectorVerdict={detectorVerdict}
