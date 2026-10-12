@@ -393,9 +393,13 @@ export class RelayFunctionalTestCoordinator {
           action.commandWriteAttempts = (action.commandWriteAttempts ?? 0) + 1;
           action.rescueWriteAttempts = (action.rescueWriteAttempts ?? 0) + 1;
           try {
-            await this.withinDeadline(() => this.detectors.simulate(index, kind === 'alarm'
+            // Never abandon an in-flight physical write with Promise.race:
+            // it could remain queued and execute *after* the next reset phase.
+            // Await the actual queued completion, even when the DIO deadline
+            // is nearly exhausted; the next phase must not overtake it.
+            await this.detectors.simulate(index, kind === 'alarm'
               ? { fire: true, fault: false }
-              : { fire: false, fault: true }), deadline - confirmationReserveMs);
+              : { fire: false, fault: true });
             action.commandWriteAccepted = (action.commandWriteAccepted ?? 0) + 1;
           } catch {
             // The original command was accepted. Physical evidence remains the
@@ -436,6 +440,9 @@ export class RelayFunctionalTestCoordinator {
     const deadline = Date.now() + this.config.resetTimeoutMs;
     const stable = new Map<number, number>();
     const feedbackErrors = new Map<number, string>();
+    const retriedReset = new Set<number>();
+    const retryAt = deadline - this.config.resetTimeoutMs / 2;
+    const confirmationReserveMs = this.config.stableSamples * this.config.sampleIntervalMs;
 
     while (Date.now() < deadline) {
       const sample = this.sharedSample(deadline);
@@ -481,6 +488,29 @@ export class RelayFunctionalTestCoordinator {
           || (action.physicalRecovered && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
+      // A reset ACK (or local write completion) does not prove the contact
+      // returned to normal. Reissue one idempotent reset only after a fresh DIO
+      // snapshot showed no recovery and while stable confirmation still fits.
+      // This is a rescue inside the same PLC pass, never a second test cycle.
+      let rescueAttempted = false;
+      if (Date.now() >= retryAt && Date.now() < deadline - confirmationReserveMs) {
+        await Promise.all([...work.entries()].map(async ([index, state]) => {
+          const action = state.result[kind];
+          if (!action.resetAccepted || action.physicalRecovered || (stable.get(index) ?? 0) > 0
+            || feedbackErrors.has(index) || retriedReset.has(index)) return;
+          retriedReset.add(index);
+          rescueAttempted = true;
+          action.resetRescueWriteAttempts = (action.resetRescueWriteAttempts ?? 0) + 1;
+          try {
+            // Wait for the queued addressed F000 write AND its matching FC10
+            // reply. A deadline-raced promise could execute in the next phase.
+            await this.detectors.reset(index);
+          } catch {
+            // DIO physical recovery remains the final authority.
+          }
+        }));
+      }
+      if (rescueAttempted) continue;
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       await sleep(Math.min(this.config.sampleIntervalMs, remaining));
