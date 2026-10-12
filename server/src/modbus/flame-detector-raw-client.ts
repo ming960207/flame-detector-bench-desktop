@@ -5,6 +5,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 700;
 // Each physical port carries single-wire RTU frames and replies, not independent
 // multiplexed requests. Avoid bursts faster than the downstream serial gateway.
 export const MIN_RTU_COMMAND_GAP_MS = 120;
+const MIN_RTU_READ_GAP_MS = 20;
 export const RTU_TIMEOUT_REPLY_QUIET_MS = 220;
 /** 现场 TCP 独立端口拓扑：每个端口仅挂一台探测器，所有探测器从站地址均为 0x01。 */
 const FIELD_TCP_DEVICE_ADDRESS = 0x01;
@@ -58,6 +59,7 @@ export class RawTcpModbusClient {
   private readonly requestTimeoutMs: number;
   private requestTail: Promise<void> = Promise.resolve();
   private lastCommandSentAt = 0;
+  private lastCommandWasWrite = false;
 
   constructor(
     public readonly socket: Socket,
@@ -141,15 +143,21 @@ export class RawTcpModbusClient {
     return next;
   }
 
-  private async waitForTransmitGap(): Promise<void> {
-    const remaining = this.lastCommandSentAt + MIN_RTU_COMMAND_GAP_MS - Date.now();
+  private async waitForTransmitGap(isWrite: boolean): Promise<void> {
+    // Read/ACK transactions are already serialized by the per-port queue.
+    // Do not inject a 120ms pause between ordinary identity reads: reserve
+    // the larger gap for broadcasts/resets and transitions involving writes.
+    const minimumGapMs = isWrite || this.lastCommandWasWrite
+      ? MIN_RTU_COMMAND_GAP_MS : MIN_RTU_READ_GAP_MS;
+    const remaining = this.lastCommandSentAt + minimumGapMs - Date.now();
     if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
     if (!this.isOpen) throw new Error('探测器原始 TCP 连接不可用');
     this.lastCommandSentAt = Date.now();
+    this.lastCommandWasWrite = isWrite;
   }
 
   private async exchange(request: Buffer, address: number, functionCode: number, quantity: number, startAddress?: number): Promise<Buffer> {
-    await this.waitForTransmitGap();
+    await this.waitForTransmitGap(functionCode === 0x10);
     try {
       return await new Promise<Buffer>((resolve, reject) => {
       let settled = false;
@@ -202,7 +210,7 @@ export class RawTcpModbusClient {
   }
 
   private async writeOneWay(request: Buffer): Promise<void> {
-    await this.waitForTransmitGap();
+    await this.waitForTransmitGap(true);
     if (!this.isOpen) return Promise.reject(new Error('探测器原始 TCP 连接不可用'));
     return new Promise<void>((resolve, reject) => {
       try {
