@@ -236,39 +236,47 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
-    const sample = this.sharedSample(Date.now() + this.config.dio.requestTimeoutMs);
-    await Promise.all([...work.entries()].map(async ([index, state]) => {
-      const [internal, physical] = await Promise.all([
-        this.diagnosticInternalState(index),
-        this.physicalState(index, sample),
-      ]);
-      state.baselineLevels = {
-        alarm: physical.rawAlarm,
-        fault: physical.rawFault,
-      };
-      state.result.baseline = {
-        alarmInternal: internal?.fire ?? null,
-        faultInternal: internal?.fault ?? null,
-        alarmPhysical: physical.alarm,
-        faultPhysical: physical.fault,
-      };
-
-      // Functional verification uses the observed raw baseline, not configured
-      // polarity. A stuck/active contact will still fail because it cannot produce
-      // the required transition after the command.
-      if (physical.error) {
-        uniquePush(state.result.alarm.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-        uniquePush(state.result.fault.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-      } else if (physical.rawAlarm === null || physical.rawFault === null) {
-        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
-        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
-      } else if (physical.alarm === true || physical.fault === true) {
-        // A pre-energized contact cannot prove a new command transition.
-        // Isolate this slot without extending the PLC window or affecting peers.
-        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_NOT_NORMAL');
-        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_NOT_NORMAL');
-      }
-    }));
+    // One PLC pass, but up to two independent DIO baseline snapshots. The
+    // underlying readFeedback already retries its Modbus transaction; a fresh
+    // snapshot also recovers from an exhausted transient timeout. Never simulate
+    // a relay until a complete, trustworthy baseline has been observed.
+    const pending = new Set(work.keys());
+    const lastErrors = new Map<number, string>();
+    for (let attempt = 0; attempt < 2 && pending.size > 0; attempt += 1) {
+      if (attempt > 0) await sleep(RELAY_READ_RETRY_DELAY_MS);
+      const sample = this.sharedSample(Date.now() + this.config.dio.requestTimeoutMs);
+      await Promise.all([...work.entries()].filter(([index]) => pending.has(index)).map(async ([index, state]) => {
+        const [internal, physical] = await Promise.all([
+          this.diagnosticInternalState(index),
+          this.physicalState(index, sample),
+        ]);
+        if (physical.error || physical.rawAlarm === null || physical.rawFault === null) {
+          lastErrors.set(index, physical.error ?? 'DIO_RESPONSE_INVALID');
+          return;
+        }
+        lastErrors.delete(index);
+        pending.delete(index);
+        state.baselineLevels = { alarm: physical.rawAlarm, fault: physical.rawFault };
+        state.result.baseline = {
+          alarmInternal: internal?.fire ?? null,
+          faultInternal: internal?.fault ?? null,
+          alarmPhysical: physical.alarm,
+          faultPhysical: physical.fault,
+        };
+        // An already-energized contact is NOT a transient read failure. Do
+        // not reset/energize it blindly to manufacture a passing transition.
+        if (physical.alarm === true || physical.fault === true) {
+          uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_NOT_NORMAL');
+          uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_NOT_NORMAL');
+        }
+      }));
+    }
+    for (const index of pending) {
+      const state = work.get(index)!;
+      const reason = `RELAY_FEEDBACK_READ_FAILED:${lastErrors.get(index) ?? 'DIO_RESPONSE_INVALID'}`;
+      uniquePush(state.result.alarm.reasons, reason);
+      uniquePush(state.result.fault.reasons, reason);
+    }
   }
 
   private async sendCommand(
