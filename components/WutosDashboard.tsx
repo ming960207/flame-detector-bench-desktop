@@ -774,6 +774,9 @@ const LiveWaveformPanel: FC<{
       <IndicatorCameraPanel
         expanded={expanded}
         batchId={productPrecheck?.batchId ?? waveformAnalysis?.batchId ?? relayTest?.batchId ?? null}
+        // Arm continuous evidence acquisition as soon as PLC reaches position 1
+        // instead of waiting until async identity/relay precheck has started.
+        positionOneReady={status?.processStage === 'HEAT' && status?.stage !== 'FAULT'}
         precheckBusy={productPrecheckBusy}
         relayTest={relayTest}
         relayFunctionalTest={productPrecheck?.relayFunctionalTest}

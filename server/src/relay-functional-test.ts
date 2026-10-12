@@ -69,6 +69,8 @@ export interface RelayActionResult {
   commandWriteAttempts?: number;
   commandWriteAccepted?: number;
   rescueWriteAttempts?: number;
+  /** One bounded F000 rescue if local success was not confirmed by physical DIO. */
+  resetRescueWriteAttempts?: number;
   physicalConfirmedAt?: number | null;
   resetConfirmedAt?: number | null;
   emergencyRecovered?: boolean;
