@@ -92,3 +92,20 @@ test('early red lamp captured during ALARM_COMMAND can be used only after a stab
   phases.set('ALARM_COMMAND', observed(alarmFrame, 'ALARM_COMMAND', 1));
   assert.equal(completedIndicatorResults(phases, [roi])[0]!.lights.red.state, 'UNKNOWN', 'single red frame cannot pass');
 });
+
+test('separated red specks and frozen duplicate timestamps never count as a stable lamp', () => {
+  const on = image();
+  for (let y = 31; y < 35; y++) for (let x = 31; x < 35; x++) pixel(on, x, y);
+  const off = image();
+  const sample = (frame: ImageData, at: number) => ({
+    capturedAt: at,
+    phase: 'ALARM_VERIFY' as const,
+    slots: analyzeIndicatorFrame(frame, [roi], 'ALARM_VERIFY'),
+  });
+  const flicker = [sample(on, 0), sample(off, 160), sample(on, 320), sample(off, 480)];
+  assert.notEqual(aggregateSamples(flicker, 'ALARM_VERIFY', [roi])[0]!.verdict, 'PASS');
+  const frozen = [sample(on, 0), sample(on, 0)];
+  assert.notEqual(aggregateSamples(frozen, 'ALARM_VERIFY', [roi])[0]!.verdict, 'PASS');
+  const stable = [sample(on, 0), sample(on, 160)];
+  assert.equal(aggregateSamples(stable, 'ALARM_VERIFY', [roi])[0]!.verdict, 'PASS');
+});
