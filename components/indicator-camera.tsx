@@ -496,6 +496,16 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
           return;
         }
         streamRef.current = video;
+        video.getVideoTracks().forEach((track) => {
+          track.addEventListener('ended', () => {
+            if (cameraGenerationRef.current === generation && streamRef.current === video) {
+              // UVC unplug/driver restart: let the bounded reopening policy
+              // resume this batch, without pretending that any frame was seen.
+              setCameraError('UVC 视频流中断，正在自动重新连接');
+              setCameraStatus('error');
+            }
+          }, { once: true });
+        });
         const videos = [captureVideoRef.current, previewVideoRef.current].filter((element): element is HTMLVideoElement => Boolean(element));
         videos.forEach((element) => { element.srcObject = video; });
         await Promise.all(videos.map((element) => element.play().catch(() => undefined)));
