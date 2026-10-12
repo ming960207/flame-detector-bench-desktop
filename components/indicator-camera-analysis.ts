@@ -151,17 +151,36 @@ export function analyzeIndicatorFrame(image: ImageData, rois: IndicatorSlotRoi[]
 
 export function aggregateLight(samples: FrameSample[], slot: number, color: IndicatorColor): IndicatorLightResult {
   const matches = samples
-    .map((sample) => sample.slots.find((item) => item.slot === slot)?.lights[color])
-    .filter((item): item is IndicatorLightResult => Boolean(item));
-  const onSamples = matches.filter((item) => item.state === 'ON');
-  const strongest = matches.slice().sort((left, right) => right.confidence - left.confidence)[0];
-  const state: IndicatorState = onSamples.length >= REQUIRED_STABLE_FRAMES ? 'ON' : matches.length >= REQUIRED_STABLE_FRAMES ? 'OFF' : 'UNKNOWN';
+    .map((sample) => ({
+      timestamp: sample.capturedAt,
+      light: sample.slots.find((item) => item.slot === slot)?.lights[color],
+    }))
+    .filter((item): item is { timestamp: number; light: IndicatorLightResult } => Boolean(item.light));
+  const onSamples = matches.filter((item) => item.light.state === 'ON');
+  const offSamples = matches.filter((item) => item.light.state === 'OFF');
+  const strongest = matches.map((item) => item.light)
+    .sort((left, right) => right.confidence - left.confidence)[0];
+  // Two non-adjacent noise flashes must not fake a stable lamp. Distinct video
+  // timestamps also prevent a frozen frame being counted twice as new proof.
+  let stableOn = false;
+  let previousOnAt: number | null = null;
+  for (const item of matches) {
+    const gap = previousOnAt === null ? -1 : item.timestamp - previousOnAt;
+    if (item.light.state === 'ON') {
+      if (gap >= 60 && gap <= 650) stableOn = true;
+      previousOnAt = item.timestamp;
+    } else {
+      previousOnAt = null;
+    }
+  }
+  const state: IndicatorState = stableOn ? 'ON'
+    : offSamples.length >= REQUIRED_STABLE_FRAMES ? 'OFF' : 'UNKNOWN';
   return {
     color,
     state,
     confidence: strongest?.confidence ?? 0,
     matchRatio: strongest?.matchRatio ?? 0,
-    bounds: onSamples.find((item) => item.bounds)?.bounds ?? null,
+    bounds: onSamples.find((item) => item.light.bounds)?.light.bounds ?? null,
   };
 }
 
