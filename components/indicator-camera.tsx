@@ -23,7 +23,7 @@ import {
   type ContainMediaGeometry,
 } from './indicator-camera-geometry';
 import { displayResultsForCapture } from './indicator-camera-display-model';
-import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, completedIndicatorResults, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
+import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, completedIndicatorResults, shouldSampleIndicatorEvidence, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
 export { analyzeIndicatorFrame } from './indicator-camera-analysis';
 import type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, FrameSample } from './indicator-camera-analysis';
 export type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, IndicatorLightResult } from './indicator-camera-analysis';
@@ -278,11 +278,14 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       : relayTestBelongsToBatch && relayTest
         ? relayTest.phase
         : 'MANUAL';
-  const relayTestCompletedForBatch = relayTestBelongsToBatch && relayTest?.active === false && relayTest.phase === 'COMPLETE';
-  const samplingActive = Boolean(batchId)
-    && (positionOneReady || precheckBusy || (relayTest?.active === true && relayTestBelongsToBatch))
-    && !relayTestCompletedForBatch
-    && activePhase !== 'COMPLETE';
+  const samplingActive = shouldSampleIndicatorEvidence({
+    batchId,
+    positionOneReady,
+    precheckBusy,
+    relayBatchId: relayTest?.batchId ?? null,
+    relayActive: relayTest?.active === true,
+    relayPhase: relayTest?.phase ?? 'MANUAL',
+  });
   const autoStartKey = batchId ?? relayTest?.batchId ?? 'active';
   const currentCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
   const liveGeometry = useMemo(() => (
@@ -617,7 +620,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     setAnnotationsVisible(true);
     setRecognitionPending(false);
 
-    const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
+    const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_COMMAND' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
     // Save the first frame even when an expected LED is absent, so failed
     // inspections retain visual evidence. Keep follow-up photos bounded.
     const shouldSave = savePhoto || automaticPhotoAllowed && (
