@@ -552,3 +552,38 @@ test('a slow rescue write callback leaves enough time for all stable DIO samples
   assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
 });
+
+test('one-pass reset rescue reissues F000 only when physical DIO fails to recover', async () => {
+  const inputs = { X1: false, X2: false };
+  let resets = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
+    },
+    async reset() {
+      resets++;
+      // First reset is transport-accepted but intentionally has no effect.
+      // A second, serially awaited F000 should recover the physical contacts.
+      if (resets === 1) return;
+      inputs.X1 = false;
+      inputs.X2 = false;
+    },
+    async readLatched() { return { fire: inputs.X1, fault: inputs.X2 }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true, mode: 'FAST_BATCH',
+    stableSamples: 1, sampleIntervalMs: 50,
+    feedbackTimeoutMs: 250, resetTimeoutMs: 600,
+    mappings: createMapping([1]),
+  });
+  const report = await new RelayFunctionalTestCoordinator(
+    detectors, { readInputs: () => ({ ...inputs }) }, config,
+  ).run('reset-rescue-one-pass');
+  assert.equal(report.verdict, 'PASS');
+  assert.equal(report.units[0]?.alarm.physicalRecovered, true);
+  assert.equal(report.units[0]?.alarm.resetRescueWriteAttempts, 1);
+  assert.equal(report.units[0]?.fault.resetRescueWriteAttempts, undefined);
+  assert.ok(resets >= 4, 'alarm reset, its rescue, fault reset and final safe cleanup');
+});
