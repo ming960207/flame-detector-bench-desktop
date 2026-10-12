@@ -610,10 +610,18 @@ export class RelayFunctionalTestCoordinator {
       await this.emergencyCleanup(work);
     }
 
-    const units = [...work.values()].map(({ result }) => {
+    const units = [...work.values()].map(({ result, baselineLevels, actionLevels }) => {
       this.finalizeAction(result.alarm);
       this.finalizeAction(result.fault);
       result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      result.diagnostics = {
+        baselineRawAlarm: baselineLevels.alarm,
+        baselineRawFault: baselineLevels.fault,
+        alarmSampleRawAlarm: actionLevels.alarm?.alarm ?? null,
+        alarmSampleRawFault: actionLevels.alarm?.fault ?? null,
+        faultSampleRawAlarm: actionLevels.fault?.alarm ?? null,
+        faultSampleRawFault: actionLevels.fault?.fault ?? null,
+      };
       return result;
     });
 
