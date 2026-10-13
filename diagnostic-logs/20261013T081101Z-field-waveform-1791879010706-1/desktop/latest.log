@@ -1,0 +1,24 @@
+[2026-10-13T08:10:10.596Z][STDOUT] [日志自动上传] 已启用，完整测试结果落盘后自动上传: C:\Users\admin\AppData\Roaming\flame-detector-bench-desktop\runtime\logs
+[2026-10-13T08:10:10.596Z][BACKEND] 启动完成 durationMs=723
+[2026-10-13T08:10:10.615Z][STDOUT] [WS] 新客户端连接
+[2026-10-13T08:10:10.617Z][STDOUT] [WaveformDiag][WS] mode=snapshot clients=1 resync=0 maxBuffered=0 stateAgeMs=0 D1{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0} D2{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0} D3{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0} D4{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0} D5{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0} D6{on=0,ready=0,sync=0,startup=DISCONNECTED,attempts=0,streak=0,firstAgeMs=-1,readyAgeMs=-1,total=0,delta=-,hist=0,lastAgeMs=-1,reset=0}
+[2026-10-13T08:10:10.633Z][BACKEND] 健康检查通过 durationMs=36 status=200
+[2026-10-13T08:10:10.664Z][RENDERER] loadFile=D:\exe\flame-detector-bench-desktop\resources\app.asar\dist\index.html
+[2026-10-13T08:10:10.771Z][STDOUT] [MQTT Server] 云端连接成功
+[2026-10-13T08:10:10.868Z][RENDERER] ready-to-show
+[2026-10-13T08:10:11.128Z][STDOUT] [WS] 新客户端连接
+[2026-10-13T08:10:11.276Z][RENDERER/LOAD] did-finish-load
+[2026-10-13T08:10:11.277Z][BOOT] 桌面程序启动完成
+[2026-10-13T08:10:11.284Z][RENDERER/1] file:///D:/exe/flame-detector-bench-desktop/resources/app.asar/dist/assets/index-BGzl9S3v.js:326 [RuntimeDiag][UI] WebSocket connected ws://127.0.0.1:3003
+[2026-10-13T08:10:11.285Z][RENDERER/1] file:///D:/exe/flame-detector-bench-desktop/resources/app.asar/dist/assets/index-BGzl9S3v.js:325 [标签打印] 已连接精臣打印服务 ws://127.0.0.1:37989
+[2026-10-13T08:10:11.796Z][RENDERER/1] file:///D:/exe/flame-detector-bench-desktop/resources/app.asar/dist/assets/index-BGzl9S3v.js:325 [标签打印] USB扫描完成 count=1
+[2026-10-13T08:10:12.076Z][RENDERER/1] file:///D:/exe/flame-detector-bench-desktop/resources/app.asar/dist/assets/index-BGzl9S3v.js:325 [标签打印] USB标签机连接成功 name=I704020079 port=7
+[2026-10-13T08:11:01.024Z][STDOUT] [标签打印/快照] {"slot":1,"deviceId":"D1","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.025Z][STDOUT] [标签打印/快照] {"slot":2,"deviceId":"D2","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.025Z][STDOUT] [标签打印/快照] {"slot":3,"deviceId":"D3","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.026Z][STDOUT] [标签打印/快照] {"slot":4,"deviceId":"D4","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.026Z][STDOUT] [标签打印/快照] {"slot":5,"deviceId":"D5","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.027Z][STDOUT] [标签打印/快照] {"slot":6,"deviceId":"D6","finalGrade":"不合格","finalPassed":false,"ngReasons":["火警动作异常","故障动作异常"],"labelReason":"火警动作异常 / 故障动作异常","printText":"NG 火警动作异常 / 故障动作异常"}
+[2026-10-13T08:11:01.035Z][STDOUT] [标签打印] 批次 field-waveform-1791879010706-1 已生成 6 个标签任务（D1→D6）。
+[2026-10-13T08:11:01.071Z][STDOUT] [MES] MES自动上传跳过：批次 field-waveform-1791879010706-1，没有可上传的产品编号。
+[2026-10-13T08:11:01.814Z][STDOUT] [日志自动上传] 检测完成，开始上传 batch=field-waveform-1791879010706-1
