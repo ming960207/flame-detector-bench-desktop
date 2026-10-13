@@ -33,12 +33,13 @@ import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdic
 import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-waveform-analysis';
 import type { FlameDetectorState, FlameDetectorUnitState } from '../server/src/types';
 import type { FlameSample } from '../server/src/types';
+import { detectorResultTone } from '../utils/completed-result-hold';
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import { FLAME_DETECTOR_SIMULATION_COMMANDS, type FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
 import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
-import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
+import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformPreviewPoints, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
 import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './wutos-dashboard.css';
@@ -288,12 +289,6 @@ function alarmRows(
   ];
 }
 
-function detectorTone(unit: FlameDetectorUnitState | undefined, grade: FieldQualityGrade | undefined): 'pass' | 'fail' | 'pending' {
-  if (unit?.fault || grade === 'FAIL') return 'fail';
-  if (grade === 'A_PASS' || grade === 'B_PASS') return 'pass';
-  return 'pending';
-}
-
 function Panel({ title, titleMeta, className, children }: { title: string; titleMeta?: ReactNode; className: string; children: ReactNode }) {
   return (
     <section className={'wutos-panel ' + className}>
@@ -512,19 +507,20 @@ const DetectorCard: FC<{
   configuredRatios: RatioMetric[];
   noiseLimits: NoiseLimits;
   onOpenDetail: (detail: ResultDetail) => void;
-}> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits, onOpenDetail }) => {
+  resultComplete?: boolean;
+}> = ({ index, unit, result: detectorResult, analysis, minimumNoiseSamples, configuredRatios, noiseLimits, onOpenDetail, resultComplete = false }) => {
   const [openLamp, setOpenLamp] = useState<ProcessLampKey | null>(null);
   const grade = detectorResult?.grade;
   const testInvalid = detectorResult?.classification === 'TEST_INVALID';
-  const tone = detectorTone(unit, grade);
-  const fail = Boolean(unit?.fault || grade === 'FAIL');
+  const tone = detectorResultTone(Boolean(unit?.fault), grade, resultComplete);
+  const fail = tone === 'fail';
   const noiseRatios = maximumConfiguredRatio(detectorResult?.metrics, configuredRatios);
   const probeFluctuationValues = probeMetricValues(unit, analysis, 'fluctuation');
   const probeAbsoluteValues = probeMetricValues(unit, analysis, 'absolute');
   const probeFluctuationSummary = probeMetricSummary(probeFluctuationValues);
   const probeAbsoluteSummary = probeMetricSummary(probeAbsoluteValues);
   const isNoisePhase = analysis?.phase === 'NOISE';
-  const fullReason = failureReasonLabel(detectorResult?.reason || (unit?.fault ? 'DETECTOR_FAULT' : undefined));
+  const fullReason = failureReasonLabel(detectorResult?.reason || (!resultComplete && unit?.fault ? 'DETECTOR_FAULT' : undefined));
   const precheckReasons = detectorResult?.precheck?.reasons ?? [];
   const openDetectorResult = () => onOpenDetail({
     title: `探测器${index} · 检测结果`,
@@ -628,10 +624,10 @@ function WorkflowArrow() {
 }
 
 function miniWavePath(samples: FlameSample[], key: keyof FlameSample, domain: ReturnType<typeof waveformDomain>, width = 120, height = 34): string {
-  const values = samples.map((sample) => Number(sample[key])).filter(Number.isFinite);
-  if (values.length < 2) return '';
-  return values.map((value, index) => {
-    const x = (index / (values.length - 1)) * width;
+  const points = waveformPreviewPoints(samples, key, 240);
+  if (points.length < 2) return '';
+  return points.map(({ sampleIndex, value }, index) => {
+    const x = (sampleIndex / (samples.length - 1)) * width;
     const y = height - 2 - ((value - domain.min) / domain.span) * (height - 4);
     return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
@@ -891,6 +887,7 @@ const DetectorSimulationDialog: FC<{
 };
 
 export interface WutosDashboardProps {
+  resultComplete?: boolean;
   status: PLCProcessStatus | null;
   detectors: FlameDetectorState | null;
   waveformAnalysis: FieldWaveformAnalysisSnapshot | null;
@@ -912,6 +909,7 @@ export interface WutosDashboardProps {
 }
 
 export function WutosDashboard({
+  resultComplete = false,
   status,
   detectors,
   waveformAnalysis,
@@ -979,7 +977,8 @@ export function WutosDashboard({
     () => Array.from({ length: 6 }, (_, index) => detectors?.units.find((unit) => unit.index === index + 1)),
     [detectors],
   );
-  const activeWorkflowIndex = workflowIndex(status);
+  // Keep the completed workflow stable while PLC I/O and alarms remain live.
+  const activeWorkflowIndex = resultComplete ? WORKFLOW.length - 1 : workflowIndex(status);
   const alarms = alarmRows(new Date(), status, detectors, detectorVerdict, finalVerdict, channelOnline);
   const onlineCount = detectors?.onlineCount ?? units.filter((unit) => unit?.online).length;
   const faultCount = detectors?.faultCount ?? units.filter((unit) => unit?.fault).length;
@@ -990,7 +989,7 @@ export function WutosDashboard({
   const failCount = detectorVerdict?.units.filter((unit) => unit.grade === 'FAIL' && unit.classification !== 'TEST_INVALID').length ?? faultCount;
   const configuredRatios = configuredRatioMetrics(waveformAnalysis);
   const noiseLimits = configuredNoiseLimits(waveformAnalysis);
-  const stageText = processLabel(status);
+  const stageText = resultComplete ? '已完成' : processLabel(status);
   const isAlarm = Boolean(hasActivePLCProcessAlarm(status) || finalVerdict?.verdict === 'FAIL' || detectorVerdict?.grade === 'FAIL');
 
   return (
@@ -1067,6 +1066,7 @@ export function WutosDashboard({
                 key={index + 1}
                 index={index + 1}
                 unit={unit}
+                resultComplete={resultComplete}
                 result={detectorVerdict?.units.find((result) => result.index === index + 1)}
                 analysis={waveformAnalysis?.units.find((result) => result.index === index + 1)}
                 minimumNoiseSamples={waveformAnalysis?.thresholds.minNoiseSamples ?? 1}
