@@ -39,6 +39,15 @@ test('detector verdict always exposes D1-D6 even when one state slot is missing'
   } as any);
   assert.equal(complete.units[5]?.verdict, 'PENDING');
   assert.equal(complete.units[5]?.grade, 'PENDING');
+  assert.equal(complete.units[5]?.classification, 'TEST_INVALID');
+  for (const detector of complete.units.slice(0, 5)) {
+    assert.equal(detector.verdict, 'PENDING');
+    assert.equal(detector.grade, 'PENDING');
+    assert.equal(detector.classification, 'TEST_INVALID');
+    assert.equal(detector.reason, 'WAVEFORM_ANALYSIS_MISSING');
+  }
+  assert.equal(complete.testInvalidCount, 6);
+  assert.equal(complete.productFailCount, 0);
   assert.equal(complete.verdict, 'PENDING');
 });
 
@@ -87,6 +96,8 @@ test('mode-switch startup failure is reported before waveform threshold evaluati
   };
 
   const result = evaluateFieldDetectorBatch(state, { phase: 'COMPLETE', thresholds: {}, units: [] } as any);
-  assert.equal(result.units[5]?.verdict, 'FAIL');
+  assert.equal(result.units[5]?.verdict, 'PENDING');
+  assert.equal(result.units[5]?.grade, 'PENDING');
+  assert.equal(result.units[5]?.classification, 'TEST_INVALID');
   assert.equal(result.units[5]?.reason, 'MODE_SWITCH_TIMEOUT');
 });

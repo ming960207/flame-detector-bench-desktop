@@ -316,7 +316,7 @@ function evaluateUnit(
   }
   if (unit.fault) return result(base, metrics, 'FAIL', 'FAIL', 'DETECTOR_FAULT', precheck);
   if (complete && !analysis) {
-    return result(base, metrics, 'FAIL', 'FAIL', 'WAVEFORM_ANALYSIS_MISSING', precheck, missingProbes, 'TEST_INVALID');
+    return result(base, metrics, 'PENDING', 'PENDING', 'WAVEFORM_ANALYSIS_MISSING', precheck, missingProbes, 'TEST_INVALID');
   }
   if (!complete || !analysis) {
     if (!unit.online) return result(base, metrics, 'PENDING', 'PENDING', 'DETECTOR_OFFLINE', precheck);

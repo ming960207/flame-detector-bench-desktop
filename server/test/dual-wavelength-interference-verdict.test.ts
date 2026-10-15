@@ -154,9 +154,12 @@ test('completed waveform PASS survives intentional stop-stream transport reset',
   assert.equal(evaluateFieldDetectorBatch(stopped, snapshot(1.2, 1.0), precheck(), dualProduct()).units[0]?.grade, 'A_PASS');
 });
 
-test('explicit startup failure remains authoritative after completion', () => {
+test('explicit startup failure requires retest after completion', () => {
   const failed = state(); failed.units[0]!.startup = terminalStartup('FAILED');
   const verdict = evaluateFieldDetectorBatch(failed, snapshot(1.2, 1.0), precheck(), dualProduct());
-  assert.equal(verdict.units[0]?.verdict, 'FAIL');
+  assert.equal(verdict.units[0]?.verdict, 'PENDING');
+  assert.equal(verdict.units[0]?.grade, 'PENDING');
+  assert.equal(verdict.units[0]?.classification, 'TEST_INVALID');
   assert.equal(verdict.units[0]?.reason, 'MODE_SWITCH_FAILED');
+  assert.equal(verdict.productFailCount, 0);
 });
