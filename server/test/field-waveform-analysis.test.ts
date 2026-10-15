@@ -94,8 +94,8 @@ function closeNoiseWindow(analysis: FieldWaveformAnalysis, timestamp: number): v
   analysis.observeProcess(end);
 }
 
-function signalWindow(ratio: number, flash = false, flatDenominator = false) {
-  const analysis = new FieldWaveformAnalysis({ minInterferenceSamples: 1, quality: {
+function signalWindow(ratio: number, flash = false, flatDenominator = false, frameCount = 16) {
+  const analysis = new FieldWaveformAnalysis({ quality: {
     ...DEFAULT_DETECTION_QUALITY_CONFIG,
     a: { ...DEFAULT_DETECTION_QUALITY_CONFIG.a, maxInterferenceRatio: 100 },
     b: { ...DEFAULT_DETECTION_QUALITY_CONFIG.b, maxInterferenceRatio: 100 },
@@ -109,7 +109,7 @@ function signalWindow(ratio: number, flash = false, flatDenominator = false) {
     analysis.observeProcess(plc);
   }
   // Device features/RAW detrending are deliberately different from card values.
-  for (let frame = 0; frame < 16; frame++) {
+  for (let frame = 0; frame < frameCount; frame++) {
     const raw = [0, 1, 0, -1].map((wave, index) => {
       const point = frame * 4 + index;
       return { probe1: wave * 50, probe2: 1_000 + point * 8 + wave * 50 * ratio, probe3: 1_000 + point * 2 + wave * (flatDenominator ? 0 : 50) };
@@ -145,6 +145,51 @@ test('flash accepts actual waveform data below the former 80 sample gate', () =>
   const flash = signalWindow(1, true);
   assert.equal(flash.sampleCount, 64);
   assert.equal(flash.verdict, 'PASS');
+});
+
+test('field heat stage accepts fresh 36-40 samples and inclusive P2/P3 limits without the bulk sample gate', () => {
+  for (const frameCount of [9, 10]) {
+    for (const ratio of [0.5, 0.8084112149532711, 1.2551724137931035, 1.3726708074534162, 1.4387096774193548, 1.5]) {
+      const heat = signalWindow(ratio, false, false, frameCount);
+      assert.equal(heat.sampleCount, frameCount * 4);
+      assert.ok(Math.abs(heat.snr23! - ratio) <= 0.005, 'probe display rounds fluctuations to integers');
+      assert.equal(heat.verdict, 'PASS', `${heat.sampleCount} samples, ratio=${ratio}: ${heat.reason}`);
+    }
+  }
+});
+
+test('completed batch accepts short heat evidence while retaining the EMC sample minimum', () => {
+  for (const emcCount of [40, 80]) {
+    const analysis = new FieldWaveformAnalysis({ minNoiseSamples: 1, minNoiseRms: 0 });
+    const raw = [0, 100, 0, 100].map((value) => ({ probe1: value, probe2: value, probe3: value }));
+    analysis.observeProcess(status(1_000));
+    analysis.observeProcess(status(11_000));
+    for (const timestamp of [11_100, 21_100]) {
+      analysis.observeDetectors(detectorState(timestamp, detectorUnit(timestamp, raw)));
+    }
+    closeNoiseWindow(analysis, 22_000);
+    for (const [stage, timestamp, count] of [['heat', 22_000, 36], ['flash', 23_000, 40], ['emc', 24_000, emcCount]] as const) {
+      const plc = status(timestamp);
+      plc.io!.internal!.noiseCaptureWindow = false;
+      plc.io!.steps = { stepM10_4: stage === 'heat', stepM11_0: stage === 'flash', stepM11_2: stage === 'emc' };
+      analysis.observeProcess(plc);
+      const samples = Array.from({ length: count }, (_, index) => raw[index % raw.length]!);
+      analysis.observeDetectors(detectorState(timestamp + 100, {
+        ...detectorUnit(timestamp + 100, samples), probe2Fluctuation: 100, probe3Fluctuation: 100,
+      }));
+    }
+    const end = status(24_200);
+    end.complete = true;
+    end.processStage = 'COMPLETE';
+    end.io!.internal!.complete = true;
+    end.io!.internal!.noiseCaptureWindow = false;
+    analysis.observeProcess(end);
+    const unit = analysis.snapshot().units[0]!;
+    assert.equal(unit.stages!.heat.verdict, 'PASS');
+    assert.equal(unit.stages!.flash.verdict, 'PASS');
+    assert.equal(unit.verdict, emcCount === 80 ? 'PASS' : 'FAIL');
+    assert.equal(unit.reason, emcCount === 80 ? 'WAVEFORM_WITHIN_LIMIT' : 'EMC_SAMPLES_MISSING');
+  }
 });
 
 test('old frames are ignored and fresh displayed ratios are accepted immediately at stage start', () => {

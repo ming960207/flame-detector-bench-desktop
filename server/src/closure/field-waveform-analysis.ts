@@ -646,6 +646,13 @@ function stageFailureReason(
   return undefined;
 }
 
+function stageHasEnoughSamples(stage: InterferenceStage, sampleCount: number, config: WaveformAnalysisConfig): boolean {
+  // Heat and flash are short PLC-controlled motions. Their formal ratios use
+  // fresh displayed probe values, so the bulk EMC sample quota is not applicable.
+  // A real waveform frame and a fresh stage probe snapshot are still required.
+  return stage === 'emc' ? sampleCount >= config.minInterferenceSamples : sampleCount > 0;
+}
+
 function publicUnitResult(
   accumulator: UnitAccumulator,
   phase: WaveformAnalysisPhase,
@@ -689,7 +696,7 @@ function publicUnitResult(
   const ratioConfig = config.interferenceRatio ?? { numerator: 'probe2' as ChannelKey, denominator: 'probe3' as ChannelKey };
   const stages = Object.fromEntries((['heat', 'flash', 'emc'] as InterferenceStage[]).map((stage) => {
     const samples = stageSamples[stage];
-    const enough = (stage === 'flash' ? samples.length > 0 : samples.length >= config.minInterferenceSamples)
+    const enough = stageHasEnoughSamples(stage, samples.length, config)
       && accumulator.stageProbes[stage] !== null;
     const interferenceRatio = probeRatio(displayedProbeValue(accumulator.stageProbes[stage], ratioConfig.numerator),
       displayedProbeValue(accumulator.stageProbes[stage], ratioConfig.denominator));
@@ -749,7 +756,7 @@ function publicUnitResult(
     return result;
   }
   const missingStage = (['heat', 'flash', 'emc'] as InterferenceStage[])
-    .find((stage) => (stage === 'flash' ? stages[stage].sampleCount === 0 : stages[stage].sampleCount < config.minInterferenceSamples)
+    .find((stage) => !stageHasEnoughSamples(stage, stages[stage].sampleCount, config)
       || accumulator.stageProbes[stage] === null);
   if (missingStage) {
     result.verdict = phase === 'COMPLETE' ? 'FAIL' : 'PENDING';
