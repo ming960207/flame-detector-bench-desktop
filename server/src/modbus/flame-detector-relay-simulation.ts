@@ -147,5 +147,10 @@ export async function readLatchedAlarmFaultState(device: FlameDetectorDevice): P
 }
 
 export async function resetAlarmFaultSimulation(device: FlameDetectorDevice): Promise<void> {
-  await sendFlameDetectorSimulationCommand(device, 'systemReset');
+  if (typeof (device as { sendRawFrame?: unknown }).sendRawFrame === 'function') {
+    await sendFlameDetectorSimulationCommand(device, 'systemReset');
+    return;
+  }
+  await device.systemReset();
 }
+
