@@ -23,7 +23,7 @@ import {
   type ContainMediaGeometry,
 } from './indicator-camera-geometry';
 import { displayResultsForCapture } from './indicator-camera-display-model';
-import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
+import { analyzeIndicatorFrame, aggregateLight, aggregateSamples, completedIndicatorResults, shouldSampleIndicatorEvidence, REQUIRED_STABLE_FRAMES } from './indicator-camera-analysis';
 export { analyzeIndicatorFrame } from './indicator-camera-analysis';
 import type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, FrameSample } from './indicator-camera-analysis';
 export type { IndicatorColor, IndicatorPhase, IndicatorState, IndicatorVerdict, IndicatorSlotRoi, IndicatorSlotResult, IndicatorLightResult } from './indicator-camera-analysis';
@@ -53,7 +53,9 @@ const LEGACY_CAMERA_CONFIG_KEY = 'wutos-indicator-camera-rois-v1';
 const CAMERA_WIDTH = 960;
 const SLOT_ROI_SIZE = 0.1;
 const SOURCE_ROI_HEIGHT = 0.18;
-const SAMPLE_INTERVAL_MS = 240;
+// Six to eight actual frames/second while PLC is at position 1, including
+// stabilization, command dispatch and recovery gaps (not just ALARM_VERIFY).
+const SAMPLE_INTERVAL_MS = 160;
 const PHOTO_INTERVAL_MS = 720;
 const MAX_PHASE_SAMPLES = 12;
 const MAX_RUN_SAMPLES = 32;
@@ -211,6 +213,7 @@ export interface IndicatorCameraPanelProps {
   expanded: boolean;
   batchId: string | null;
   precheckBusy: boolean;
+  positionOneReady: boolean;
   relayTest: RelayFunctionalTestProgress | null | undefined;
   relayFunctionalTest: ProductPrecheckReport['relayFunctionalTest'] | null | undefined;
   onSubmitEvidence?: (report: IndicatorVisionReport) => Promise<void>;
@@ -220,6 +223,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   expanded,
   batchId,
   precheckBusy,
+  positionOneReady,
   relayTest,
   relayFunctionalTest,
   onSubmitEvidence,
@@ -247,7 +251,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const wasBusyRef = useRef(false);
   const lastBatchKeyRef = useRef<string | null>(batchId);
   const submittedBatchRef = useRef<string | null>(null);
-  const autoStartAttemptRef = useRef<string | null>(null);
+  const cameraRecoveryAttemptRef = useRef(0);
   const previewViewportRef = useRef<HTMLDivElement | null>(null);
   const photoFrameRef = useRef<HTMLDivElement | null>(null);
 
@@ -269,15 +273,19 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const relayTestBelongsToBatch = Boolean(relayTest?.batchId && batchId && relayTest.batchId === batchId);
   const activePhase: IndicatorPhase = relayTest?.active === true && relayTestBelongsToBatch
     ? relayTest.phase
-    : precheckBusy
+    : (precheckBusy || positionOneReady)
       ? 'BASELINE'
-      : relayTest
+      : relayTestBelongsToBatch && relayTest
         ? relayTest.phase
         : 'MANUAL';
-  const relayTestCompletedForBatch = relayTestBelongsToBatch && relayTest?.active === false && relayTest.phase === 'COMPLETE';
-  const samplingActive = (precheckBusy || relayTest?.active === true)
-    && !relayTestCompletedForBatch
-    && activePhase !== 'COMPLETE';
+  const samplingActive = shouldSampleIndicatorEvidence({
+    batchId,
+    positionOneReady,
+    precheckBusy,
+    relayBatchId: relayTest?.batchId ?? null,
+    relayActive: relayTest?.active === true,
+    relayPhase: relayTest?.phase ?? 'MANUAL',
+  });
   const autoStartKey = batchId ?? relayTest?.batchId ?? 'active';
   const currentCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
   const liveGeometry = useMemo(() => (
@@ -293,23 +301,10 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   const expectedColor = expectedLightForPhase(activePhase);
   const summary = useMemo(() => visualSummary(liveResults, relayFunctionalTest), [liveResults, relayFunctionalTest]);
 
-  const completedResults = useCallback((): IndicatorSlotResult[] => slotRoisRef.current.map((roi) => {
-    const alarm = phaseResultsRef.current.get('ALARM_VERIFY')?.find((item) => item.slot === roi.slot);
-    const fault = phaseResultsRef.current.get('FAULT_VERIFY')?.find((item) => item.slot === roi.slot);
-    const green = runSamplesRef.current.length >= REQUIRED_STABLE_FRAMES
-      ? aggregateLight(runSamplesRef.current, roi.slot, 'green')
-      : { color: 'green' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const red = alarm?.lights.red ?? { color: 'red' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const yellow = fault?.lights.yellow ?? { color: 'yellow' as const, state: 'UNKNOWN' as const, confidence: 0, matchRatio: 0, bounds: null };
-    const lights = { green, red, yellow };
-    const states = [green.state, red.state, yellow.state];
-    const verdict: IndicatorVerdict = states.every((state) => state === 'ON')
-      ? 'PASS'
-      : states.some((state) => state === 'OFF')
-        ? 'FAIL'
-        : 'WAITING';
-    return { slot: roi.slot, roi, verdict, lights, frames: Math.max(runSamplesRef.current.length, alarm?.frames ?? 0, fault?.frames ?? 0) };
-  }), []);
+  const completedResults = useCallback(
+    (): IndicatorSlotResult[] => completedIndicatorResults(phaseResultsRef.current, slotRoisRef.current),
+    [],
+  );
 
   const submitCompletedEvidence = useCallback(async () => {
     if (
@@ -318,7 +313,6 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       || !relayFunctionalTest
       || relayTest?.phase !== 'COMPLETE'
       || precheckBusy
-      || captures.length === 0
       || submittedBatchRef.current === batchId
     ) return;
     const lightVerdict = (state: IndicatorState): 'PASS' | 'FAIL' | 'PENDING' => state === 'ON' ? 'PASS' : state === 'OFF' ? 'FAIL' : 'PENDING';
@@ -329,7 +323,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       faultYellow: lightVerdict(unit.lights.yellow.state),
       verdict: unit.verdict === 'WAITING' ? 'PENDING' : unit.verdict,
     }));
-    const lightStates = units.flatMap((unit) => [unit.runningGreen, unit.fireRed, unit.faultYellow]);
+    const lightStates = units.flatMap((unit) => [unit.runningGreen, unit.fireRed]);
     const verdict = lightStates.every((state) => state === 'PASS')
       ? 'PASS'
       : lightStates.some((state) => state === 'FAIL')
@@ -342,7 +336,9 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
         capturedAt: Date.now(),
         source: 'UVC_HSV',
         captureCount: captures.length,
-        phases: [...new Set(captures.map((capture) => capture.phase))],
+        // Report sampled phases, not only photos that happened to be saved.
+        // A missing red/green phase is PENDING, never inferred from other frames.
+        phases: [...phaseResultsRef.current.keys()].filter((phase) => phase !== 'MANUAL'),
         verdict,
         units,
       });
@@ -426,21 +422,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     lastBatchKeyRef.current = batchId;
   }, [batchId]);
 
+  // Position-one BASELINE samples are already being collected before precheck.
+  // Clearing them when precheckBusy becomes true used to erase the strongest
+  // green-light evidence and could leave zero baseline frames in the result.
   useEffect(() => {
-    if (precheckBusy && !wasBusyRef.current) {
-      phaseSamplesRef.current = [];
-      runSamplesRef.current = [];
-      phaseResultsRef.current.clear();
-      submittedBatchRef.current = null;
-      lastAutomaticPhotoPhaseRef.current = null;
-      setCaptures([]);
-      setSelectedCaptureId(null);
-      setLiveResults([]);
-      setAnnotationsVisible(false);
-      lastPhaseRef.current = activePhase;
-    }
     wasBusyRef.current = precheckBusy;
-  }, [activePhase, precheckBusy]);
+  }, [precheckBusy]);
 
   useEffect(() => {
     if (!samplingActive) return;
@@ -509,6 +496,16 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
           return;
         }
         streamRef.current = video;
+        video.getVideoTracks().forEach((track) => {
+          track.addEventListener('ended', () => {
+            if (cameraGenerationRef.current === generation && streamRef.current === video) {
+              // UVC unplug/driver restart: let the bounded reopening policy
+              // resume this batch, without pretending that any frame was seen.
+              setCameraError('UVC 视频流中断，正在自动重新连接');
+              setCameraStatus('error');
+            }
+          }, { once: true });
+        });
         const videos = [captureVideoRef.current, previewVideoRef.current].filter((element): element is HTMLVideoElement => Boolean(element));
         videos.forEach((element) => { element.srcObject = video; });
         await Promise.all(videos.map((element) => element.play().catch(() => undefined)));
@@ -538,13 +535,22 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
 
   useEffect(() => {
     if (!samplingActive) {
-      autoStartAttemptRef.current = null;
+      cameraRecoveryAttemptRef.current = 0;
+      return;
+    }
+    if (cameraStatus === 'ready') {
+      cameraRecoveryAttemptRef.current = 0;
       return;
     }
     if (cameraStatus !== 'idle' && cameraStatus !== 'error') return;
-    if (autoStartAttemptRef.current === autoStartKey) return;
-    autoStartAttemptRef.current = autoStartKey;
-    void startCamera();
+    // A camera opening/USB glitch gets bounded automatic retries in the SAME
+    // batch. Never generate a PASS when the camera remains unavailable.
+    if (cameraStatus === 'error' && cameraRecoveryAttemptRef.current >= 3) return;
+    const delay = cameraStatus === 'error'
+      ? 350 * 2 ** cameraRecoveryAttemptRef.current++
+      : 0;
+    const timer = window.setTimeout(() => { void startCamera(); }, delay);
+    return () => window.clearTimeout(timer);
   }, [autoStartKey, cameraStatus, samplingActive, startCamera]);
 
   useEffect(() => () => {
@@ -624,10 +630,13 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     setAnnotationsVisible(true);
     setRecognitionPending(false);
 
-    const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
-    const shouldSave = savePhoto || automaticPhotoAllowed && automaticEvidenceReady(phase, frame.slots, relayTest?.detectorIndexes) && (
+    const automaticPhotoAllowed = phase === 'BASELINE' || phase === 'ALARM_COMMAND' || phase === 'ALARM_VERIFY' || phase === 'FAULT_VERIFY';
+    // Save the first frame even when an expected LED is absent, so failed
+    // inspections retain visual evidence. Keep follow-up photos bounded.
+    const shouldSave = savePhoto || automaticPhotoAllowed && (
       lastAutomaticPhotoPhaseRef.current !== phase
-      || frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS
+      || (automaticEvidenceReady(phase, frame.slots, relayTest?.detectorIndexes)
+        && frame.capturedAt - lastPhotoAtRef.current >= PHOTO_INTERVAL_MS)
     );
     if (!shouldSave) return;
     lastPhotoAtRef.current = frame.capturedAt;
@@ -645,8 +654,12 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       window.cancelAnimationFrame(captureFrameRequestRef.current);
       captureFrameRequestRef.current = null;
     }
-    setLiveResults([]);
-    setAnnotationsVisible(false);
+    // Do not blank the six LEDs on every automatic frame; that caused visual
+    // flashing while the camera was continuously scanning.
+    if (savePhoto) {
+      setLiveResults([]);
+      setAnnotationsVisible(false);
+    }
     setRecognitionPending(true);
     captureFrameRequestRef.current = window.requestAnimationFrame(() => {
       captureFrameRequestRef.current = null;
@@ -665,7 +678,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       captureFrameRef.current(false);
     }, SAMPLE_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [cameraStatus, samplingActive]);
+  }, [cameraStatus, samplingActive, activePhase]);
 
   useEffect(() => {
     if (relayFunctionalTest && relayTest?.phase === 'COMPLETE' && !precheckBusy) {

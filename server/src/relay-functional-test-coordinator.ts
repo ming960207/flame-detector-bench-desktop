@@ -29,12 +29,17 @@ interface UnitWorkState {
     alarm: boolean | null;
     fault: boolean | null;
   };
+  /** Last sampled DIO levels during each actuation, before the reset phase. */
+  actionLevels: Record<'alarm' | 'fault', { alarm: boolean | null; fault: boolean | null } | null>;
 }
 
 const RELAY_COMMAND_MAX_ATTEMPTS = 3;
 const RELAY_COMMAND_RETRY_DELAY_MS = 80;
 const RELAY_SIMULATION_BURST_COUNT = 3;
 export const RELAY_SIMULATION_BURST_INTERVAL_MS = 100;
+// UVC samples every 240 ms and needs two frames. Keep the confirmed alarm
+// active long enough for phase delivery, camera exposure and stable evidence.
+export const ALARM_INDICATOR_OBSERVATION_MS = 1000;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
 
@@ -119,13 +124,18 @@ export class RelayFunctionalTestCoordinator {
     return false;
   }
 
-  private async detectorSimulationBurst(operation: () => Promise<void>): Promise<boolean> {
+  private async detectorSimulationBurst(
+    operation: () => Promise<void>,
+    onWrite?: (success: boolean) => void,
+  ): Promise<boolean> {
     let accepted = false;
     for (let attempt = 1; attempt <= RELAY_SIMULATION_BURST_COUNT; attempt += 1) {
       try {
         await operation();
         accepted = true;
+        onWrite?.(true);
       } catch {
+        onWrite?.(false);
         // Simulation commands are idempotent; keep sending the remaining frames.
       }
       if (attempt < RELAY_SIMULATION_BURST_COUNT) await sleep(RELAY_SIMULATION_BURST_INTERVAL_MS);
@@ -226,34 +236,47 @@ export class RelayFunctionalTestCoordinator {
   }
 
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
-    const sample = this.sharedSample(Date.now() + this.config.dio.requestTimeoutMs);
-    await Promise.all([...work.entries()].map(async ([index, state]) => {
-      const [internal, physical] = await Promise.all([
-        this.diagnosticInternalState(index),
-        this.physicalState(index, sample),
-      ]);
-      state.baselineLevels = {
-        alarm: physical.rawAlarm,
-        fault: physical.rawFault,
-      };
-      state.result.baseline = {
-        alarmInternal: internal?.fire ?? null,
-        faultInternal: internal?.fault ?? null,
-        alarmPhysical: physical.alarm,
-        faultPhysical: physical.fault,
-      };
-
-      // Functional verification uses the observed raw baseline, not configured
-      // polarity. A stuck/active contact will still fail because it cannot produce
-      // the required transition after the command.
-      if (physical.error) {
-        uniquePush(state.result.alarm.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-        uniquePush(state.result.fault.reasons, `RELAY_FEEDBACK_READ_FAILED:${physical.error}`);
-      } else if (physical.rawAlarm === null || physical.rawFault === null) {
-        uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_READ_FAILED');
-        uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_READ_FAILED');
-      }
-    }));
+    // One PLC pass, but up to two independent DIO baseline snapshots. The
+    // underlying readFeedback already retries its Modbus transaction; a fresh
+    // snapshot also recovers from an exhausted transient timeout. Never simulate
+    // a relay until a complete, trustworthy baseline has been observed.
+    const pending = new Set(work.keys());
+    const lastErrors = new Map<number, string>();
+    for (let attempt = 0; attempt < 2 && pending.size > 0; attempt += 1) {
+      if (attempt > 0) await sleep(RELAY_READ_RETRY_DELAY_MS);
+      const sample = this.sharedSample(Date.now() + this.config.dio.requestTimeoutMs);
+      await Promise.all([...work.entries()].filter(([index]) => pending.has(index)).map(async ([index, state]) => {
+        const [internal, physical] = await Promise.all([
+          this.diagnosticInternalState(index),
+          this.physicalState(index, sample),
+        ]);
+        if (physical.error || physical.rawAlarm === null || physical.rawFault === null) {
+          lastErrors.set(index, physical.error ?? 'DIO_RESPONSE_INVALID');
+          return;
+        }
+        lastErrors.delete(index);
+        pending.delete(index);
+        state.baselineLevels = { alarm: physical.rawAlarm, fault: physical.rawFault };
+        state.result.baseline = {
+          alarmInternal: internal?.fire ?? null,
+          faultInternal: internal?.fault ?? null,
+          alarmPhysical: physical.alarm,
+          faultPhysical: physical.fault,
+        };
+        // An already-energized contact is NOT a transient read failure. Do
+        // not reset/energize it blindly to manufacture a passing transition.
+        if (physical.alarm === true || physical.fault === true) {
+          uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_NOT_NORMAL');
+          uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_NOT_NORMAL');
+        }
+      }));
+    }
+    for (const index of pending) {
+      const state = work.get(index)!;
+      const reason = `RELAY_FEEDBACK_READ_FAILED:${lastErrors.get(index) ?? 'DIO_RESPONSE_INVALID'}`;
+      uniquePush(state.result.alarm.reasons, reason);
+      uniquePush(state.result.fault.reasons, reason);
+    }
   }
 
   private async sendCommand(
@@ -262,10 +285,21 @@ export class RelayFunctionalTestCoordinator {
   ): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
+      // Never issue blind simulation to a detector without trustworthy DIO
+      // baseline feedback. The remaining stations continue in parallel.
+      if (action.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+        || action.reasons.includes('RELAY_BASELINE_READ_FAILED')
+        || action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))) return;
       state.commandStartedAt = Date.now();
-      const accepted = await this.detectorSimulationBurst(() => this.detectors.simulate(index, kind === 'alarm'
-        ? { fire: true, fault: false }
-        : { fire: false, fault: true }));
+      const accepted = await this.detectorSimulationBurst(
+        () => this.detectors.simulate(index, kind === 'alarm'
+          ? { fire: true, fault: false }
+          : { fire: false, fault: true }),
+        (success) => {
+          action.commandWriteAttempts = (action.commandWriteAttempts ?? 0) + 1;
+          if (success) action.commandWriteAccepted = (action.commandWriteAccepted ?? 0) + 1;
+        },
+      );
       if (accepted) action.commandAccepted = true;
       else uniquePush(action.reasons, kind === 'alarm' ? 'ALARM_COMMAND_FAILED' : 'FAULT_COMMAND_FAILED');
     }));
@@ -275,7 +309,14 @@ export class RelayFunctionalTestCoordinator {
     work: Map<number, UnitWorkState>,
     kind: 'alarm' | 'fault',
   ): Promise<void> {
-    const deadline = Date.now() + this.config.feedbackTimeoutMs;
+    let deadline = Date.now() + this.config.feedbackTimeoutMs;
+    // A slow but awaited rescue write must leave enough wall-clock time for
+    // physical DIO stable samples. Extend *confirmation only*, bounded by
+    // one extra second; do not issue more than one rescue or rerun the PLC.
+    // Rare slow socket callback (e.g. 700ms) must finish before reset. Allow
+    // bounded extra confirmation only when a rescue actually occurs, not during
+    // normal relay testing or at all for an already-confirmed contact.
+    const hardDeadline = deadline + 900;
     const stable = new Map<number, number>();
     const feedbackErrors = new Map<number, string>();
     const retried = new Set<number>();
@@ -300,6 +341,7 @@ export class RelayFunctionalTestCoordinator {
           return;
         }
         feedbackErrors.delete(index);
+        state.actionLevels[kind] = { alarm: physical.rawAlarm, fault: physical.rawFault };
 
         const ownPhysical = kind === 'alarm' ? physical.alarm : physical.fault;
         const oppositePhysical = kind === 'alarm' ? physical.fault : physical.alarm;
@@ -329,6 +371,7 @@ export class RelayFunctionalTestCoordinator {
           stable.set(index, next);
           if (next >= this.config.stableSamples) {
             action.physicalStateReached = true;
+            action.physicalConfirmedAt ??= Date.now();
             if (action.responseTimeMs === null) {
               action.responseTimeMs = Math.max(0, Date.now() - (state.commandStartedAt ?? Date.now()));
             }
@@ -354,19 +397,30 @@ export class RelayFunctionalTestCoordinator {
           rescueAttempted = true;
           // One idempotent rescue frame only; keep the original baseline, stable
           // sample requirement and deadline. Never repeat the whole action cycle.
+          action.commandWriteAttempts = (action.commandWriteAttempts ?? 0) + 1;
+          action.rescueWriteAttempts = (action.rescueWriteAttempts ?? 0) + 1;
           try {
-            await this.withinDeadline(() => this.detectors.simulate(index, kind === 'alarm'
+            // Never abandon an in-flight physical write with Promise.race:
+            // it could remain queued and execute *after* the next reset phase.
+            // Await the actual queued completion, even when the DIO deadline
+            // is nearly exhausted; the next phase must not overtake it.
+            await this.detectors.simulate(index, kind === 'alarm'
               ? { fire: true, fault: false }
-              : { fire: false, fault: true }), deadline - confirmationReserveMs);
+              : { fire: false, fault: true });
+            action.commandWriteAccepted = (action.commandWriteAccepted ?? 0) + 1;
           } catch {
             // The original command was accepted. Physical evidence remains the
             // authority, and lack of actuation still fails at the same deadline.
           }
         }));
       }
-      // Start confirmation immediately after a rescue, including a slow write
-      // callback, so the reserved time contains all required spaced samples.
-      if (rescueAttempted) continue;
+      // Only the physical confirmation deadline may extend: a write can finish
+      // late, but the following reset must wait until it has actually settled.
+      if (rescueAttempted) {
+        deadline = Math.min(hardDeadline, Math.max(deadline,
+          Date.now() + confirmationReserveMs + this.config.sampleIntervalMs));
+        continue;
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       await sleep(Math.min(this.config.sampleIntervalMs, remaining));
@@ -397,6 +451,9 @@ export class RelayFunctionalTestCoordinator {
     const deadline = Date.now() + this.config.resetTimeoutMs;
     const stable = new Map<number, number>();
     const feedbackErrors = new Map<number, string>();
+    const retriedReset = new Set<number>();
+    const retryAt = deadline - this.config.resetTimeoutMs / 2;
+    const confirmationReserveMs = this.config.stableSamples * this.config.sampleIntervalMs;
 
     while (Date.now() < deadline) {
       const sample = this.sharedSample(deadline);
@@ -427,7 +484,10 @@ export class RelayFunctionalTestCoordinator {
         if (ownRecovered) {
           const next = (stable.get(index) ?? 0) + 1;
           stable.set(index, next);
-          if (next >= this.config.stableSamples) action.physicalRecovered = true;
+          if (next >= this.config.stableSamples) {
+            action.physicalRecovered = true;
+            action.resetConfirmedAt ??= Date.now();
+          }
         } else {
           stable.set(index, 0);
         }
@@ -439,6 +499,29 @@ export class RelayFunctionalTestCoordinator {
           || (action.physicalRecovered && (stable.get(index) ?? 0) >= this.config.stableSamples);
       });
       if (done) break;
+      // A reset ACK (or local write completion) does not prove the contact
+      // returned to normal. Reissue one idempotent reset only after a fresh DIO
+      // snapshot showed no recovery and while stable confirmation still fits.
+      // This is a rescue inside the same PLC pass, never a second test cycle.
+      let rescueAttempted = false;
+      if (Date.now() >= retryAt && Date.now() < deadline - confirmationReserveMs) {
+        await Promise.all([...work.entries()].map(async ([index, state]) => {
+          const action = state.result[kind];
+          if (!action.resetAccepted || action.physicalRecovered || (stable.get(index) ?? 0) > 0
+            || feedbackErrors.has(index) || retriedReset.has(index)) return;
+          retriedReset.add(index);
+          rescueAttempted = true;
+          action.resetRescueWriteAttempts = (action.resetRescueWriteAttempts ?? 0) + 1;
+          try {
+            // Wait for the queued addressed F000 write AND its matching FC10
+            // reply. A deadline-raced promise could execute in the next phase.
+            await this.detectors.reset(index);
+          } catch {
+            // DIO physical recovery remains the final authority.
+          }
+        }));
+      }
+      if (rescueAttempted) continue;
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       await sleep(Math.min(this.config.sampleIntervalMs, remaining));
@@ -461,6 +544,9 @@ export class RelayFunctionalTestCoordinator {
     await this.sendCommand(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_VERIFY' : 'FAULT_VERIFY', work);
     await this.waitForAction(work, kind);
+    if (kind === 'alarm' && [...work.values()].some((state) => state.result.alarm.commandAccepted)) {
+      await sleep(ALARM_INDICATOR_OBSERVATION_MS);
+    }
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET' : 'FAULT_RESET', work);
     await this.resetBatch(work, kind);
     this.emitPhase(kind === 'alarm' ? 'ALARM_RESET_VERIFY' : 'FAULT_RESET_VERIFY', work);
@@ -516,7 +602,8 @@ export class RelayFunctionalTestCoordinator {
         feedbackErrors.delete(index);
 
         if (!alarmRecovered.has(index)) {
-          const recovered = physical.rawAlarm !== null && state.baselineLevels.alarm !== null
+          const recovered = !state.result.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+            && physical.rawAlarm !== null && state.baselineLevels.alarm !== null
             ? physical.rawAlarm === state.baselineLevels.alarm
             : physical.alarm === false;
           const next = recovered ? (alarmStable.get(index) ?? 0) + 1 : 0;
@@ -524,7 +611,8 @@ export class RelayFunctionalTestCoordinator {
           if (next >= this.config.stableSamples) alarmRecovered.add(index);
         }
         if (!faultRecovered.has(index)) {
-          const recovered = physical.rawFault !== null && state.baselineLevels.fault !== null
+          const recovered = !state.result.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
+            && physical.rawFault !== null && state.baselineLevels.fault !== null
             ? physical.rawFault === state.baselineLevels.fault
             : physical.fault === false;
           const next = recovered ? (faultStable.get(index) ?? 0) + 1 : 0;
@@ -542,6 +630,8 @@ export class RelayFunctionalTestCoordinator {
 
     for (const [index, state] of work.entries()) {
       if (!resetAccepted.has(index)) continue;
+      state.result.alarm.emergencyRecovered = alarmRecovered.has(index);
+      state.result.fault.emergencyRecovered = faultRecovered.has(index);
       const feedbackError = feedbackErrors.get(index);
       if (feedbackError) {
         this.addCleanupReason(state, `EMERGENCY_RESET_FEEDBACK_READ_FAILED:${feedbackError}`);
@@ -585,6 +675,7 @@ export class RelayFunctionalTestCoordinator {
         result: emptyUnit(index),
         commandStartedAt: null,
         baselineLevels: { alarm: null, fault: null },
+        actionLevels: { alarm: null, fault: null },
       }]),
     );
 
@@ -600,12 +691,35 @@ export class RelayFunctionalTestCoordinator {
       await this.emergencyCleanup(work);
     }
 
-    const units = [...work.values()].map(({ result }) => {
+    const units = [...work.values()].map(({ result, baselineLevels, actionLevels }) => {
       this.finalizeAction(result.alarm);
       this.finalizeAction(result.fault);
       result.verdict = result.alarm.verdict === 'PASS' && result.fault.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      result.diagnostics = {
+        baselineRawAlarm: baselineLevels.alarm,
+        baselineRawFault: baselineLevels.fault,
+        alarmSampleRawAlarm: actionLevels.alarm?.alarm ?? null,
+        alarmSampleRawFault: actionLevels.alarm?.fault ?? null,
+        faultSampleRawAlarm: actionLevels.fault?.alarm ?? null,
+        faultSampleRawFault: actionLevels.fault?.fault ?? null,
+      };
       return result;
     });
+
+    // Field failure evidence must expose the actual DIO baseline and sampled
+    // transition. A command write being accepted does not prove that a contact
+    // moved, especially when all six TCP ports have recently disconnected.
+    for (const [index, state] of work) {
+      const { result, baselineLevels, actionLevels } = state;
+      if (result.verdict !== 'FAIL') continue;
+      const print = (value: boolean | null | undefined) => value === null || value === undefined ? '?' : Number(value);
+      const describe = (kind: 'alarm' | 'fault') => {
+        const action = result[kind];
+        const sampled = actionLevels[kind];
+        return `${kind}{dio=${print(sampled?.alarm)}/${print(sampled?.fault)},tcpWrites=${action.commandWriteAccepted ?? 0}/${action.commandWriteAttempts ?? 0},rescue=${action.rescueWriteAttempts ?? 0},physicalConfirmed=${Number(action.physicalStateReached)},resetAck=${Number(action.resetAccepted)},inWindowRecovered=${Number(action.physicalRecovered)},cleanupRecovered=${Number(action.emergencyRecovered ?? false)},reasons=${action.reasons.join(',') || '-'}}`;
+      };
+      console.warn(`[RelayDiag] batch=${batchId ?? '-'} D${index} baselineDio=${print(baselineLevels.alarm)}/${print(baselineLevels.fault)} ${describe('alarm')} ${describe('fault')}`);
+    }
 
     this.emitPhase('COMPLETE', work);
 

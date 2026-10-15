@@ -65,6 +65,15 @@ export interface RelayFunctionalTestConfig {
 
 export interface RelayActionResult {
   commandAccepted: boolean;
+  /** Local transport writes are not device acknowledgements; physical DIO still decides PASS. */
+  commandWriteAttempts?: number;
+  commandWriteAccepted?: number;
+  rescueWriteAttempts?: number;
+  /** One bounded F000 rescue if local success was not confirmed by physical DIO. */
+  resetRescueWriteAttempts?: number;
+  physicalConfirmedAt?: number | null;
+  resetConfirmedAt?: number | null;
+  emergencyRecovered?: boolean;
   internalStateReached: boolean;
   physicalStateReached: boolean;
   oppositeRelayStayedNormal: boolean;
@@ -88,6 +97,15 @@ export interface RelayFunctionalTestUnitResult {
   alarm: RelayActionResult;
   fault: RelayActionResult;
   verdict: RelayFunctionalTestVerdict;
+  /** Raw physical contact evidence, independent of configured normal polarity. */
+  diagnostics?: {
+    baselineRawAlarm: boolean | null;
+    baselineRawFault: boolean | null;
+    alarmSampleRawAlarm: boolean | null;
+    alarmSampleRawFault: boolean | null;
+    faultSampleRawAlarm: boolean | null;
+    faultSampleRawFault: boolean | null;
+  };
 }
 
 export interface RelayFunctionalTestReport {

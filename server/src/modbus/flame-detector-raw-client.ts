@@ -2,6 +2,11 @@ import { Socket } from 'node:net';
 import { calculateModbusCRC16 } from './flame-data-decoder.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 700;
+// Each physical port carries single-wire RTU frames and replies, not independent
+// multiplexed requests. Avoid bursts faster than the downstream serial gateway.
+export const MIN_RTU_COMMAND_GAP_MS = 120;
+const MIN_RTU_READ_GAP_MS = 20;
+export const RTU_TIMEOUT_REPLY_QUIET_MS = 220;
 /** 现场 TCP 独立端口拓扑：每个端口仅挂一台探测器，所有探测器从站地址均为 0x01。 */
 const FIELD_TCP_DEVICE_ADDRESS = 0x01;
 
@@ -21,6 +26,7 @@ function findResponse(
   address: number,
   functionCode: number,
   quantity: number,
+  startAddress?: number,
 ): { frame?: Buffer; error?: Error } | null {
   for (let offset = 0; offset < buffer.length; offset += 1) {
     if (buffer[offset] !== address) continue;
@@ -40,6 +46,10 @@ function findResponse(
     if (buffer.length - offset < frameLength) return null;
     const frame = buffer.subarray(offset, offset + frameLength);
     if (!isValidFrame(frame)) continue;
+    // FC10 ACKs echo *both* register start and count. A delayed reply to a
+    // previous command must never be accepted as confirmation of F000 reset.
+    if (functionCode === 0x10 &&
+      (frame.readUInt16BE(2) !== startAddress || frame.readUInt16BE(4) !== quantity)) continue;
     return { frame: Buffer.from(frame) };
   }
   return null;
@@ -48,6 +58,8 @@ function findResponse(
 export class RawTcpModbusClient {
   private readonly requestTimeoutMs: number;
   private requestTail: Promise<void> = Promise.resolve();
+  private lastCommandSentAt = 0;
+  private lastCommandWasWrite = false;
 
   constructor(
     public readonly socket: Socket,
@@ -90,7 +102,7 @@ export class RawTcpModbusClient {
     body.writeUInt16BE(values.length, 4);
     body[6] = values.length * 2;
     values.forEach((value, index) => body.writeUInt16BE(Number(value) & 0xFFFF, 7 + index * 2));
-    await this.enqueue(() => this.exchange(appendCRC(body), targetAddress, 0x10, values.length));
+    await this.enqueue(() => this.exchange(appendCRC(body), targetAddress, 0x10, values.length, startAddress));
   }
 
   async sendRawFrame(frame: Buffer): Promise<void> {
@@ -131,15 +143,29 @@ export class RawTcpModbusClient {
     return next;
   }
 
-  private exchange(request: Buffer, address: number, functionCode: number, quantity: number): Promise<Buffer> {
-    if (!this.isOpen) return Promise.reject(new Error('探测器原始 TCP 连接不可用'));
-    return new Promise<Buffer>((resolve, reject) => {
+  private async waitForTransmitGap(isWrite: boolean): Promise<void> {
+    // Read/ACK transactions are already serialized by the per-port queue.
+    // Do not inject a 120ms pause between ordinary identity reads: reserve
+    // the larger gap for broadcasts/resets and transitions involving writes.
+    const minimumGapMs = isWrite || this.lastCommandWasWrite
+      ? MIN_RTU_COMMAND_GAP_MS : MIN_RTU_READ_GAP_MS;
+    const remaining = this.lastCommandSentAt + minimumGapMs - Date.now();
+    if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    if (!this.isOpen) throw new Error('探测器原始 TCP 连接不可用');
+    this.lastCommandSentAt = Date.now();
+    this.lastCommandWasWrite = isWrite;
+  }
+
+  private async exchange(request: Buffer, address: number, functionCode: number, quantity: number, startAddress?: number): Promise<Buffer> {
+    await this.waitForTransmitGap(functionCode === 0x10);
+    try {
+      return await new Promise<Buffer>((resolve, reject) => {
       let settled = false;
       let timer: NodeJS.Timeout;
       const onData = (chunk: Buffer) => {
         if (settled) return;
         buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
-        const found = findResponse(buffer, address, functionCode, quantity);
+        const found = findResponse(buffer, address, functionCode, quantity, startAddress);
         if (found?.error) finish(found.error);
         else if (found?.frame) finish(undefined, found.frame);
         else if (buffer.length > 8192) buffer = buffer.subarray(-256);
@@ -172,10 +198,19 @@ export class RawTcpModbusClient {
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)));
       }
-    });
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('回包超时')) {
+        // Do not let a timed-out FC10 response overlap the next queued command.
+        // This is a bounded quiet period, not evidence the write was delivered.
+        await new Promise<void>((resolve) => setTimeout(resolve, RTU_TIMEOUT_REPLY_QUIET_MS));
+      }
+      throw error;
+    }
   }
 
-  private writeOneWay(request: Buffer): Promise<void> {
+  private async writeOneWay(request: Buffer): Promise<void> {
+    await this.waitForTransmitGap(true);
     if (!this.isOpen) return Promise.reject(new Error('探测器原始 TCP 连接不可用'));
     return new Promise<void>((resolve, reject) => {
       try {

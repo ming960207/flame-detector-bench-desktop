@@ -416,6 +416,44 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       unit.reasons.length ? unit.reasons.map(precheckReasonText).join('；') : '-',
     ]);
 
+    const relayReport = test.productPrecheck?.relayFunctionalTest ?? null;
+    const dioLevel = (level: boolean | null | undefined): string => level == null ? '-' : level ? '1' : '0';
+    const relayRows = (relayReport?.units ?? []).map((unit) => {
+      const diag = unit.diagnostics;
+      const action = (kind: 'alarm' | 'fault') => {
+        const step = unit[kind];
+        return [
+          step.commandAccepted ? '本地发送成功' : '本地发送失败',
+          `发送成功/尝试=${step.commandWriteAccepted ?? 0}/${step.commandWriteAttempts ?? 0}`,
+          `窗口内补发=${step.rescueWriteAttempts ?? 0}`,
+          step.physicalStateReached ? 'DIO稳定确认' : 'DIO未确认',
+          step.responseTimeMs == null ? '-' : `${step.responseTimeMs}ms`,
+          step.resetAccepted ? '是' : '否',
+          `复位补发=${step.resetRescueWriteAttempts ?? 0}`,
+          step.physicalRecovered ? '时限内恢复' : '时限内未恢复',
+          step.emergencyRecovered === true ? '紧急清理后恢复' : step.emergencyRecovered === false ? '紧急清理后未恢复' : '紧急清理无证据',
+          step.reasons.join('、') || '-',
+        ].join(' / ');
+      };
+      return [
+        String(unit.detectorIndex),
+        unit.verdict,
+        `${dioLevel(diag?.baselineRawAlarm)}/${dioLevel(diag?.baselineRawFault)}`,
+        `${dioLevel(diag?.alarmSampleRawAlarm)}/${dioLevel(diag?.alarmSampleRawFault)}`,
+        action('alarm'),
+        `${dioLevel(diag?.faultSampleRawAlarm)}/${dioLevel(diag?.faultSampleRawFault)}`,
+        action('fault'),
+      ];
+    });
+    const indicatorReport = test.productPrecheck?.indicatorVision ?? null;
+    const indicatorRows = (indicatorReport?.units ?? []).map((unit) => [
+      String(unit.slot),
+      unit.runningGreen,
+      unit.fireRed,
+      unit.faultYellow,
+      unit.verdict,
+    ]);
+
     const deviceRows = units.map((unit) => {
       const metrics = unit.metrics;
       const analysis = analysisByIndex.get(unit.index);
@@ -519,6 +557,24 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       ...(precheckRows.length
         ? table(['设备', '地址', '实际版本', '期望版本', '实际探头数', '期望探头数', '报警', '故障', '结果', '说明'], precheckRows)
         : ['未记录产品预检结果']),
+      '',
+      '继电器原始反馈与动作诊断',
+      '说明：DIO原始电平顺序为火警/故障，0/1代表实际采样状态；-表示缺少证据，不得视为正常。模拟写入成功不代表继电器真实动作，必须检查对应物理反馈翻转。',
+      ...(relayReport
+        ? [
+          `检测模式：${relayReport.mode} | 全局判定：${relayReport.verdict} | 开始：${localDateTime(relayReport.startedAt)} | 结束：${localDateTime(relayReport.completedAt)}`,
+          ...table(['设备', '结果', '初始电平 火警/故障', '火警动作采样', '火警命令/动作/耗时/复位命令/恢复/故障', '故障动作采样', '故障命令/动作/耗时/复位命令/恢复/故障'], relayRows),
+        ]
+        : ['本批次未记录继电器功能检测数据（可能未启用或未归档，不能据此推定检测合格）']),
+      '',
+      '指示灯摄像头检测诊断',
+      ...(indicatorReport
+        ? [
+          `来源：${indicatorReport.source} | 采样帧数：${indicatorReport.captureCount} | 阶段：${indicatorReport.phases.join(',') || '-'} | 总结果：${indicatorReport.verdict}`,
+          '说明：仅绿灯和火警红灯参与生产判定；故障黄灯仅用于调试。',
+          ...table(['设备', '运行绿灯', '火警红灯', '故障黄灯（仅诊断）', '检测结果'], indicatorRows),
+        ]
+        : ['本批次没有归档摄像头指示灯判定信息（不等于灯检合格）']),
       '',
       '设备结果明细',
       '说明：正式信噪比使用工序内最近1秒同步 RAW 波形的去趋势幅度比，剔除工序开始200毫秒过渡段；检测位原始数值为历史波形辅助快照。',

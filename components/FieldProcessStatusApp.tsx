@@ -147,8 +147,8 @@ export function FieldProcessStatusApp() {
     if ('status' in patch) next.status = { sequence, value: patch.status ?? null };
     if ('detectors' in patch && patch.detectors) next.detectors = { sequence, value: patch.detectors };
     if ('summary' in patch && patch.summary) {
-      // Lock COMPLETE before coalescing so a following stale PENDING frame in
-      // the same 80 ms window cannot replace the result before it is rendered.
+      // Latch at ingestion: an 80ms coalescing window must not discard COMPLETE
+      // when it is immediately followed by a stale/PENDING snapshot.
       next.summary = { sequence, value: resultHoldRef.current.accept(patch.summary) };
     }
     if ('notice' in patch && patch.notice !== undefined) next.notice = { sequence, value: patch.notice };

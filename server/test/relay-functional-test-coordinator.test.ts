@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
+import { ALARM_INDICATOR_OBSERVATION_MS, RelayFunctionalTestCoordinator, type RelayDetectorPort } from '../src/relay-functional-test-coordinator.js';
 import {
   normalizeRelayFunctionalTestConfig,
   relayFunctionalTestMissingMappings,
@@ -421,11 +421,63 @@ function fixture(options: { slowDiagnostic?: boolean; droppedCommands?: boolean;
   return { coordinator, commands, elapsed, diagnosticReads: () => diagnosticReads };
 }
 
+
+test('healthy relay commands capture transport writes and physical confirmations without a new phase', async () => {
+  const { coordinator, commands } = fixture({});
+  const report = await coordinator.run('command-delivery-evidence');
+  assert.equal(report.verdict, 'PASS');
+  for (const unit of report.units) {
+    for (const kind of ['alarm', 'fault'] as const) {
+      const action = unit[kind];
+      assert.equal(action.commandWriteAttempts, 3);
+      assert.equal(action.commandWriteAccepted, 3);
+      assert.equal(action.rescueWriteAttempts ?? 0, 0);
+      assert.equal(action.physicalStateReached, true);
+      assert.ok(typeof action.physicalConfirmedAt === 'number');
+      assert.ok(typeof action.resetConfirmedAt === 'number');
+      assert.equal(action.emergencyRecovered, true);
+    }
+  }
+  assert.equal(commands.get('6:alarm'), 3);
+});
+
+test('already-active DIO baseline isolates unsafe slot, leaves peers and PLC phases untouched', async () => {
+  const inputs: Record<string, boolean> = { X1: false, X2: false, X3: true, X4: false };
+  const writes: number[] = [];
+  const config = normalizeRelayFunctionalTestConfig({
+    mode: 'FAST_BATCH',
+    stableSamples: 1, sampleIntervalMs: 50, feedbackTimeoutMs: 250, resetTimeoutMs: 250,
+    mappings: createMapping([1, 2]),
+  });
+  const coordinator = new RelayFunctionalTestCoordinator({
+    enabledDetectorIndexes: () => [1, 2],
+    async simulate(index, state) {
+      writes.push(index);
+      inputs[`X${index * 2 - 1}`] = state.fire;
+      inputs[`X${index * 2}`] = state.fault;
+    },
+    async reset(index) {
+      inputs[`X${index * 2 - 1}`] = false;
+      inputs[`X${index * 2}`] = false;
+    },
+    async readLatched() { return { fire: false, fault: false }; },
+  }, { readInputs: () => ({ ...inputs }) }, config);
+  const report = await coordinator.run('abnormal-initial-contact');
+  assert.equal(report.units[0]?.verdict, 'PASS');
+  assert.equal(report.units[1]?.verdict, 'FAIL');
+  assert.ok(report.units[1]?.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
+  assert.ok(report.units[1]?.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
+  assert.equal(writes.filter((index) => index === 2).length, 0);
+  assert.equal(writes.filter((index) => index === 1).length, 6);
+  assert.equal(report.units[1]?.alarm.emergencyRecovered, true);
+});
+
 test('one slow internal diagnostic cannot invalidate six healthy relays or extend the production window', async () => {
   const { coordinator, elapsed, diagnosticReads } = fixture({ slowDiagnostic: true });
   const report = await coordinator.run('six-relay-slow-diagnostic');
   assert.equal(report.verdict, 'PASS');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.equal(diagnosticReads(), 0, 'production must not enqueue slow internal diagnostic reads');
 });
 
@@ -437,7 +489,8 @@ test('only unconfirmed relays receive one rescue command within the original win
   assert.equal(commands.get('2:fault'), 4);
   assert.equal(commands.get('1:alarm'), 3);
   assert.equal(commands.get('1:fault'), 3);
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
 });
 
@@ -455,14 +508,16 @@ test('a real stuck relay still fails after the bounded rescue command', async ()
   assert.equal(report.units.filter((unit) => unit.verdict === 'FAIL').length, 1);
   assert.ok(report.units[1]!.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'));
   assert.ok(report.units[1]!.fault.reasons.includes('FAULT_RELAY_NOT_ACTUATED'));
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
 });
 
 test('a slow DIO read ends at the existing deadline and remains a communication failure', async () => {
   const { coordinator, elapsed } = fixture({ slowFeedback: true });
   const report = await coordinator.run('slow-dio');
   assert.equal(report.verdict, 'FAIL');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
+  // Feedback still has its original deadline; the camera window follows it.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 450);
   assert.ok(report.units.every((unit) => unit.alarm.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))));
   assert.ok(report.units.every((unit) => !unit.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED')));
 });
@@ -489,10 +544,47 @@ test('reset feedback recovers within its original window without a sticky error'
   assert.ok(elapsed.get('ALARM_RESET_VERIFY')! < 450);
 });
 
-test('a slow rescue write callback leaves enough time for all stable DIO samples', async () => {
+test('a slow rescue write remains serialized and gets bounded DIO confirmation grace', async () => {
   const { coordinator, elapsed } = fixture({ droppedCommands: true, slowRescueCallback: true });
   const report = await coordinator.run('slow-rescue-callback');
   assert.equal(report.verdict, 'PASS');
-  assert.ok(elapsed.get('ALARM_VERIFY')! < 450);
-  assert.ok(elapsed.get('FAULT_VERIFY')! < 450);
+  // A slow callback must be awaited to avoid the F000 reset overtaking it.
+  // Exceptional rescue may need a bounded extra window, never a PLC rerun.
+  assert.ok(elapsed.get('ALARM_VERIFY')! - ALARM_INDICATOR_OBSERVATION_MS < 1300);
+  assert.ok(elapsed.get('FAULT_VERIFY')! < 1300);
+});
+
+test('one-pass reset rescue reissues F000 only when physical DIO fails to recover', async () => {
+  const inputs = { X1: false, X2: false };
+  let resets = 0;
+  const detectors: RelayDetectorPort = {
+    enabledDetectorIndexes: () => [1],
+    async simulate(_index, state) {
+      inputs.X1 = state.fire;
+      inputs.X2 = state.fault;
+    },
+    async reset() {
+      resets++;
+      // First reset is transport-accepted but intentionally has no effect.
+      // A second, serially awaited F000 should recover the physical contacts.
+      if (resets === 1) return;
+      inputs.X1 = false;
+      inputs.X2 = false;
+    },
+    async readLatched() { return { fire: inputs.X1, fault: inputs.X2 }; },
+  };
+  const config = normalizeRelayFunctionalTestConfig({
+    enabled: true, mode: 'FAST_BATCH',
+    stableSamples: 1, sampleIntervalMs: 50,
+    feedbackTimeoutMs: 250, resetTimeoutMs: 600,
+    mappings: createMapping([1]),
+  });
+  const report = await new RelayFunctionalTestCoordinator(
+    detectors, { readInputs: () => ({ ...inputs }) }, config,
+  ).run('reset-rescue-one-pass');
+  assert.equal(report.verdict, 'PASS');
+  assert.equal(report.units[0]?.alarm.physicalRecovered, true);
+  assert.equal(report.units[0]?.alarm.resetRescueWriteAttempts, 1);
+  assert.equal(report.units[0]?.fault.resetRescueWriteAttempts, undefined);
+  assert.ok(resets >= 4, 'alarm reset, its rescue, fault reset and final safe cleanup');
 });

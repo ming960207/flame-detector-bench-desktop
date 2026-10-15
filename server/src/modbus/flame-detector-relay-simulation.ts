@@ -1,6 +1,7 @@
 import {
   FLAME_DETECTOR_REGISTERS,
   SEND_MODE_BROADCAST_ADDRESS,
+  isRawTcpClient,
   getRawTcpSocket,
   type FlameDetectorDevice,
 } from './flame-detector-device.js';
@@ -55,6 +56,15 @@ async function writeBroadcastRegisters(
       throw new Error('探测器 TCP 连接不可写');
     }
     const request = buildBroadcastWriteRegistersFrame(startAddress, values);
+    // Serialize FF broadcast simulation with addressed Modbus reads/resets on
+    // this *same* detector TCP port. Direct socket.write bypasses the RTU
+    // client's request queue and can race an F000 reset or identity read.
+    // This only guarantees the bytes were written by the local transport;
+    // actual delivery remains subject to independent physical DIO confirmation.
+    if (isRawTcpClient(client)) {
+      await device.sendRawFrame(request);
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
       try {
         socket.write(request, (error?: Error | null) => {

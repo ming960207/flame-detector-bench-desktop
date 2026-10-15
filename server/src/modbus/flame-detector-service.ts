@@ -6,6 +6,7 @@
  */
 
 import ModbusRTU from 'modbus-serial';
+import { detectorReconnectDelayMs } from './flame-detector-reconnect-policy.js';
 import { EventEmitter } from 'events';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -53,7 +54,6 @@ import {
 } from './flame-detector-command.js';
 
 const SEND_MODE_BROADCAST_RETRY_INTERVAL_MS = 250;
-const TCP_RECONNECT_INTERVAL_MS = 250;
 const TCP_CONNECT_TIMEOUT_MS = 750;
 const DEVICE_REQUEST_TIMEOUT_MS = 700;
 const CLIENT_CLOSE_TIMEOUT_MS = 1000;
@@ -207,6 +207,7 @@ export class FlameDetectorService extends EventEmitter {
   private devices: Map<number, FlameDetectorDevice> = new Map();
   private pollTimer: NodeJS.Timeout | null = null;
   private unitReconnectTimers: Map<number, NodeJS.Timeout> = new Map();
+  private unitReconnectFailures = new Map<number, number>();
   private reconnectingUnits = new Set<number>();
   private polling = false;
   private autoTesting = false;
@@ -419,6 +420,7 @@ export class FlameDetectorService extends EventEmitter {
     this.waveformWatchdogTimers.clear();
     for (const timer of this.unitReconnectTimers.values()) clearTimeout(timer);
     this.unitReconnectTimers.clear();
+    this.unitReconnectFailures.clear();
     this.reconnectingUnits.clear();
     this.broadcastModeRequestingUnits.clear();
     this.broadcastModeRequestInFlight.clear();
@@ -505,6 +507,11 @@ export class FlameDetectorService extends EventEmitter {
   }
 
   private markTransportConnected(unit: FlameUnitConfig): void {
+    // A recovered detector restarts the failure streak and clears stale retries.
+    this.unitReconnectFailures.delete(unit.index);
+    const staleTimer = this.unitReconnectTimers.get(unit.index);
+    if (staleTimer) clearTimeout(staleTimer);
+    this.unitReconnectTimers.delete(unit.index);
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
     const tracker = this.startupTrackers.get(unit.index) ?? new DetectorStartupTracker(unit.index, unit.address);
     this.startupTrackers.set(unit.index, tracker);
@@ -521,11 +528,17 @@ export class FlameDetectorService extends EventEmitter {
 
   private scheduleUnitReconnect(unit: FlameUnitConfig): void {
     if (this.disposed || this.closing || this.unitReconnectTimers.has(unit.index)) return;
-    console.log(`[FlameService] 设备 ${unit.index} 安排重连，延迟 ${TCP_RECONNECT_INTERVAL_MS}ms`);
+    const failures = (this.unitReconnectFailures.get(unit.index) ?? 0) + 1;
+    this.unitReconnectFailures.set(unit.index, failures);
+    const delay = detectorReconnectDelayMs(failures, unit.index);
+    // Keep offline evidence but avoid flooding the shared gateway and log files.
+    if (failures === 1 || (failures & (failures - 1)) === 0) {
+      console.warn(`[FlameService] 设备 ${unit.index} 连续连接失败 ${failures} 次，下次重连 ${delay}ms 后`);
+    }
     const timer = setTimeout(() => {
       this.unitReconnectTimers.delete(unit.index);
       void this.reconnectUnit(unit);
-    }, TCP_RECONNECT_INTERVAL_MS);
+    }, delay);
     this.unitReconnectTimers.set(unit.index, timer);
   }
 
@@ -561,6 +574,12 @@ export class FlameDetectorService extends EventEmitter {
       if (result.ok && generation === this.lifecycleGeneration && !this.disposed) this.emit('connected');
     } finally {
       this.reconnectingUnits.delete(unit.index);
+      // A retry timer can fire before the prior attempt finishes. Restore a
+      // future retry when the unit is still offline, never start overlaps.
+      if (!this.disposed && !this.closing && generation === this.lifecycleGeneration
+        && !this.pool.get(key)?.ok && !this.unitReconnectTimers.has(unit.index)) {
+        this.scheduleUnitReconnect(unit);
+      }
     }
   }
 

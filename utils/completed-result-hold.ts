@@ -7,7 +7,7 @@ interface ResultSummary {
   finalVerdict: { verdict: string };
 }
 
-/** Lock production evidence before render coalescing, while keeping live controls and I/O current. */
+/** Lock production evidence before render coalescing, while keeping live controls/I/O current. */
 export function createCompletedResultHold<Summary extends ResultSummary>() {
   let held: Summary | null = null;
   let batchId: string | null = null;
@@ -32,8 +32,8 @@ export function createCompletedResultHold<Summary extends ResultSummary>() {
         held = incoming;
       }
       if (!held) return latest = incoming;
-      // Same-batch COMPLETE frames can be recomputed from changing live fault bits.
-      // Freeze result evidence only; controls and process status stay current.
+      // Same-batch COMPLETE frames can also be recomputed from changing live fault bits.
+      // Freeze only evidence/result fields; product selection, precheck and relay controls stay live.
       return latest = {
         ...incoming,
         waveformAnalysis: held.waveformAnalysis,

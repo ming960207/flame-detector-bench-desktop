@@ -1,3 +1,4 @@
+import { detectorResultTone } from '../utils/completed-result-hold';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { FC, ReactNode } from 'react';
@@ -33,7 +34,6 @@ import type { FieldFinalVerdict } from '../server/src/closure/field-final-verdic
 import type { FieldWaveformAnalysisSnapshot } from '../server/src/closure/field-waveform-analysis';
 import type { FlameDetectorState, FlameDetectorUnitState } from '../server/src/types';
 import type { FlameSample } from '../server/src/types';
-import { detectorResultTone } from '../utils/completed-result-hold';
 import type { ProductPrecheckReport } from '../server/src/product-profile';
 import type { RelayFunctionalTestProgress } from '../server/src/product-aware-flame-detector-service';
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
@@ -774,6 +774,9 @@ const LiveWaveformPanel: FC<{
       <IndicatorCameraPanel
         expanded={expanded}
         batchId={productPrecheck?.batchId ?? waveformAnalysis?.batchId ?? relayTest?.batchId ?? null}
+        // Arm continuous evidence acquisition as soon as PLC reaches position 1
+        // instead of waiting until async identity/relay precheck has started.
+        positionOneReady={status?.processStage === 'HEAT' && status?.stage !== 'FAULT'}
         precheckBusy={productPrecheckBusy}
         relayTest={relayTest}
         relayFunctionalTest={productPrecheck?.relayFunctionalTest}
@@ -977,7 +980,7 @@ export function WutosDashboard({
     () => Array.from({ length: 6 }, (_, index) => detectors?.units.find((unit) => unit.index === index + 1)),
     [detectors],
   );
-  // Keep the completed workflow stable while PLC I/O and alarms remain live.
+  // Keep the completed workflow stable while PLC I/O and safety alarms remain live.
   const activeWorkflowIndex = resultComplete ? WORKFLOW.length - 1 : workflowIndex(status);
   const alarms = alarmRows(new Date(), status, detectors, detectorVerdict, finalVerdict, channelOnline);
   const onlineCount = detectors?.onlineCount ?? units.filter((unit) => unit?.online).length;
