@@ -4,43 +4,35 @@ import test from 'node:test';
 import { createFieldStatusRuntime, type FlameDetectorStatusSource, type PLCProcessStatusSource } from '../src/closure/field-status-server.js';
 import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
 import { FlameDetectorDevice } from '../src/modbus/flame-detector-device.js';
-import { detrendedAmplitudeRatio } from '../src/modbus/waveform-signal-ratios.js';
+import { displayedProbeValue, displayedProbeRatios } from '../src/modbus/probe-ratios.js';
 import { createLatestValueScheduler, waveformKeys } from '../../utils/waveform.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../src/types.js';
+import type { PLCProcessStatus } from '../src/process-status.js';
 
-test('unpaired channel samples cannot change either side of an amplitude ratio', () => {
-  const paired = [0, 1, 0, -1].map(w => ({ probe1: 0, probe2: w * 20, probe3: w * 10 }));
-  const missing = { probe1: 0, probe2: 90000, probe3: NaN };
-  assert.equal(detrendedAmplitudeRatio([...paired, missing], 'probe2', 'probe3'), 2);
-  assert.equal(detrendedAmplitudeRatio([missing, missing, ...paired.slice(0, 2)], 'probe2', 'probe3'), null);
-  assert.equal(detrendedAmplitudeRatio(paired.map(s => ({ ...s, probe2: 0 })), 'probe2', 'probe3'), 0);
-});
-
-test('live ratios use synchronized RAW drift-removed amplitudes and expire old frames', () => {
+test('live ratio equals the displayed probe values after the existing clear operation', () => {
   const service = new FlameDetectorService({ mode: 'TCP', ip: '127.0.0.1', port: 31001,
     units: [{ index: 1, address: 1, enabled: false }] });
   const internal = service as any;
   const unit = internal.units.get(1);
-  // Normalization/history and reported device features must not supply ratios.
-  unit.historySamples = [{ probe1: -1, probe2: -9000, probe3: -1 }, { probe1: 1, probe2: 9000, probe3: 1 }];
   const device = { normalizeSamples: (samples: FlameSample[]) => ({ samples, baseline: {} }),
-    getProtocolProfile: () => ({ isFourWavelength: true }) } as unknown as FlameDetectorDevice;
-  const raw = (ratio: number) => [0, 1, 0, -1].map((w, i) => ({
-    probe1: 100 + i * 9 + w * 10, probe2: 1000 + i * 30 + w * 20 * ratio,
-    probe3: -300 + i * 2 + w * 20, probe4: 500 + i * 40 + w * 60,
-  }));
-  const update = (ratio: number, at: number) => internal.applyRealtimeState(unit,
-    { samples: raw(ratio), features: [{ snr21: 999, snr23: 999, snr31: 999, snr43: 999 }] }, device, at);
-  update(1, 1000);
-  assert.ok(Math.abs(unit.snr23 - 1) < 1e-9);
-  assert.ok(Math.abs(unit.snr21 - 2) < 1e-9);
-  assert.ok(Math.abs(unit.snr31 - 2) < 1e-9);
-  assert.ok(Math.abs(unit.snr43 - 3) < 1e-9);
-  update(1.5, 2100);
-  assert.ok(Math.abs(unit.snr23 - 1.5) < 1e-9);
-  internal.applyRealtimeState(unit, { samples: raw(1).map(s => ({ ...s, probe3: 0 })), features: [] }, device, 3200);
-  assert.equal(unit.snr23, null);
-  assert.equal(unit.snr43, null);
+    getProtocolProfile: () => ({ isFourWavelength: false }) } as unknown as FlameDetectorDevice;
+  unit.historySamples = [{ probe1: 0, probe2: -9000, probe3: -1 }, { probe1: 1, probe2: 9000, probe3: 1 }];
+  service.clearWaveformHistory();
+  const samples = [0, 1, 0, -1].map((w, i) => ({ probe1: w * 9, probe2: w * 168 + i * 30, probe3: w * 160 + i * 2 }));
+  internal.applyRealtimeState(unit, { samples, features: [{ snr23: 999 }] }, device);
+  assert.equal(unit.probe2Fluctuation, 138);
+  assert.equal(unit.probe3Fluctuation, 158);
+  assert.equal(unit.snr23, 138 / 158);
+});
+
+test('ratios divide displayed integer values and preserve missing or zero denominator', () => {
+  const unit = { probe1: 8.5, probe2: 183, probe3: 168, probe4: 336, snr23: 999 };
+  assert.equal(displayedProbeValue(unit, 'probe1'), 9);
+  assert.deepEqual(displayedProbeRatios(unit), { snr21: 183 / 9, snr23: 183 / 168, snr31: 168 / 9, snr43: 2 });
+  assert.equal(displayedProbeRatios({ probe2: 0, probe3: 160 }).snr23, 0);
+  assert.equal(displayedProbeRatios({ probe2: 168, probe3: 0 }).snr23, null);
+  assert.equal(displayedProbeRatios({ probe2: 168 }).snr23, null);
+  assert.equal(displayedProbeRatios({ probe2: NaN, probe3: 160 }).snr23, null);
 });
 
 test('latest value scheduler publishes only the newest pending detector state', () => {
@@ -148,6 +140,26 @@ class FakeDetectorSource extends EventEmitter implements FlameDetectorStatusSour
     this.emit('flame_state', this.state);
   }
 }
+
+test('each heat, flash and EMC entry invokes the same waveform clear as the toolbar once', async () => {
+  const source = new FakeProcessSource();
+  const detectors = new FakeDetectorSource();
+  const runtime = createFieldStatusRuntime(source, detectors);
+  await runtime.listen(0);
+  try {
+    for (const [index, stage] of ['HEAT', 'FLASH', 'EMC'].entries()) {
+      const timestamp = 1000 + index * 1000;
+      const status = { timestamp, autoRunning: true, stage, processStage: stage, valid: true,
+        io: { internal: { autoRunning: true, noiseCaptureWindow: false }, steps: {
+          stepM10_4: stage === 'HEAT', stepM11_0: stage === 'FLASH', stepM11_2: stage === 'EMC',
+        } } } as PLCProcessStatus;
+      source.emit('status', status);
+      assert.equal(detectors.clearCalls, index + 1, stage);
+      source.emit('status', { ...status, timestamp: timestamp + 10 });
+      assert.equal(detectors.clearCalls, index + 1, `${stage} repeated poll`);
+    }
+  } finally { await runtime.close(); }
+});
 
 test('field API exposes the all-detector waveform clear operation', async () => {
   const source = new FakeProcessSource();

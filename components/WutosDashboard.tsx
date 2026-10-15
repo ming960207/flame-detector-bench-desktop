@@ -1,3 +1,4 @@
+import { displayedProbeValue, displayedProbeRatios } from '../server/src/modbus/probe-ratios';
 import { detectorResultTone } from '../utils/completed-result-hold';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -583,7 +584,7 @@ const DetectorCard: FC<{
           >
             <i /><span>{lamp.label}</span>
             {openLamp === lamp.key && <small className="wutos-process-lamp__popover" role="status">
-              <em>{lamp.key === 'noise' ? '各探头噪声值' : configuredRatios.length === 1 ? `${RATIO_LABELS[configuredRatios[0]]} 同步振幅比` : '同步探头振幅比'}</em>
+              <em>{lamp.key === 'noise' ? '各探头噪声值' : configuredRatios.length === 1 ? `${RATIO_LABELS[configuredRatios[0]]} 探头值之比` : '探头值之比'}</em>
               <b>{lamp.key === 'noise'
                 ? `波动 ${probeFluctuationSummary}`
                 : lamp.ratios ? `${configuredRatios.length === 1 ? '' : `${lamp.ratios[0]} `}${lamp.ratios[1].toFixed(2)}` : '暂无数据'}</b>
@@ -634,11 +635,7 @@ function miniWavePath(samples: FlameSample[], key: keyof FlameSample, domain: Re
 }
 
 function probeFluctuation(unit: FlameDetectorUnitState | undefined, key: keyof FlameSample): number {
-  const explicit = unit?.[`${String(key)}Fluctuation` as keyof FlameDetectorUnitState];
-  const hasHistory = (unit?.historySamples?.length ?? unit?.samples?.length ?? 0) > 0;
-  return Number.isFinite(Number(explicit)) && (Number(explicit) > 0 || !hasHistory)
-    ? Number(explicit)
-    : Number(unit?.[key] ?? NaN);
+  return displayedProbeValue(unit, key) ?? NaN;
 }
 
 function probeAbsolute(unit: FlameDetectorUnitState | undefined, key: keyof FlameSample): number {
@@ -673,7 +670,7 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
   const domain = waveformDomain(samples, probes);
   const state = unit?.fault ? 'fault' : unit?.fire ? 'fire' : unit?.online ? 'online' : 'offline';
   const stateLabel = detectorStartupLabel(unit) ?? signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
-  const ratio23 = unit?.snr23;
+  const ratio23 = displayedProbeRatios(unit).snr23;
 
   return <article className={`wutos-sensor-card is-${state}`} aria-label={`探测器${index}实时状态`}>
     <header>

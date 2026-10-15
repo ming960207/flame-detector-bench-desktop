@@ -108,14 +108,13 @@ function signalWindow(ratio: number, flash = false, flatDenominator = false) {
     plc.io!.steps!.stepM11_0 = true;
     analysis.observeProcess(plc);
   }
-  // Reproduce a stale normalized-history ratio while actual RAW AC channels
-  // have the requested ratio plus unequal linear DC drift.
+  // Device features/RAW detrending are deliberately different from card values.
   for (let frame = 0; frame < 16; frame++) {
     const raw = [0, 1, 0, -1].map((wave, index) => {
       const point = frame * 4 + index;
       return { probe1: wave * 50, probe2: 1_000 + point * 8 + wave * 50 * ratio, probe3: 1_000 + point * 2 + wave * (flatDenominator ? 0 : 50) };
     });
-    analysis.observeDetectors(detectorState(12_250 + frame * 50, { ...detectorUnit(12_250 + frame * 50, raw), snr23: 5.9 }));
+    analysis.observeDetectors(detectorState(12_250 + frame * 50, { ...detectorUnit(12_250 + frame * 50, raw), probe1Fluctuation: 10, probe2Fluctuation: 100 * ratio, probe3Fluctuation: flatDenominator ? 0 : 100, snr23: 5.9 }));
   }
   const end = status(13_100);
   end.io!.internal!.noiseCaptureWindow = false;
@@ -123,19 +122,19 @@ function signalWindow(ratio: number, flash = false, flatDenominator = false) {
   return analysis.snapshot().units[0]!.stages![flash ? 'flash' : 'heat'];
 }
 
-test('formal stage ratio removes DC drift instead of trusting normalized history extrema', () => {
+test('formal stage ratio directly divides the current displayed probe values', () => {
   const heat = signalWindow(1);
   assert.ok(Math.abs(heat.snr23! - 1) < 0.03);
   assert.equal(heat.interferenceRatio, heat.snr23);
 });
 
-test('stable window still rejects a real channel amplitude ratio above the B limit', () => {
+test('displayed probe ratio above the B limit still fails', () => {
   const heat = signalWindow(2);
   assert.ok(heat.snr23! > 1.65);
   assert.equal(heat.reason, 'SNR23_ABOVE_LIMIT');
 });
 
-test('stable window preserves low-ratio and absent denominator failures', () => {
+test('displayed probe ratio preserves low-ratio and absent denominator failures', () => {
   assert.equal(signalWindow(0.3).reason, 'SNR23_BELOW_LIMIT');
   const flat = signalWindow(1, true, true);
   assert.equal(flat.snr23, null);
@@ -148,14 +147,15 @@ test('flash accepts actual waveform data below the former 80 sample gate', () =>
   assert.equal(flash.verdict, 'PASS');
 });
 
-test('old frames and stage-start transients cannot supply formal heat ratios', () => {
+test('old frames are ignored and fresh displayed ratios are accepted immediately at stage start', () => {
   const analysis = new FieldWaveformAnalysis();
   analysis.observeProcess(status(1_000));
   closeNoiseWindow(analysis, 12_000);
   const raw = [{ probe1: 0, probe2: 10, probe3: 10 }, { probe1: 10, probe2: 20, probe3: 20 }];
   analysis.observeDetectors(detectorState(12_010, detectorUnit(11_900, raw)));
-  analysis.observeDetectors(detectorState(12_050, detectorUnit(12_050, raw)));
   assert.equal(analysis.snapshot().units[0]!.stages!.heat.snr23, null);
+  analysis.observeDetectors(detectorState(12_050, { ...detectorUnit(12_050, raw), probe2Fluctuation: 180, probe3Fluctuation: 160 }));
+  assert.equal(analysis.snapshot().units[0]!.stages!.heat.snr23, 180 / 160);
 });
 
 test('flash without waveform data still requires a retest after removing the count gate', () => {

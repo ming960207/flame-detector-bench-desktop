@@ -418,8 +418,8 @@ export function createFieldStatusRuntime(
 
   source.on('status', (status: PLCProcessStatus) => {
     const previousStatus = currentStatus;
-    const previousStage = previousStatus?.processStage;
     const previousBatchId = waveformAnalysisState.batchId;
+    const previousNoiseCaptureActive = waveformAnalysisState.noiseCaptureActive;
     const signalStabilizationStarted = isPositionOneSignalStabilization(status) && !isPositionOneSignalStabilization(previousStatus);
     const signalStabilizationEnded = !isPositionOneSignalStabilization(status) && isPositionOneSignalStabilization(previousStatus);
     const heatInterferenceStarted = status.io?.steps?.stepM10_4 === true && previousStatus?.io?.steps?.stepM10_4 !== true;
@@ -427,8 +427,7 @@ export function createFieldStatusRuntime(
     const flashStarted = status.io?.steps?.stepM11_0 === true && previousStatus?.io?.steps?.stepM11_0 !== true;
     const flashCompleted = status.io?.steps?.stepM11_0 !== true && previousStatus?.io?.steps?.stepM11_0 === true;
     currentStatus = status;
-    const interferenceWindowStarted = (status.processStage === 'FLASH' || status.processStage === 'EMC')
-      && previousStage !== 'FLASH' && previousStage !== 'EMC';
+    const emcStarted = status.io?.steps?.stepM11_2 === true && previousStatus?.io?.steps?.stepM11_2 !== true;
     waveformAnalysis.observeProcess(status);
     waveformAnalysisState = waveformAnalysis.snapshot();
     const batchStarted = waveformAnalysisState.batchId !== previousBatchId;
@@ -443,7 +442,6 @@ export function createFieldStatusRuntime(
         detectorStartupReport = detectors.getReadyReport?.() ?? detectorStartupReport;
       }
     }
-    if (batchStarted || heatInterferenceStarted || interferenceWindowStarted) detectors.clearWaveformHistory?.();
     if (waveformAnalysisState.batchId && positionBatchId !== waveformAnalysisState.batchId) resetInspectionPositions(waveformAnalysisState.batchId);
     if (signalStabilizationStarted) scheduleDelayedProductPrecheck(waveformAnalysisState.batchId);
     if (signalStabilizationEnded) cancelDelayedProductPrecheck('LEFT_SIGNAL_STABILIZATION');
@@ -460,6 +458,10 @@ export function createFieldStatusRuntime(
         'DETECTION_POSITION_2_FLASH', '第二次检测位/爆闪检测',
         positionStartedAt.get('DETECTION_POSITION_2_FLASH') ?? null, status.timestamp, detectors.getCurrentState(),
       ));
+    }
+    const noiseCaptureStarted = waveformAnalysisState.noiseCaptureActive && !previousNoiseCaptureActive;
+    if (batchStarted || noiseCaptureStarted || heatInterferenceStarted || flashStarted || emcStarted) {
+      detectors.clearWaveformHistory?.();
     }
     recomputeVerdicts();
     if (waveformAnalysisState.phase === 'COMPLETE' && waveformAnalysisState.batchId && streamingStoppedBatchId !== waveformAnalysisState.batchId) {

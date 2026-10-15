@@ -1,4 +1,4 @@
-import { SIGNAL_RATIO_WINDOW_MS, synchronizedSignalRatios, detrendedAmplitudeRatio } from '../modbus/waveform-signal-ratios.js';
+import { displayedProbeValue, displayedProbeRatios, probeRatio, type ProbeDisplaySource } from '../modbus/probe-ratios.js';
 import { isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../types.js';
 import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
@@ -14,7 +14,7 @@ export type WaveformAnalysisLogger = (message: string) => void;
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
 const NOISE_ROLLING_WINDOW_MS = 10_000;
-const SIGNAL_RATIO_SETTLE_MS = 200;
+const MAX_STAGE_SAMPLE_AGE_MS = 1_000;
 
 export interface DetectionSNRRange {
   min: number;
@@ -275,9 +275,9 @@ interface UnitAccumulator {
   rollingRawSamples: Array<{ timestamp: number; sample: FlameSample }>;
   rawStageRanges: Record<ChannelKey, RawChannelRange>;
   interferenceSamples: Record<InterferenceStage, FlameSample[]>;
-  ratioFrames: Record<InterferenceStage, Array<{ timestamp: number; samples: FlameSample[] }>>;
+  stageProbes: Record<InterferenceStage, ProbeDisplaySource | null>;
+  stageSampledAt: Record<InterferenceStage, number | null>;
   latest: LatestUnitState;
-  stageRatios: Record<InterferenceStage, { snr21: number | null; snr23: number | null; snr31: number | null }>;
   lastEventKey: string;
   lastNoiseSamples: FlameSample[];
   lastNoiseRawSamples: FlameSample[];
@@ -409,11 +409,6 @@ function channelAmplitude(samples: FlameSample[], key: ChannelKey): number | nul
   return (Math.max(...values) - Math.min(...values)) / 2;
 }
 
-/** Same-window RAW channel amplitudes shared with live telemetry. */
-function stableSignalRatios(frames: UnitAccumulator['ratioFrames'][InterferenceStage]): UnitAccumulator['stageRatios'][InterferenceStage] {
-  return synchronizedSignalRatios(frames);
-}
-
 function emptyChannelNumberMap(): Record<ChannelKey, number | null> {
   return Object.fromEntries(CHANNEL_KEYS.map((key) => [key, null])) as Record<ChannelKey, number | null>;
 }
@@ -503,13 +498,9 @@ function newAccumulator(index: number, address = index): UnitAccumulator {
     rollingRawSamples: [],
     rawStageRanges: emptyRawChannelRanges(),
     interferenceSamples: { heat: [], flash: [], emc: [] },
-    ratioFrames: { heat: [], flash: [], emc: [] },
+    stageProbes: { heat: null, flash: null, emc: null },
+    stageSampledAt: { heat: null, flash: null, emc: null },
     latest: blankLatest(address),
-    stageRatios: {
-      heat: { snr21: null, snr23: null, snr31: null },
-      flash: { snr21: null, snr23: null, snr31: null },
-      emc: { snr21: null, snr23: null, snr31: null },
-    },
     lastEventKey: '',
     lastNoiseSamples: [],
     lastNoiseRawSamples: [],
@@ -698,18 +689,18 @@ function publicUnitResult(
   const ratioConfig = config.interferenceRatio ?? { numerator: 'probe2' as ChannelKey, denominator: 'probe3' as ChannelKey };
   const stages = Object.fromEntries((['heat', 'flash', 'emc'] as InterferenceStage[]).map((stage) => {
     const samples = stageSamples[stage];
-    const ratioSamples = accumulator.ratioFrames[stage].flatMap(frame => frame.samples);
     const enough = (stage === 'flash' ? samples.length > 0 : samples.length >= config.minInterferenceSamples)
-      && accumulator.ratioFrames[stage].length > 0;
-    const interferenceRatio = detrendedAmplitudeRatio(ratioSamples, ratioConfig.numerator, ratioConfig.denominator);
+      && accumulator.stageProbes[stage] !== null;
+    const interferenceRatio = probeRatio(displayedProbeValue(accumulator.stageProbes[stage], ratioConfig.numerator),
+      displayedProbeValue(accumulator.stageProbes[stage], ratioConfig.denominator));
     const stageMetrics = {
       interferenceRatio,
       consistencyTrend: trendAgreement(samples, config.consistencyProbes?.length ? config.consistencyProbes : CHANNEL_KEYS.slice(0, 3)),
-      ...accumulator.stageRatios[stage],
+      ...displayedProbeRatios(accumulator.stageProbes[stage]),
     };
     const completed = completedStages.has(stage) || phase === 'COMPLETE';
     const failure = enough ? stageFailureReason(stageMetrics, config) : 'SAMPLES_MISSING';
-    return [stage, {
+    const stageResult: InterferenceStageResult = {
       completed,
       verdict: completed ? failure ? 'FAIL' : 'PASS' : 'PENDING',
       reason: completed
@@ -717,10 +708,11 @@ function publicUnitResult(
         : enough ? 'WAITING_FOR_PROCESS_COMPLETE' : 'WAITING_FOR_STAGE_SAMPLES',
       sampleCount: samples.length,
       ...stageMetrics,
-    } satisfies InterferenceStageResult];
+    };
+    return [stage, stageResult];
   })) as Record<InterferenceStage, InterferenceStageResult>;
   const displayStage = (['heat', 'flash', 'emc'] as InterferenceStage[]).find(stage => stages[stage].verdict === 'FAIL' && stages[stage].reason !== 'SAMPLES_MISSING')
-    ?? (['emc', 'flash', 'heat'] as InterferenceStage[]).find(stage => accumulator.ratioFrames[stage].length > 0)
+    ?? (['emc', 'flash', 'heat'] as InterferenceStage[]).find(stage => accumulator.stageProbes[stage] !== null)
     ?? 'heat';
   const result: WaveformAnalysisUnitResult = {
     index: accumulator.index,
@@ -733,7 +725,7 @@ function publicUnitResult(
     interferenceRms: interference ? Number(interference.rms.toFixed(3)) : null,
     interferenceRatio: stages[displayStage].interferenceRatio,
     consistencyTrend: trendAgreement(interferenceSamples, config.consistencyProbes?.length ? config.consistencyProbes : CHANNEL_KEYS.slice(0, 3)),
-    ...accumulator.stageRatios[displayStage],
+    ...displayedProbeRatios(accumulator.stageProbes[displayStage]),
     noiseSampleCount: noiseSamples.length,
     noiseTest,
     interferenceSampleCount: interferenceSamples.length,
@@ -758,7 +750,7 @@ function publicUnitResult(
   }
   const missingStage = (['heat', 'flash', 'emc'] as InterferenceStage[])
     .find((stage) => (stage === 'flash' ? stages[stage].sampleCount === 0 : stages[stage].sampleCount < config.minInterferenceSamples)
-      || accumulator.ratioFrames[stage].length === 0);
+      || accumulator.stageProbes[stage] === null);
   if (missingStage) {
     result.verdict = phase === 'COMPLETE' ? 'FAIL' : 'PENDING';
     result.reason = phase === 'COMPLETE' ? `${missingStage.toUpperCase()}_SAMPLES_MISSING` : 'WAITING_FOR_INTERFERENCE_SAMPLES';
@@ -955,14 +947,15 @@ export class FieldWaveformAnalysis {
     if (previousCaptureStage && (processComplete || previousCaptureStage !== activeInterferenceStage)) {
       this.completedStages.add(previousCaptureStage);
       for (const accumulator of this.units.values()) {
-        const frames = accumulator.ratioFrames[previousCaptureStage]
-          .filter((frame) => frame.timestamp > status.timestamp - SIGNAL_RATIO_WINDOW_MS);
-        accumulator.ratioFrames[previousCaptureStage] = frames;
-        accumulator.stageRatios[previousCaptureStage] = stableSignalRatios(frames);
-        this.log(`[信噪比窗口] batch=${this.batchId ?? '-'} stage=${previousCaptureStage} D${accumulator.index} `
-          + `frames=${frames.length} samples=${frames.reduce((sum, frame) => sum + frame.samples.length, 0)} `
-          + `first=${compactTimestamp(frames[0]?.timestamp ?? null)} last=${compactTimestamp(frames.at(-1)?.timestamp ?? null)} `
-          + `snr23=${compactNumber(accumulator.stageRatios[previousCaptureStage].snr23 ?? NaN)}`);
+        const sampledAt = accumulator.stageSampledAt[previousCaptureStage];
+        if (sampledAt === null || status.timestamp - sampledAt > MAX_STAGE_SAMPLE_AGE_MS) {
+          accumulator.stageProbes[previousCaptureStage] = null;
+        }
+        const probes = accumulator.stageProbes[previousCaptureStage];
+        this.log(`[探头比值] batch=${this.batchId ?? '-'} stage=${previousCaptureStage} D${accumulator.index} `
+          + `sampledAt=${compactTimestamp(sampledAt)} P2=${compactNumber(displayedProbeValue(probes, 'probe2') ?? NaN)} `
+          + `P3=${compactNumber(displayedProbeValue(probes, 'probe3') ?? NaN)} `
+          + `snr23=${compactNumber(displayedProbeRatios(probes).snr23 ?? NaN)}`);
       }
     }
     if (processComplete) {
@@ -1030,11 +1023,9 @@ export class FieldWaveformAnalysis {
       }
       if (this.capturePhase === 'INTERFERENCE' && this.captureStage) {
         accumulator.interferenceSamples[this.captureStage].push(...samples);
-        if (frameAt - this.captureStageStartedAt >= SIGNAL_RATIO_SETTLE_MS && rawSamples.length > 0) {
-          const frames = accumulator.ratioFrames[this.captureStage];
-          frames.push({ timestamp: frameAt, samples: rawSamples });
-          accumulator.ratioFrames[this.captureStage] = frames.filter((frame) => frame.timestamp > frameAt - SIGNAL_RATIO_WINDOW_MS).slice(-100);
-          accumulator.stageRatios[this.captureStage] = stableSignalRatios(accumulator.ratioFrames[this.captureStage]);
+        if (samples.length > 0) {
+          accumulator.stageProbes[this.captureStage] = Object.fromEntries(CHANNEL_KEYS.map(key => [key, displayedProbeValue(unit, key)]));
+          accumulator.stageSampledAt[this.captureStage] = frameAt;
         }
       }
       accumulator.noiseSamples = accumulator.noiseSamples.slice(-2_000);
