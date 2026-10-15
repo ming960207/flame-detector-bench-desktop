@@ -15,7 +15,7 @@ export interface ProductLabelPrintJob {
   productModel: string;
   productCode: string | null;
   qrContent: string | null;
-  verdict: 'A类合格' | 'B类合格' | '不合格';
+  verdict: 'A类合格' | 'B类合格' | '不合格' | '需复测';
   isolation: boolean;
   ngReasons?: string[];
   labelReason?: string | null;
@@ -118,10 +118,11 @@ export function labelQrBox(column: number): { x: number; y: number; width: numbe
   };
 }
 
-const STORAGE_KEY = 'flame-detector-label-printer-config-v1';
+const STORAGE_KEY = 'flame-detector-label-printer-config-v2';
+const LEGACY_STORAGE_KEY = 'flame-detector-label-printer-config-v1';
 const DEFAULT_CONFIG: LocalLabelPrinterConfig = {
-  autoPrint: false,
-  autoPrintSince: null,
+  autoPrint: true,
+  autoPrintSince: Date.now(),
   connectionType: 'usb',
   printerName: '',
   printerPort: 0,
@@ -139,12 +140,19 @@ function normalizeConnectionType(value: unknown): PrinterConnectionType {
 
 function loadConfig(): LocalLabelPrinterConfig {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<LocalLabelPrinterConfig>;
+    const storedConfig = localStorage.getItem(STORAGE_KEY);
+    const migrating = storedConfig === null;
+    const parsed = JSON.parse(storedConfig ?? localStorage.getItem(LEGACY_STORAGE_KEY) ?? '{}') as Partial<LocalLabelPrinterConfig>;
     const storedAutoPrintSince = Number(parsed.autoPrintSince);
-    const autoPrint = parsed.autoPrint === true && Number.isFinite(storedAutoPrintSince) && storedAutoPrintSince > 0;
-    return {
+    // Auto-print is enabled by default for field deployment. On first load of
+    // this version, migrate saved printer settings and start with new jobs only.
+    const autoPrint = migrating || parsed.autoPrint === true;
+    const autoPrintSince = autoPrint
+      ? (!migrating && Number.isFinite(storedAutoPrintSince) && storedAutoPrintSince > 0 ? storedAutoPrintSince : Date.now())
+      : null;
+    const config: LocalLabelPrinterConfig = {
       autoPrint,
-      autoPrintSince: autoPrint ? storedAutoPrintSince : null,
+      autoPrintSince,
       connectionType: normalizeConnectionType(parsed.connectionType),
       printerName: typeof parsed.printerName === 'string' ? parsed.printerName : '',
       printerPort: Number.isFinite(Number(parsed.printerPort)) ? Number(parsed.printerPort) : 0,
@@ -155,8 +163,10 @@ function loadConfig(): LocalLabelPrinterConfig {
       labelType: [1, 2, 3, 4, 5, 6, 10].includes(Number(parsed.labelType)) ? Number(parsed.labelType) : 1,
       printMode: [1, 2].includes(Number(parsed.printMode)) ? Number(parsed.printMode) : 1,
     };
+    if (migrating) saveConfig(config);
+    return config;
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, autoPrintSince: Date.now() };
   }
 }
 
@@ -797,7 +807,7 @@ class LabelPrinterRuntime {
                   { x: detailX, y: 6.8, width: 12, height: 2.8, fontSize: job.isolation ? 2.2 : 1.8 }, { bold: true });
                 await this.transport.text(`日期 ${localDate(job.productionDate)}`,
                   { x: detailX, y: 10, width: 12, height: 1.4, fontSize: 0.9 });
-                await this.transport.text(job.isolation ? ngReason : '扫码追溯',
+                await this.transport.text(job.isolation ? ngReason : job.verdict === '需复测' ? '请复测' : '扫码追溯',
                   { x: detailX, y: 11.7, width: 12, height: 2.5, fontSize: job.isolation ? 1.15 : 1.05 }, { bold: true });
                 await this.transport.line(offset + 2.4, 15.8, 25.2);
                 await this.transport.text(`编号 ${job.productCode!}`,

@@ -108,8 +108,14 @@ function localMESConfig(): { baseUrl?: string; apiKey?: string } {
 
 export function defaultMESConfig(): MESConfig {
   const local = localMESConfig();
+  const enabledOverride = String(process.env.MES_ENABLED || '').trim().toLowerCase();
+  const disabledValues = ['false', '0', 'off', 'no'];
   return {
-    enabled: !['false', '0', 'off', 'no'].includes((process.env.MES_ENABLED || '').trim().toLowerCase()),
+    // A local installation without MES credentials is an offline-capable bench.
+    // Preserve automatic upload for explicitly enabled or credentialed setups.
+    enabled: enabledOverride
+      ? !disabledValues.includes(enabledOverride)
+      : Boolean((process.env.MES_API_KEY || local.apiKey || '').trim()),
     baseUrl: process.env.MES_BASE_URL || local.baseUrl || DEFAULT_MES_BASE_URL,
     apiKey: process.env.MES_API_KEY || local.apiKey || '',
     operatorName: process.env.MES_OPERATOR_NAME || '',
@@ -241,6 +247,7 @@ export class MESPublisher {
   }
 
   async checkConnectivity(force = false): Promise<MESConnectivityStatus> {
+    if (!this.config.enabled) return { state: 'UNKNOWN', checkedAt: null, httpStatus: null };
     const now = Date.now();
     if (!force && this.connectivity.checkedAt !== null && now - this.connectivity.checkedAt < MES_CONNECTIVITY_CACHE_MS) {
       return { ...this.connectivity };

@@ -39,7 +39,7 @@ import type { RelayFunctionalTestProgress } from '../server/src/product-aware-fl
 import type { IndicatorVisionReport } from '../server/src/indicator-vision';
 import { FLAME_DETECTOR_SIMULATION_COMMANDS, type FlameDetectorSimulationCommand } from '../server/src/modbus/flame-detector-command';
 import type { FlameDetectorSimulationCommandResult } from '../server/src/modbus/flame-detector-service';
-import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
+import { DEFAULT_WAVEFORM_MAX_SAMPLES, waveformDomain, waveformKeys, waveformPreviewPoints, waveformSamples, type WaveformDisplayMode } from '../utils/waveform';
 import { IndicatorCameraPanel } from './indicator-camera';
 import { ThemeToggleButton, useAppTheme } from './theme-toggle';
 import './wutos-dashboard.css';
@@ -624,10 +624,10 @@ function WorkflowArrow() {
 }
 
 function miniWavePath(samples: FlameSample[], key: keyof FlameSample, domain: ReturnType<typeof waveformDomain>, width = 120, height = 34): string {
-  const values = samples.map((sample) => Number(sample[key])).filter(Number.isFinite);
-  if (values.length < 2) return '';
-  return values.map((value, index) => {
-    const x = (index / (values.length - 1)) * width;
+  const points = waveformPreviewPoints(samples, key, 240);
+  if (points.length < 2) return '';
+  return points.map(({ sampleIndex, value }, index) => {
+    const x = (sampleIndex / (samples.length - 1)) * width;
     const y = height - 2 - ((value - domain.min) / domain.span) * (height - 4);
     return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');

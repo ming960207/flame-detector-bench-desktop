@@ -106,6 +106,10 @@ function productVerdict(
   return '合格';
 }
 
+function measuredNotTested<T>(value: T, reason: string): { value: T; status: '未检测'; source: 'NOT_TESTED'; reason: string } {
+  return { value, status: '未检测', source: 'NOT_TESTED', reason };
+}
+
 export function buildProductionInspectionRecord(input: ProductionInspectionRecordBuildInput): ProductionInspectionRecord {
   const profile = selectedProductProfile(input.productConfig);
   const allocation = input.precheck?.productCodeAllocation ?? null;
@@ -114,16 +118,21 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
 
   for (let slot = 1; slot <= 6; slot += 1) {
     const detector = input.detectorVerdict.units.find((unit) => unit.index === slot);
+    const testInvalid = detector?.classification === 'TEST_INVALID';
     const precheck = input.precheck?.units.find((unit) => unit.index === slot);
     const relayUnit = relay?.units.find((unit) => unit.detectorIndex === slot);
     const codeItem = allocation?.items.find((item) => item.slot === slot);
     const fixed = fixedNotApplicableItems();
 
     const fireAction = profile.relayFunctionalTestEnabled
-      ? autoStatus(relayUnit?.alarm.verdict === 'PASS', reasonText(relayUnit?.alarm.reasons ?? ['RELAY_RESULT_MISSING']))
+      ? testInvalid && relayUnit?.alarm.verdict !== 'PASS'
+        ? notTested('TEST_INVALID_RETEST_REQUIRED')
+        : autoStatus(relayUnit?.alarm.verdict === 'PASS', reasonText(relayUnit?.alarm.reasons ?? ['RELAY_RESULT_MISSING']))
       : relayTestNotApplicable();
     const faultAction = profile.relayFunctionalTestEnabled
-      ? autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
+      ? testInvalid && relayUnit?.fault.verdict !== 'PASS'
+        ? notTested('TEST_INVALID_RETEST_REQUIRED')
+        : autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
       : relayTestNotApplicable();
 
     const amplitudeChannels = expectedProbeChannels(precheck?.actualProbeCount ?? profile.expectedProbeCount);
@@ -146,26 +155,47 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
     const basePassed = detector?.verdict === 'PASS';
     const indicatorVision = indicatorVisionValue(input.precheck?.indicatorVision, slot);
 
-    const softwareVersion = measuredValue(
-      precheck?.actualSoftwareVersion ?? null,
-      softwareOk,
-      reasonText(precheck?.reasons.filter((reason) => reason.includes('SOFTWARE_VERSION') || reason === 'PRECHECK_READ_FAILED') ?? []),
-    );
-    const productInfo = measuredValue(
-      {
-        probeCount: precheck?.actualProbeCount ?? null,
-        sensitivityLevel: precheck?.sensitivityLevel ?? detector?.metrics.sensitivity ?? null,
-      },
-      productInfoOk,
-      productInfoOk ? undefined : 'PRODUCT_INFO_READ_OR_MATCH_FAILED',
-    );
-    const interferenceResistance = autoStatus(interferenceOk, interferenceOk ? undefined : 'INTERFERENCE_TEST_FAILED');
+    const softwareVersionValue = precheck?.actualSoftwareVersion ?? null;
+    const softwareVersion = testInvalid && !softwareOk && !precheck?.reasons.includes('SOFTWARE_VERSION_MISMATCH')
+      ? measuredNotTested(softwareVersionValue, 'TEST_INVALID_RETEST_REQUIRED')
+      : measuredValue(
+        softwareVersionValue,
+        softwareOk,
+        reasonText(precheck?.reasons.filter((reason) => reason.includes('SOFTWARE_VERSION') || reason === 'PRECHECK_READ_FAILED') ?? []),
+      );
+    const productInfoValue = {
+      probeCount: precheck?.actualProbeCount ?? null,
+      sensitivityLevel: precheck?.sensitivityLevel ?? detector?.metrics.sensitivity ?? null,
+    };
+    const productInfo = testInvalid && !productInfoOk && !precheck?.reasons.includes('PROBE_COUNT_MISMATCH')
+      ? measuredNotTested(productInfoValue, 'TEST_INVALID_RETEST_REQUIRED')
+      : measuredValue(
+        productInfoValue,
+        productInfoOk,
+        productInfoOk ? undefined : 'PRODUCT_INFO_READ_OR_MATCH_FAILED',
+      );
+    const interferenceResistance = interferenceOk
+      ? autoStatus(true)
+      : testInvalid
+        ? notTested('TEST_INVALID_RETEST_REQUIRED')
+        : autoStatus(false, 'INTERFERENCE_TEST_FAILED');
     const amplitude = {
       values: amplitudes,
-      status: (amplitudeOk ? '合格' : '不合格') as InspectionItemStatus,
-      source: 'AUTO' as const,
-      ...(amplitudeOk ? {} : { reason: 'AMPLITUDE_OR_NOISE_TEST_FAILED' }),
+      status: (amplitudeOk ? '合格' : testInvalid ? '未检测' : '不合格') as InspectionItemStatus,
+      source: (amplitudeOk || !testInvalid ? 'AUTO' : 'NOT_TESTED') as 'AUTO' | 'NOT_TESTED',
+      ...(amplitudeOk ? {} : { reason: testInvalid ? 'TEST_INVALID_RETEST_REQUIRED' : 'AMPLITUDE_OR_NOISE_TEST_FAILED' }),
     };
+
+    const verdictStatuses: InspectionItemStatus[] = [
+      fireAction.status,
+      faultAction.status,
+      amplitude.status,
+      softwareVersion.status,
+      productInfo.status,
+      interferenceResistance.status,
+      ...(input.precheck?.indicatorVision ? [indicatorVision.status] : []),
+    ];
+    const hasConfirmedProductFailure = verdictStatuses.includes('不合格');
 
     products.push({
       slot,
@@ -179,15 +209,9 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
       softwareVersion,
       productInfo,
       interferenceResistance,
-      verdict: productVerdict(basePassed, [
-        fireAction.status,
-        faultAction.status,
-        amplitude.status,
-        softwareVersion.status,
-        productInfo.status,
-        interferenceResistance.status,
-        ...(input.precheck?.indicatorVision ? [indicatorVision.status] : []),
-      ]),
+      verdict: testInvalid
+        ? hasConfirmedProductFailure ? '不合格' : '未检测'
+        : productVerdict(basePassed, verdictStatuses),
     });
   }
 

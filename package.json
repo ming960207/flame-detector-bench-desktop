@@ -49,6 +49,8 @@
       "dist/**/*",
       "server/dist/**/*",
       "server/node_modules/**/*",
+      "!server/node_modules/flame-detector-bench-desktop",
+      "!server/node_modules/flame-detector-bench-desktop/**/*",
       "server/package.json",
       "server/product-profiles.json",
       "server/system-config.json",
@@ -57,7 +59,9 @@
       "config/release-source.json"
     ],
     "asarUnpack": [
-      "server/**/*"
+      "server/**/*",
+      "!server/node_modules/flame-detector-bench-desktop",
+      "!server/node_modules/flame-detector-bench-desktop/**/*"
     ],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],

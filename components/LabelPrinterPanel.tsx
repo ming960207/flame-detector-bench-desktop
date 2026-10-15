@@ -127,7 +127,7 @@ function messageTone(message: string): string {
 }
 
 function LabelPreview({ data }: { data: PreviewData }) {
-  const resultTone = data.isolation ? 'is-fail' : data.verdict.includes('B') ? 'is-b' : 'is-pass';
+  const resultTone = data.isolation ? 'is-fail' : data.verdict === '需复测' ? 'is-retest' : data.verdict.includes('B') ? 'is-b' : 'is-pass';
   return <article className={`label-preview-paper ${resultTone}`} aria-label={`D${data.slot} 标签预览`}>
     <div className="label-preview-paper-topline">
       <span>LGSK / TRACE</span>
@@ -451,7 +451,7 @@ export function LabelPrinterPanel({ backendHttpUrl }: Props) {
                 <div className="label-queue-slot"><b>D{job.slot}</b><small>{job.batchId.slice(-8)}</small></div>
                 <span className="label-queue-model" title={job.productModel}>{job.productModel}</span>
                 <span className={`label-queue-code ${job.productCode ? '' : 'is-missing'}`} title={job.productCode || shortError(job.lastError)}>{job.productCode || '等待编号'}</span>
-                <strong className={job.isolation ? 'is-fail' : 'is-pass'}>{job.verdict}</strong>
+                <strong className={job.isolation ? 'is-fail' : job.verdict === '需复测' ? 'is-retest' : 'is-pass'}>{job.verdict}</strong>
                 <span className={`label-queue-status is-${status.tone}`} title={shortError(job.lastError)}><i />{status.text}{job.lastError && <small>{shortError(job.lastError)}</small>}</span>
                 {retryable ? <button
                   type="button"

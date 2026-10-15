@@ -376,8 +376,8 @@ export function FieldProcessStatusApp() {
 
   return <>
     <WutosDashboard
-      status={status}
       resultComplete={resultComplete}
+      status={status}
       detectors={detectors}
       waveformAnalysis={waveformAnalysis}
       detectorVerdict={detectorVerdict}

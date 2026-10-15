@@ -81,6 +81,65 @@ export function waveformSamples(
   return source.slice(Math.max(0, source.length - limit));
 }
 
+export interface WaveformPreviewPoint {
+  sampleIndex: number;
+  value: number;
+}
+
+/** Preserve per-bucket extrema while limiting points sent to a small SVG preview. */
+export function waveformPreviewPoints(
+  samples: FlameSample[],
+  key: keyof FlameSample,
+  maxPoints = 240,
+): WaveformPreviewPoint[] {
+  const parsedLimit = Number(maxPoints);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(4, Math.floor(parsedLimit)) : 240;
+  if (samples.length <= limit) {
+    return samples.flatMap((sample, sampleIndex) => {
+      const value = Number(sample[key]);
+      return Number.isFinite(value) ? [{ sampleIndex, value }] : [];
+    });
+  }
+
+  const points: WaveformPreviewPoint[] = [];
+  const bucketCount = Math.max(1, Math.floor((limit - 2) / 2));
+  const bucketSize = samples.length / bucketCount;
+  let first: WaveformPreviewPoint | undefined;
+  let last: WaveformPreviewPoint | undefined;
+
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = Math.floor(bucket * bucketSize);
+    const end = Math.min(samples.length, Math.floor((bucket + 1) * bucketSize));
+    let minimum: WaveformPreviewPoint | undefined;
+    let maximum: WaveformPreviewPoint | undefined;
+
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+      const value = Number(samples[sampleIndex]?.[key]);
+      if (!Number.isFinite(value)) continue;
+      const point = { sampleIndex, value };
+      first ??= point;
+      last = point;
+      if (!minimum || value < minimum.value) minimum = point;
+      if (!maximum || value > maximum.value) maximum = point;
+    }
+
+    if (!minimum || !maximum) continue;
+    if (minimum.sampleIndex === maximum.sampleIndex) {
+      points.push(minimum);
+    } else if (minimum.sampleIndex < maximum.sampleIndex) {
+      points.push(minimum, maximum);
+    } else {
+      points.push(maximum, minimum);
+    }
+  }
+
+  const unique = new Map<number, WaveformPreviewPoint>();
+  if (first) unique.set(first.sampleIndex, first);
+  for (const point of points) unique.set(point.sampleIndex, point);
+  if (last) unique.set(last.sampleIndex, last);
+  return [...unique.values()].sort((left, right) => left.sampleIndex - right.sampleIndex);
+}
+
 function mergeWaveformUnit(
   previous: FlameDetectorUnitState | undefined,
   delta: FlameDetectorWaveformDeltaUnit,

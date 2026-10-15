@@ -4,7 +4,7 @@ import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict
 import type { ProductionInspectionRecord, ProductionInspectionProductResult } from './production-inspection-record.js';
 
 export type LabelPrintJobStatus = 'WAITING' | 'PRINTING' | 'PRINTED' | 'FAILED' | 'BLOCKED';
-export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格';
+export type LabelVerdict = 'A类合格' | 'B类合格' | '不合格' | '需复测';
 export type LabelNoiseChannel = 'P1' | 'P2' | 'P3' | 'P4';
 
 export interface LabelNoiseMetric {
@@ -89,6 +89,7 @@ function labelVerdict(record: ProductionInspectionRecord, slot: number, detector
   const product = record.products.find((item) => item.slot === slot);
   if (!product || product.verdict === '不合格') return '不合格';
   const detector = detectorVerdict.units.find((item) => item.index === slot);
+  if (detector?.classification === 'TEST_INVALID' || product.verdict === '未检测') return '需复测';
   if (detector?.grade === 'A_PASS') return 'A类合格';
   if (detector?.grade === 'B_PASS') return 'B类合格';
   return '不合格';
@@ -259,7 +260,7 @@ export class LabelPrintQueueStore {
           slot: product.slot,
           deviceId: product.productCode ?? `D${product.slot}`,
           finalGrade: verdict,
-          finalPassed: verdict !== '不合格',
+          finalPassed: verdict === 'A类合格' || verdict === 'B类合格',
           ngReasons,
           labelReason,
           printText,

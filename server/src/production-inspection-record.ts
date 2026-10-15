@@ -50,7 +50,7 @@ export interface ProductionInspectionProductResult {
     /** 按 P2、P3 顺序记录本批噪声窗口的相对波动值。 */
     values: number[];
     status: InspectionItemStatus;
-    source: 'AUTO';
+    source: 'AUTO' | 'NOT_TESTED';
     reason?: string;
   };
   softwareVersion: InspectionMeasuredValue<string | null>;

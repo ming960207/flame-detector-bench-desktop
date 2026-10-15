@@ -344,7 +344,7 @@ test('missing precheck requires retest but batch product identity still survives
   };
   const result = analysisUnit();
   const detectorVerdict = evaluateFieldDetectorBatch(state, snapshot(result), null, dualProduct());
-  assert.equal(detectorVerdict.verdict, 'FAIL');
+  assert.equal(detectorVerdict.verdict, 'PENDING');
   assert.equal(detectorVerdict.units[0]?.reason, 'TEST_INVALID_RETEST_REQUIRED');
   assert.equal(detectorVerdict.units[0]?.classification, 'TEST_INVALID');
   assert.equal(detectorVerdict.productType, 'DUAL_WAVELENGTH');
@@ -394,7 +394,7 @@ test('slots absent from completed precheck remain explicit and require retest', 
   assert.deepEqual(verdict.units.map((item) => item.index), [1, 2, 3, 4, 5, 6]);
   assert.equal(verdict.units[1]?.reason, 'TEST_INVALID_RETEST_REQUIRED');
   assert.equal(verdict.units[1]?.classification, 'TEST_INVALID');
-  assert.equal(verdict.units[1]?.verdict, 'FAIL');
+  assert.equal(verdict.units[1]?.verdict, 'PENDING');
   assert.equal(verdict.units[2]?.reason, 'DETECTOR_SLOT_MISSING');
-  assert.equal(verdict.verdict, 'FAIL');
+  assert.equal(verdict.verdict, 'PENDING');
 });

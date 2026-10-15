@@ -37,9 +37,9 @@ test('detector verdict always exposes D1-D6 even when one state slot is missing'
     thresholds: {},
     units: [],
   } as any);
-  assert.equal(complete.units[5]?.verdict, 'FAIL');
-  assert.equal(complete.units[5]?.grade, 'FAIL');
-  assert.equal(complete.verdict, 'FAIL');
+  assert.equal(complete.units[5]?.verdict, 'PENDING');
+  assert.equal(complete.units[5]?.grade, 'PENDING');
+  assert.equal(complete.verdict, 'PENDING');
 });
 
 test('partial precheck evidence cannot remove an unreported production slot', () => {
