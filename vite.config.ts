@@ -5,12 +5,16 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
+  const fieldRuntime = process.env.VITE_RUNTIME_MODE === 'field' || env.VITE_RUNTIME_MODE === 'field';
   return {
     base: mode === 'desktop' || mode === 'test' ? './' : '/',
     server: {
       port: 3002,
       host: '127.0.0.1',
       open: false,
+      // The field browser runtime is long-running. Vite HMR can issue a full
+      // page reload when watched files change, interrupting an active test.
+      hmr: fieldRuntime ? false : undefined,
     },
     plugins: [
       react(),
