@@ -15,7 +15,7 @@ export interface ProductLabelPrintJob {
   productModel: string;
   productCode: string | null;
   qrContent: string | null;
-  verdict: 'A类合格' | 'B类合格' | '不合格';
+  verdict: 'A类合格' | 'B类合格' | '不合格' | '需复测';
   isolation: boolean;
   ngReasons?: string[];
   labelReason?: string | null;
@@ -807,7 +807,7 @@ class LabelPrinterRuntime {
                   { x: detailX, y: 6.8, width: 12, height: 2.8, fontSize: job.isolation ? 2.2 : 1.8 }, { bold: true });
                 await this.transport.text(`日期 ${localDate(job.productionDate)}`,
                   { x: detailX, y: 10, width: 12, height: 1.4, fontSize: 0.9 });
-                await this.transport.text(job.isolation ? ngReason : '扫码追溯',
+                await this.transport.text(job.isolation ? ngReason : job.verdict === '需复测' ? '请复测' : '扫码追溯',
                   { x: detailX, y: 11.7, width: 12, height: 2.5, fontSize: job.isolation ? 1.15 : 1.05 }, { bold: true });
                 await this.transport.line(offset + 2.4, 15.8, 25.2);
                 await this.transport.text(`编号 ${job.productCode!}`,

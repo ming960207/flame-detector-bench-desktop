@@ -252,6 +252,7 @@
 .label-preview-paper::after { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; content: ''; border-top: 1px solid rgba(29, 68, 64, .18); border-left: 1px solid rgba(29, 68, 64, .18); }
 .label-preview-paper.is-pass { border-top: 4px solid #39a77e; }
 .label-preview-paper.is-b { border-top: 4px solid #c49e43; }
+.label-preview-paper.is-retest { border-top: 4px solid #c49e43; }
 .label-preview-paper.is-fail { color: #321b1b; border-color: rgba(214, 118, 106, .84); border-top: 4px solid #d76254; background: linear-gradient(145deg, #faeee7, #f0d8d0); }
 
 .label-preview-paper-topline { display: flex; align-items: center; justify-content: space-between; gap: 5px; color: #688075; font: 700 clamp(6px, .64vw, 9px) Consolas, monospace; letter-spacing: .08em; }
@@ -267,6 +268,7 @@
 .label-preview-detail > span { color: #6a8179; font-size: clamp(6px, .62vw, 9px); }
 .label-preview-detail b { overflow: hidden; color: #187354; font-size: clamp(9px, .98vw, 13px); text-overflow: ellipsis; white-space: nowrap; }
 .label-preview-paper.is-b .label-preview-detail b { color: #a47b24; }
+.label-preview-paper.is-retest .label-preview-detail b { color: #a47b24; }
 .label-preview-paper.is-fail .label-preview-detail b { color: #b13d35; }
 .label-preview-detail small { color: #65766f; font: clamp(6px, .61vw, 8px) Consolas, monospace; }
 .label-preview-detail em { color: #3e5c54; font-size: clamp(6px, .62vw, 8px); font-style: normal; }
@@ -361,6 +363,7 @@
 .label-queue-code { color: var(--lp-text); font: 10px Consolas, monospace; }
 .label-queue-code.is-missing { color: var(--lp-amber); }
 .label-queue-row > strong.is-pass { color: var(--lp-green); }
+.label-queue-row > strong.is-retest { color: var(--lp-amber); }
 .label-queue-row > strong.is-fail { color: var(--lp-red); }
 .label-queue-status { position: relative; gap: 6px; min-width: 0; color: var(--lp-muted); }
 .label-queue-status > i { width: 6px; height: 6px; color: currentColor; box-shadow: 0 0 6px currentColor; }

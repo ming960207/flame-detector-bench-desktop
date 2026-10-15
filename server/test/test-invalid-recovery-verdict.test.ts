@@ -233,8 +233,8 @@ test('unrecovered startup failure is RETEST evidence, not product NG', () => {
   current.units[4]!.startup = failedStartup(5);
   const verdict = evaluateFieldDetectorBatch(current, snapshot(), precheck(), dualProduct());
   const unit5 = verdict.units.find((unit) => unit.index === 5)!;
-  assert.equal(unit5.verdict, 'FAIL');
-  assert.equal(unit5.grade, 'FAIL');
+  assert.equal(unit5.verdict, 'PENDING');
+  assert.equal(unit5.grade, 'PENDING');
   assert.equal(unit5.classification, 'TEST_INVALID');
   assert.equal(unit5.reason, 'MODE_SWITCH_TIMEOUT');
   assert.equal(verdict.testInvalidCount, 1);
@@ -246,8 +246,8 @@ test('completed flash sample shortage is RETEST evidence, not product NG', () =>
   const verdict = evaluateFieldDetectorBatch(state(), waveform, precheck(), dualProduct());
   const unit5 = verdict.units.find((unit) => unit.index === 5)!;
 
-  assert.equal(unit5.verdict, 'FAIL');
-  assert.equal(unit5.grade, 'FAIL');
+  assert.equal(unit5.verdict, 'PENDING');
+  assert.equal(unit5.grade, 'PENDING');
   assert.equal(unit5.classification, 'TEST_INVALID');
   assert.equal(unit5.reason, 'FLASH_SAMPLES_MISSING');
   assert.equal(verdict.testInvalidCount, 1);
@@ -258,6 +258,6 @@ test('completed flash sample shortage is RETEST evidence, not product NG', () =>
     verdict,
     waveform,
   );
-  assert.equal(final.verdict, 'FAIL');
+  assert.equal(final.verdict, 'PENDING');
   assert.equal(final.reason, 'TEST_INVALID_RETEST_REQUIRED');
 });

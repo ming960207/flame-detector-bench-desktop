@@ -39,8 +39,11 @@ export async function startConfiguredServer(): Promise<ConfiguredServerRuntime> 
 
     fieldRuntime.app.get('/api/mes/status', async (_req, res) => {
       try {
-        await checkActiveMESConnectivity();
-        const status = getActiveMESPublicStatus();
+        let status = getActiveMESPublicStatus();
+        if (status?.enabled) {
+          await checkActiveMESConnectivity();
+          status = getActiveMESPublicStatus();
+        }
         if (!status) {
           return res.status(503).json({
             enabled: false,

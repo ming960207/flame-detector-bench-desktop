@@ -132,6 +132,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
         copiesPerProduct: 1,
         passBehavior: 'PRODUCT_LABEL',
         failBehavior: 'NG_ISOLATION_LABEL',
+        invalidBehavior: 'RETEST_LABEL',
       },
     };
   };

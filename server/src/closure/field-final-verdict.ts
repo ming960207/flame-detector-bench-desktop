@@ -35,11 +35,10 @@ export function evaluateFieldFinalVerdict(
   const qualityEnabled = Boolean((waveformAnalysis as (Pick<FieldWaveformAnalysisSnapshot, 'thresholds'> | undefined))?.thresholds?.quality);
   const onlyTestInvalid = (detectorVerdict.testInvalidCount ?? 0) > 0
     && (detectorVerdict.productFailCount ?? 0) === 0;
-  // A waveform FAIL caused only by incomplete/invalid test evidence is a retest,
-  // not a product-quality NG. Preserve the blocking FAIL verdict while exposing
-  // an explicit retest reason to downstream reporting/UI.
+  // Incomplete/invalid test evidence is not a product-quality verdict. Keep the
+  // batch pending until it is retested; real product failures still fail below.
   if (onlyTestInvalid) {
-    return { verdict: 'FAIL', grade: 'FAIL', reason: 'TEST_INVALID_RETEST_REQUIRED' };
+    return { verdict: 'PENDING', grade: 'PENDING', reason: 'TEST_INVALID_RETEST_REQUIRED' };
   }
   if (waveformAnalysis && waveformAnalysis.verdict !== 'PASS') {
     return waveformAnalysis.verdict === 'FAIL'

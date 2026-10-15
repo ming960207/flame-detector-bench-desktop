@@ -26,10 +26,10 @@ const config: MESConfig = {
   requestTimeoutMs: 2_000,
 };
 
-test('MES 无历史配置时默认启用自动上传', () => {
+test('MES_ENABLED=true explicitly enables automatic upload', () => {
   const previous = process.env.MES_ENABLED;
   try {
-    delete process.env.MES_ENABLED;
+    process.env.MES_ENABLED = 'true';
     assert.equal(defaultMESConfig().enabled, true);
   } finally {
     if (previous === undefined) delete process.env.MES_ENABLED;

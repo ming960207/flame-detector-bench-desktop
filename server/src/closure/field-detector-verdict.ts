@@ -274,14 +274,14 @@ function evaluateUnit(
   const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
   // Startup state is transport evidence, not product-quality evidence. A failure
-  // that remains FAILED still blocks release, but is always TEST_INVALID/retest.
+  // that remains FAILED makes the result pending for retest, not product NG.
   // Once an actual retry succeeds, DetectorStartupTracker clears that stale failure.
   if (unit.startup?.state === 'FAILED') {
     return result(
       base,
       metrics,
-      'FAIL',
-      'FAIL',
+      'PENDING',
+      'PENDING',
       unit.startup.failureReason || 'DETECTOR_STARTUP_FAILED',
       precheck,
       missingProbes,
@@ -293,24 +293,23 @@ function evaluateUnit(
     return result(base, metrics, 'PENDING', 'PENDING', reason, precheck, missingProbes, 'TEST_INVALID');
   }
   // Product precheck is evidence collected during the signal-stabilization wait.
-  // Transport/configuration failures remain blocking, but are explicitly classified
-  // as TEST_INVALID so production reporting can ask for a retest instead of counting
-  // them as a product-quality NG. Genuine mismatch/fault/relay-function evidence is
-  // still classified as PRODUCT_RESULT and remains an authoritative product failure.
+  // Transport/configuration failures make the result pending for retest, instead of
+  // counting them as product NG. Genuine mismatch/fault/relay evidence remains an
+  // authoritative product failure.
   if (precheck?.verdict === 'FAIL') {
     if (!complete) {
       return result(base, metrics, 'PENDING', 'PENDING', 'PRODUCT_PRECHECK_RECORDED', precheck, missingProbes);
     }
     if (precheckIsTestInvalid(precheck)) {
-      return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
+      return result(base, metrics, 'PENDING', 'PENDING', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
     }
     return result(base, metrics, 'FAIL', 'FAIL', precheck.reasons[0] || 'PRODUCT_PRECHECK_FAILED', precheck, missingProbes);
   }
   if (productConfig && complete && precheck?.verdict === 'PENDING') {
-    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
+    return result(base, metrics, 'PENDING', 'PENDING', 'TEST_INVALID_RETEST_REQUIRED', precheck, missingProbes, 'TEST_INVALID');
   }
   if (productConfig && complete && !precheck) {
-    return result(base, metrics, 'FAIL', 'FAIL', 'TEST_INVALID_RETEST_REQUIRED', undefined, missingProbes, 'TEST_INVALID');
+    return result(base, metrics, 'PENDING', 'PENDING', 'TEST_INVALID_RETEST_REQUIRED', undefined, missingProbes, 'TEST_INVALID');
   }
   if (missingProbes.length > 0) {
     return result(base, metrics, 'FAIL', 'FAIL', `${missingProbes[0].toUpperCase()}_SIGNAL_NO_DATA`, precheck, missingProbes);
@@ -329,11 +328,11 @@ function evaluateUnit(
   }
   const testInvalidReason = complete ? analysisTestInvalidReason(analysis) : undefined;
   if (testInvalidReason) {
-    return result(base, metrics, 'FAIL', 'FAIL', testInvalidReason, precheck, missingProbes, 'TEST_INVALID');
+    return result(base, metrics, 'PENDING', 'PENDING', testInvalidReason, precheck, missingProbes, 'TEST_INVALID');
   }
   if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
   if (complete && analysis?.verdict === 'PENDING') {
-    return result(base, metrics, 'FAIL', 'FAIL', 'WAVEFORM_ANALYSIS_INCOMPLETE', precheck, missingProbes, 'TEST_INVALID');
+    return result(base, metrics, 'PENDING', 'PENDING', 'WAVEFORM_ANALYSIS_INCOMPLETE', precheck, missingProbes, 'TEST_INVALID');
   }
   if (analysisSnapshot.phase !== 'COMPLETE' || analysis?.verdict !== 'PASS') {
     return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA', precheck);
@@ -400,10 +399,12 @@ export function evaluateFieldDetectorBatch(
       return result(
         { index, address: index, sampledAt: state.timestamp },
         emptyMetrics(),
-        complete ? 'FAIL' : 'PENDING',
-        complete ? 'FAIL' : 'PENDING',
+        'PENDING',
+        'PENDING',
         'DETECTOR_SLOT_MISSING',
         precheckByIndex.get(index),
+        [],
+        'TEST_INVALID',
       );
     }
     return evaluateUnit(

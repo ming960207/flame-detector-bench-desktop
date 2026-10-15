@@ -268,11 +268,11 @@ test('transient relay simulate/reset transport failures recover within bounded r
   assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RESET_COMMAND_FAILED'), false);
 });
 
-test('infrastructure-only completed precheck failure is blocking but classified as retest instead of product NG', () => {
+test('infrastructure-only completed precheck failure remains pending for retest', () => {
   const waveform = analysisSnapshot();
   const verdict = evaluateFieldDetectorBatch(detectorState(), waveform, precheckReport(), productConfig());
 
-  assert.equal(verdict.verdict, 'FAIL');
+  assert.equal(verdict.verdict, 'PENDING');
   assert.equal(verdict.units[0]?.classification, 'TEST_INVALID');
   assert.equal(verdict.units[0]?.reason, 'TEST_INVALID_RETEST_REQUIRED');
   assert.equal(verdict.testInvalidCount, 1);
@@ -280,7 +280,7 @@ test('infrastructure-only completed precheck failure is blocking but classified 
   assert.equal(verdict.units.slice(1).every((unit) => unit.grade === 'A_PASS'), true);
 
   const final = evaluateFieldFinalVerdict({ stage: 'COMPLETE', processStage: 'COMPLETE', complete: true, valid: true }, verdict, waveform);
-  assert.equal(final.verdict, 'FAIL');
+  assert.equal(final.verdict, 'PENDING');
   assert.equal(final.reason, 'TEST_INVALID_RETEST_REQUIRED');
 });
 
@@ -308,7 +308,7 @@ test('field result logs use Asia/Shanghai date and label regardless host timezon
       batchId: 'timezone-check',
       startedAt: completedAt - 150_000,
       completedAt,
-      finalVerdict: { verdict: 'FAIL', grade: 'FAIL', reason: 'TEST_INVALID_RETEST_REQUIRED' },
+      finalVerdict: { verdict: 'PENDING', grade: 'PENDING', reason: 'TEST_INVALID_RETEST_REQUIRED' },
       detectorVerdict,
       thresholds: waveform.thresholds,
       waveformAnalysis: waveform,
