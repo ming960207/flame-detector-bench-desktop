@@ -70,21 +70,6 @@ class GlobalErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBound
             }}>
               {this.state.error?.stack}
             </pre>
-            <div style={{ marginTop: '16px' }}>
-              <button
-                onClick={() => window.location.reload()}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#4fa6e8',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-              >
-                刷新页面重试
-              </button>
-            </div>
           </div>
         </div>
       );
