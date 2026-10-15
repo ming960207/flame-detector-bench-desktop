@@ -210,6 +210,12 @@ test('DIO feedback read failures are reported as communication failures', async 
   const report = await coordinator.run('dio-fail');
 
   assert.equal(report.verdict, 'FAIL');
+  for (const kind of ['alarm', 'fault'] as const) {
+    assert.equal(report.units[0]?.[kind].commandWriteAttempts, 3);
+    assert.equal(report.units[0]?.[kind].commandAccepted, true);
+    assert.equal(report.units[0]?.[kind].physicalStateReached, false);
+    assert.equal(report.units[0]?.[kind].verdict, 'FAIL');
+  }
   assert.ok(report.units[0]?.alarm.reasons.includes('RELAY_FEEDBACK_READ_FAILED:DIO_CONNECTION_FAILED'));
   assert.equal(report.units[0]?.alarm.reasons.includes('ALARM_RELAY_NOT_ACTUATED'), false);
   assert.ok(report.units[0]?.alarm.reasons.some((reason) => reason.startsWith('EMERGENCY_RESET_FEEDBACK_READ_FAILED:')));
@@ -441,35 +447,44 @@ test('healthy relay commands capture transport writes and physical confirmations
   assert.equal(commands.get('6:alarm'), 3);
 });
 
-test('already-active DIO baseline isolates unsafe slot, leaves peers and PLC phases untouched', async () => {
-  const inputs: Record<string, boolean> = { X1: false, X2: false, X3: true, X4: false };
-  const writes: number[] = [];
+test('field mixed DIO polarities send alarm and fault to all six detectors and confirm real transitions', async () => {
+  const indexes = [1, 2, 3, 4, 5, 6];
+  // Latest field batch: only D2/D5 have a high resting fault contact.
+  const baseline = Object.fromEntries(indexes.flatMap((index) => [
+    [`X${index * 2 - 1}`, false],
+    [`X${index * 2}`, index === 2 || index === 5],
+  ]));
+  const inputs = { ...baseline };
+  const writes: string[] = [];
   const config = normalizeRelayFunctionalTestConfig({
     mode: 'FAST_BATCH',
     stableSamples: 1, sampleIntervalMs: 50, feedbackTimeoutMs: 250, resetTimeoutMs: 250,
-    mappings: createMapping([1, 2]),
+    mappings: createMapping(indexes).map((mapping) => ({ ...mapping, faultNormalLevel: true })),
   });
   const coordinator = new RelayFunctionalTestCoordinator({
-    enabledDetectorIndexes: () => [1, 2],
+    enabledDetectorIndexes: () => indexes,
     async simulate(index, state) {
-      writes.push(index);
+      writes.push(`${index}:${state.fire ? 'alarm' : 'fault'}`);
       inputs[`X${index * 2 - 1}`] = state.fire;
-      inputs[`X${index * 2}`] = state.fault;
+      inputs[`X${index * 2}`] = state.fault !== baseline[`X${index * 2}`];
     },
     async reset(index) {
       inputs[`X${index * 2 - 1}`] = false;
-      inputs[`X${index * 2}`] = false;
+      inputs[`X${index * 2}`] = baseline[`X${index * 2}`]!;
     },
     async readLatched() { return { fire: false, fault: false }; },
   }, { readInputs: () => ({ ...inputs }) }, config);
-  const report = await coordinator.run('abnormal-initial-contact');
-  assert.equal(report.units[0]?.verdict, 'PASS');
-  assert.equal(report.units[1]?.verdict, 'FAIL');
-  assert.ok(report.units[1]?.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
-  assert.ok(report.units[1]?.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL'));
-  assert.equal(writes.filter((index) => index === 2).length, 0);
-  assert.equal(writes.filter((index) => index === 1).length, 6);
-  assert.equal(report.units[1]?.alarm.emergencyRecovered, true);
+  const report = await coordinator.run('field-mixed-polarities');
+  assert.equal(report.verdict, 'PASS');
+  for (const unit of report.units) {
+    for (const kind of ['alarm', 'fault'] as const) {
+      assert.equal(writes.filter((write) => write === `${unit.detectorIndex}:${kind}`).length, 3);
+      assert.equal(unit[kind].commandWriteAttempts, 3);
+      assert.equal(unit[kind].physicalStateReached, true);
+      assert.equal(unit[kind].physicalRecovered, true);
+      assert.equal(unit[kind].emergencyRecovered, true);
+    }
+  }
 });
 
 test('one slow internal diagnostic cannot invalidate six healthy relays or extend the production window', async () => {

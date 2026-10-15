@@ -238,8 +238,8 @@ export class RelayFunctionalTestCoordinator {
   private async readBaseline(work: Map<number, UnitWorkState>): Promise<void> {
     // One PLC pass, but up to two independent DIO baseline snapshots. The
     // underlying readFeedback already retries its Modbus transaction; a fresh
-    // snapshot also recovers from an exhausted transient timeout. Never simulate
-    // a relay until a complete, trustworthy baseline has been observed.
+    // snapshot also recovers from an exhausted transient timeout. Missing
+    // baseline evidence fails verification, but does not suppress command delivery.
     const pending = new Set(work.keys());
     const lastErrors = new Map<number, string>();
     for (let attempt = 0; attempt < 2 && pending.size > 0; attempt += 1) {
@@ -263,12 +263,8 @@ export class RelayFunctionalTestCoordinator {
           alarmPhysical: physical.alarm,
           faultPhysical: physical.fault,
         };
-        // An already-energized contact is NOT a transient read failure. Do
-        // not reset/energize it blindly to manufacture a passing transition.
-        if (physical.alarm === true || physical.fault === true) {
-          uniquePush(state.result.alarm.reasons, 'RELAY_BASELINE_NOT_NORMAL');
-          uniquePush(state.result.fault.reasons, 'RELAY_BASELINE_NOT_NORMAL');
-        }
+        // NO/NC wiring can differ per station. Static polarity is diagnostic;
+        // only a stable change from this measured baseline proves actuation.
       }));
     }
     for (const index of pending) {
@@ -285,11 +281,9 @@ export class RelayFunctionalTestCoordinator {
   ): Promise<void> {
     await Promise.all([...work.entries()].map(async ([index, state]) => {
       const action = state.result[kind];
-      // Never issue blind simulation to a detector without trustworthy DIO
-      // baseline feedback. The remaining stations continue in parallel.
-      if (action.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
-        || action.reasons.includes('RELAY_BASELINE_READ_FAILED')
-        || action.reasons.some((reason) => reason.startsWith('RELAY_FEEDBACK_READ_FAILED:'))) return;
+      // Deliver to every enabled detector independently of DIO polarity/read
+      // errors. Feedback evidence still gates PASS; transport acceptance alone
+      // cannot turn a missing baseline or a stuck contact into a passing test.
       state.commandStartedAt = Date.now();
       const accepted = await this.detectorSimulationBurst(
         () => this.detectors.simulate(index, kind === 'alarm'
@@ -602,8 +596,7 @@ export class RelayFunctionalTestCoordinator {
         feedbackErrors.delete(index);
 
         if (!alarmRecovered.has(index)) {
-          const recovered = !state.result.alarm.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
-            && physical.rawAlarm !== null && state.baselineLevels.alarm !== null
+          const recovered = physical.rawAlarm !== null && state.baselineLevels.alarm !== null
             ? physical.rawAlarm === state.baselineLevels.alarm
             : physical.alarm === false;
           const next = recovered ? (alarmStable.get(index) ?? 0) + 1 : 0;
@@ -611,8 +604,7 @@ export class RelayFunctionalTestCoordinator {
           if (next >= this.config.stableSamples) alarmRecovered.add(index);
         }
         if (!faultRecovered.has(index)) {
-          const recovered = !state.result.fault.reasons.includes('RELAY_BASELINE_NOT_NORMAL')
-            && physical.rawFault !== null && state.baselineLevels.fault !== null
+          const recovered = physical.rawFault !== null && state.baselineLevels.fault !== null
             ? physical.rawFault === state.baselineLevels.fault
             : physical.fault === false;
           const next = recovered ? (faultStable.get(index) ?? 0) + 1 : 0;
