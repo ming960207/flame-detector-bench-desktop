@@ -604,7 +604,14 @@ export function createFieldStatusRuntime(
     res.json({ success: true, config: current });
   });
   app.post('/api/flame/simulation-command', requireDesktopMutation, async (req, res) => {
-    if (detectorMutationBusy || productPrecheckBusy) return res.status(409).json({ code: 'FLAME_OPERATION_BUSY' });
+    if (detectorMutationBusy || productPrecheckBusy) {
+      return res.status(409).json({
+        code: 'FLAME_OPERATION_BUSY',
+        // A manual simulation may wait for the automatic product precheck, but
+        // must never race another detector mutation such as config or auto-test.
+        retryable: productPrecheckBusy && !detectorMutationBusy,
+      });
+    }
     if (!isFlameDetectorSimulationCommand(req.body?.command)) {
       return res.status(400).json({ code: 'FLAME_SIMULATION_COMMAND_INVALID' });
     }

@@ -226,22 +226,37 @@ export function FieldProcessStatusApp() {
   }, []);
 
   const sendSimulationCommand = useCallback(async (command: FlameDetectorSimulationCommand): Promise<FlameDetectorSimulationCommandResult> => {
-    const response = await fetch(`${HTTP}/api/flame/simulation-command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command }),
-    });
-    const payload = await response.json() as {
-      success?: boolean;
-      result?: FlameDetectorSimulationCommandResult;
-      error?: string;
-      code?: string;
-    };
-    if (!response.ok || !payload.success || !payload.result) {
-      throw new Error(payload.error || payload.code || `探测器指令发送失败 (${response.status})`);
+    const maxBusyRetries = 60;
+    for (let attempt = 0; attempt <= maxBusyRetries; attempt += 1) {
+      const response = await fetch(`${HTTP}/api/flame/simulation-command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+      });
+      const payload = await response.json() as {
+        success?: boolean;
+        result?: FlameDetectorSimulationCommandResult;
+        error?: string;
+        code?: string;
+        retryable?: boolean;
+      };
+      if (response.status === 409 && payload.code === 'FLAME_OPERATION_BUSY') {
+        if (!payload.retryable) {
+          throw new Error('检测工序正在运行，请本轮结束后再发送模拟指令。');
+        }
+        if (attempt < maxBusyRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
+        throw new Error('探测器仍在执行其他操作，本次指令未发送，请稍后重试。');
+      }
+      if (!response.ok || !payload.success || !payload.result) {
+        throw new Error(payload.error || payload.code || `探测器指令发送失败 (${response.status})`);
+      }
+      void refresh().catch(() => undefined);
+      return payload.result;
     }
-    void refresh().catch(() => undefined);
-    return payload.result;
+    throw new Error('探测器指令发送失败');
   }, [refresh]);
 
   const handleRefresh = useCallback(() => {
