@@ -7,6 +7,7 @@ import type { RelayFunctionalTestConfig } from './relay-functional-test.js';
 import type { ProductionInspectionRecordConfig } from './production-inspection-record.js';
 import type { MESConfig } from './mes-publisher.js';
 import type { ProductionTestSkipConfig } from './production-test-skip-config.js';
+import { writeAtomicFile } from './atomic-file-writer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -100,27 +101,10 @@ export class SystemConfigRepository {
   }
 
   private async write(store: SystemConfigStore): Promise<void> {
-    await fs.mkdir(dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
     const content = `${JSON.stringify(store, null, 2)}\n`;
     try {
-      await fs.writeFile(temporaryPath, content, 'utf-8');
-      try {
-        await fs.rename(temporaryPath, this.filePath);
-      } catch (error: any) {
-        // Windows refuses to replace an existing file that still has the
-        // read-only attribute, even though the temporary file is writable.
-        // Clear that deployment-time attribute and retry the same atomic swap.
-        if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
-        try {
-          await fs.chmod(this.filePath, 0o666);
-        } catch {
-          throw error;
-        }
-        await fs.rename(temporaryPath, this.filePath);
-      }
+      await writeAtomicFile(this.filePath, content, 'utf-8');
     } catch (error: any) {
-      try { await fs.unlink(temporaryPath); } catch { /* no temporary file */ }
       console.error('[SystemConfigStore] 保存配置失败:', error.message);
       throw error;
     }

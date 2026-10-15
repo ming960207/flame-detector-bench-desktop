@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import { writeAtomicFile } from './atomic-file-writer.js';
 import type { FieldStatusSnapshot } from './closure/field-status-server.js';
 import type { PLCProcessStatus } from './process-status.js';
 import type { ProductAwareFlameDetectorService } from './product-aware-flame-detector-service.js';
@@ -158,17 +159,9 @@ export class ProductionRunCoordinator extends EventEmitter {
   }
 
   private async saveRawArchive(archive: ProductionRunArchive): Promise<void> {
-    await fs.mkdir(this.rawDirectory, { recursive: true });
     const safe = archive.batchId.replace(/[^0-9A-Za-z._-]/g, '_').slice(0, 120) || 'batch';
     const path = join(this.rawDirectory, `${safe}.raw.json`);
-    const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      await fs.writeFile(temporary, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
-      await fs.rename(temporary, path);
-    } catch (error) {
-      try { await fs.unlink(temporary); } catch { /* best effort */ }
-      throw error;
-    }
+    await writeAtomicFile(path, `${JSON.stringify(archive, null, 2)}\n`, 'utf8');
   }
 
   getStore(): ProductionInspectionRecordStore {

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { writeAtomicFile } from './atomic-file-writer.js';
 import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict.js';
 import type { FieldWaveformAnalysisSnapshot } from './closure/field-waveform-analysis.js';
 import { DEFAULT_PRODUCTION_TEST_SKIP_CONFIG, type ProductionTestSkipConfig } from './production-test-skip-config.js';
@@ -532,15 +533,7 @@ export class ProductionInspectionRecordStore {
   }
 
   private async atomicWrite(path: string, content: string): Promise<void> {
-    await fs.mkdir(dirname(path), { recursive: true });
-    const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      await fs.writeFile(temporary, content, 'utf8');
-      await fs.rename(temporary, path);
-    } catch (error) {
-      try { await fs.unlink(temporary); } catch { /* best effort */ }
-      throw error;
-    }
+    await writeAtomicFile(path, content, 'utf8');
   }
 
   async load(batchId: string): Promise<ProductionInspectionRecord | null> {

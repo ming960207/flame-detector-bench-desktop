@@ -1,6 +1,7 @@
 import { existsSync, promises as fs, readFileSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeAtomicFile } from './atomic-file-writer.js';
 import type { ProductionInspectionProductResult } from './production-inspection-record.js';
 import type { ProductionInspectionRecordStore } from './production-inspection-record-store.js';
 import type { ProductionRunArchive } from './production-run-coordinator.js';
@@ -388,15 +389,7 @@ export class MESPublisher {
   }
 
   private async saveOutbox(): Promise<void> {
-    await fs.mkdir(dirname(this.outboxFile), { recursive: true });
-    const temporary = `${this.outboxFile}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      await fs.writeFile(temporary, `${JSON.stringify(Array.from(this.jobs.values()), null, 2)}\n`, 'utf8');
-      await fs.rename(temporary, this.outboxFile);
-    } catch (error) {
-      try { await fs.unlink(temporary); } catch { /* best effort */ }
-      throw error;
-    }
+    await writeAtomicFile(this.outboxFile, `${JSON.stringify(Array.from(this.jobs.values()), null, 2)}\n`, 'utf8');
   }
 
   private async createJob(archive: ProductionRunArchive, recordStore: ProductionInspectionRecordStore): Promise<PendingMESBatch> {

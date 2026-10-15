@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { writeAtomicFile } from './atomic-file-writer.js';
 import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict.js';
 import type { ProductionInspectionRecord, ProductionInspectionProductResult } from './production-inspection-record.js';
 
@@ -178,15 +179,7 @@ export class LabelPrintQueueStore {
   }
 
   private async save(): Promise<void> {
-    await fs.mkdir(dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.tmp-${process.pid}-${Date.now()}`;
-    try {
-      await fs.writeFile(temporary, `${JSON.stringify(this.state, null, 2)}\n`, 'utf8');
-      await fs.rename(temporary, this.file);
-    } catch (error) {
-      try { await fs.unlink(temporary); } catch { /* best effort */ }
-      throw error;
-    }
+    await writeAtomicFile(this.file, `${JSON.stringify(this.state, null, 2)}\n`, 'utf8');
   }
 
   private mutate<T>(operation: () => Promise<T>): Promise<T> {

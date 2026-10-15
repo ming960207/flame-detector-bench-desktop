@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { writeAtomicFile } from './atomic-file-writer.js';
 import {
   generateProductCode,
   productCodeRuleMissingFields,
@@ -69,16 +70,8 @@ export class ProductCodeStore {
   }
 
   private async save(state: ProductCodeCounterState): Promise<void> {
-    await fs.mkdir(dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.tmp-${process.pid}-${Date.now()}`;
     const body = `${JSON.stringify(state, null, 2)}\n`;
-    try {
-      await fs.writeFile(temporary, body, 'utf8');
-      await fs.rename(temporary, this.filePath);
-    } catch (error) {
-      try { await fs.unlink(temporary); } catch { /* best effort */ }
-      throw error;
-    }
+    await writeAtomicFile(this.filePath, body, 'utf8');
   }
 
   async getBatchAllocation(batchId: string): Promise<ProductCodeAllocation | null> {
