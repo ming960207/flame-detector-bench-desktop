@@ -63,6 +63,7 @@ export interface FieldDetectorBatchVerdict {
 const REQUIRED_PRODUCTION_SLOTS = [1, 2, 3, 4, 5, 6] as const;
 
 function finiteOrNull(value: unknown): number | null {
+  if (value == null) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -82,16 +83,15 @@ function emptyMetrics(): FieldDetectorMetrics {
 }
 
 function detectorMetrics(unit: FlameDetectorUnitState, analysis?: WaveformAnalysisUnitResult): FieldDetectorMetrics {
-  const feature = unit.features?.[0];
   return {
     noiseRms: finiteOrNull(analysis?.noiseRms),
     noisePeakToPeak: finiteOrNull(analysis?.noisePeakToPeak),
     noiseAbsolute: finiteOrNull(analysis?.noiseAbsolute),
     interferenceRatio: finiteOrNull(analysis?.interferenceRatio),
     consistencyTrend: finiteOrNull(analysis?.consistencyTrend),
-    snr21: finiteOrNull(analysis?.snr21 ?? unit.snr21 ?? feature?.snr21),
-    snr23: finiteOrNull(analysis?.snr23 ?? unit.snr23 ?? feature?.snr23),
-    snr31: finiteOrNull(analysis?.snr31 ?? unit.snr31 ?? feature?.snr31),
+    snr21: finiteOrNull(analysis ? analysis.snr21 : unit.snr21),
+    snr23: finiteOrNull(analysis ? analysis.snr23 : unit.snr23),
+    snr31: finiteOrNull(analysis ? analysis.snr31 : unit.snr31),
     sensitivity: finiteOrNull(unit.sensitivity),
   };
 }

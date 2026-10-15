@@ -3,8 +3,45 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createFieldStatusRuntime, type FlameDetectorStatusSource, type PLCProcessStatusSource } from '../src/closure/field-status-server.js';
 import { FlameDetectorService } from '../src/modbus/flame-detector-service.js';
+import { FlameDetectorDevice } from '../src/modbus/flame-detector-device.js';
+import { detrendedAmplitudeRatio } from '../src/modbus/waveform-signal-ratios.js';
 import { createLatestValueScheduler, waveformKeys } from '../../utils/waveform.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../src/types.js';
+
+test('unpaired channel samples cannot change either side of an amplitude ratio', () => {
+  const paired = [0, 1, 0, -1].map(w => ({ probe1: 0, probe2: w * 20, probe3: w * 10 }));
+  const missing = { probe1: 0, probe2: 90000, probe3: NaN };
+  assert.equal(detrendedAmplitudeRatio([...paired, missing], 'probe2', 'probe3'), 2);
+  assert.equal(detrendedAmplitudeRatio([missing, missing, ...paired.slice(0, 2)], 'probe2', 'probe3'), null);
+  assert.equal(detrendedAmplitudeRatio(paired.map(s => ({ ...s, probe2: 0 })), 'probe2', 'probe3'), 0);
+});
+
+test('live ratios use synchronized RAW drift-removed amplitudes and expire old frames', () => {
+  const service = new FlameDetectorService({ mode: 'TCP', ip: '127.0.0.1', port: 31001,
+    units: [{ index: 1, address: 1, enabled: false }] });
+  const internal = service as any;
+  const unit = internal.units.get(1);
+  // Normalization/history and reported device features must not supply ratios.
+  unit.historySamples = [{ probe1: -1, probe2: -9000, probe3: -1 }, { probe1: 1, probe2: 9000, probe3: 1 }];
+  const device = { normalizeSamples: (samples: FlameSample[]) => ({ samples, baseline: {} }),
+    getProtocolProfile: () => ({ isFourWavelength: true }) } as unknown as FlameDetectorDevice;
+  const raw = (ratio: number) => [0, 1, 0, -1].map((w, i) => ({
+    probe1: 100 + i * 9 + w * 10, probe2: 1000 + i * 30 + w * 20 * ratio,
+    probe3: -300 + i * 2 + w * 20, probe4: 500 + i * 40 + w * 60,
+  }));
+  const update = (ratio: number, at: number) => internal.applyRealtimeState(unit,
+    { samples: raw(ratio), features: [{ snr21: 999, snr23: 999, snr31: 999, snr43: 999 }] }, device, at);
+  update(1, 1000);
+  assert.ok(Math.abs(unit.snr23 - 1) < 1e-9);
+  assert.ok(Math.abs(unit.snr21 - 2) < 1e-9);
+  assert.ok(Math.abs(unit.snr31 - 2) < 1e-9);
+  assert.ok(Math.abs(unit.snr43 - 3) < 1e-9);
+  update(1.5, 2100);
+  assert.ok(Math.abs(unit.snr23 - 1.5) < 1e-9);
+  internal.applyRealtimeState(unit, { samples: raw(1).map(s => ({ ...s, probe3: 0 })), features: [] }, device, 3200);
+  assert.equal(unit.snr23, null);
+  assert.equal(unit.snr43, null);
+});
 
 test('latest value scheduler publishes only the newest pending detector state', () => {
   const callbacks: Array<(() => void) | null> = [];
@@ -84,9 +121,9 @@ test('clearing waveform history resets probe metrics, ratios, and features for e
   assert.equal(cleared.probe1Absolute, 0);
   assert.equal(cleared.probe2Absolute, 0);
   assert.equal(cleared.probe3Absolute, 0);
-  assert.equal(cleared.snr21, 0);
-  assert.equal(cleared.snr23, 0);
-  assert.equal(cleared.snr31, 0);
+  assert.equal(cleared.snr21, null);
+  assert.equal(cleared.snr23, null);
+  assert.equal(cleared.snr31, null);
   assert.deepEqual(cleared.features, []);
 });
 

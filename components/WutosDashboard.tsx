@@ -583,7 +583,7 @@ const DetectorCard: FC<{
           >
             <i /><span>{lamp.label}</span>
             {openLamp === lamp.key && <small className="wutos-process-lamp__popover" role="status">
-              <em>{lamp.key === 'noise' ? '各探头噪声值' : configuredRatios.length === 1 ? `${RATIO_LABELS[configuredRatios[0]]} 最大值` : '最大探头比值'}</em>
+              <em>{lamp.key === 'noise' ? '各探头噪声值' : configuredRatios.length === 1 ? `${RATIO_LABELS[configuredRatios[0]]} 同步振幅比` : '同步探头振幅比'}</em>
               <b>{lamp.key === 'noise'
                 ? `波动 ${probeFluctuationSummary}`
                 : lamp.ratios ? `${configuredRatios.length === 1 ? '' : `${lamp.ratios[0]} `}${lamp.ratios[1].toFixed(2)}` : '暂无数据'}</b>
@@ -673,10 +673,7 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
   const domain = waveformDomain(samples, probes);
   const state = unit?.fault ? 'fault' : unit?.fire ? 'fire' : unit?.online ? 'online' : 'offline';
   const stateLabel = detectorStartupLabel(unit) ?? signalCaptureLabel(status, captureAnalysis ?? analysis, Boolean(unit?.online));
-  const p2 = probeFluctuation(unit, 'probe2');
-  const p3 = probeFluctuation(unit, 'probe3');
-  const ratio = (reported: number | undefined, numerator: number, denominator: number) => Number.isFinite(reported) && Number(reported) > 0 ? Number(reported) : denominator > 0 ? numerator / denominator : NaN;
-  const ratio23 = ratio(unit?.snr23, p2, p3);
+  const ratio23 = unit?.snr23;
 
   return <article className={`wutos-sensor-card is-${state}`} aria-label={`探测器${index}实时状态`}>
     <header>
@@ -703,7 +700,7 @@ const SensorLiveCard: FC<{ index: number; unit: FlameDetectorUnitState | undefin
       })}
     </div>
     <div className="wutos-sensor-values wutos-sensor-values--ratios">
-      <span><label>探头比值 <em>P2/P3</em></label><b>{Number.isFinite(ratio23) ? ratio23.toFixed(2) : '--'}</b><small>×</small></span>
+      <span><label>探头比值 <em>P2/P3</em></label><b>{Number.isFinite(ratio23) ? Number(ratio23).toFixed(2) : '--'}</b><small>×</small></span>
     </div>
     <footer><span><i />{unit?.online ? '实时波形流正常' : '等待探测器通讯'}</span></footer>
   </article>;

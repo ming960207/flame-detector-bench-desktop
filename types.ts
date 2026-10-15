@@ -149,9 +149,10 @@ export interface FlameDetectorUnitState {
   probe2Fluctuation?: number;
   probe3Fluctuation?: number;
   probe4Fluctuation?: number;
-  snr21: number;        // 探头2/1比值
-  snr23: number;        // 探头2/3比值
-  snr31: number;        // 探头3/1比值
+  snr21: number | null;        // 探头2/1比值
+  snr23: number | null;        // 探头2/3比值
+  snr31: number | null;        // 探头3/1比值
+  snr43?: number | null;
   sensitivity: number;  // 灵敏度
   sendMode: number;     // 发送模式
   version: string;      // 软件版本

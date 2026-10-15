@@ -126,6 +126,7 @@ function signalWindow(ratio: number, flash = false, flatDenominator = false) {
 test('formal stage ratio removes DC drift instead of trusting normalized history extrema', () => {
   const heat = signalWindow(1);
   assert.ok(Math.abs(heat.snr23! - 1) < 0.03);
+  assert.equal(heat.interferenceRatio, heat.snr23);
 });
 
 test('stable window still rejects a real channel amplitude ratio above the B limit', () => {

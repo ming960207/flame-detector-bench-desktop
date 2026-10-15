@@ -126,7 +126,7 @@ function absoluteFor(unit: FlameDetectorUnitState | undefined, key: keyof FlameS
   return raw.reduce((max, sample) => Math.max(max, Math.abs(Number(sample[key]) || 0)), 0);
 }
 
-function formatRatio(value: number | undefined) {
+function formatRatio(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value).toFixed(2) : '--';
 }
 
@@ -220,17 +220,11 @@ const DetectorWaveformCard: FC<DetectorWaveformCardProps> = ({ index, unit, anal
   const samples = waveformSamples(unit, 'normalized', maxSamples);
   const rawSamples = waveformSamples(unit, 'raw', maxSamples);
   const probes = unitProbeKeys(unit);
-  const p1 = fluctuationFor(unit, 'probe1') ?? 0;
-  const p2 = fluctuationFor(unit, 'probe2') ?? 0;
-  const p3 = fluctuationFor(unit, 'probe3') ?? 0;
-  const ratio = (reported: number | undefined, numerator: number, denominator: number) => reported && reported > 0
-    ? reported
-    : (denominator > 0 ? numerator / denominator : undefined);
   const ratios = [
-    { label: 'P2 / P1', value: ratio(unit?.snr21, p2, p1) },
-    { label: 'P2 / P3', value: ratio(unit?.snr23, p2, p3) },
-    { label: 'P3 / P1', value: ratio(unit?.snr31, p3, p1) },
-    ...(probes.includes('probe4') ? [{ label: 'P4 / P3', value: unit?.features?.[0]?.snr43 }] : []),
+    { label: 'P2 / P1', value: unit?.snr21 },
+    { label: 'P2 / P3', value: unit?.snr23 },
+    { label: 'P3 / P1', value: unit?.snr31 },
+    ...(probes.includes('probe4') ? [{ label: 'P4 / P3', value: unit?.snr43 }] : []),
   ];
   return <article className={`detector-card ${state}`}>
     <header className="detector-card-header"><div><b>探测器 {index}</b><span>地址 {unit?.address ?? index} · {probeWavelengthLabel(probes.length)} · {probes.length} 路探头</span></div><div className="detector-card-status"><span className={`detector-card-live ${unit?.online ? 'is-live' : ''}`}>实时</span><strong>{analysis?.verdict === 'PASS' ? 'PASS' : analysis?.verdict === 'FAIL' ? 'FAIL' : startupLabel(unit)}</strong></div></header>
@@ -238,7 +232,7 @@ const DetectorWaveformCard: FC<DetectorWaveformCardProps> = ({ index, unit, anal
       <section className="detector-card-waveform"><div className="detector-card-section-heading"><b>实时波形预览</b><span>{selectedMode === 'raw' ? '原始值' : '归一化值'} · {(selectedMode === 'raw' ? rawSamples : samples).length} 点</span></div><WaveformChart samples={samples} raw={rawSamples} selectedMode={selectedMode} index={index} unit={unit} /></section>
       <div className="detector-card-data">
         <section className="probe-data-section"><header><b>探头数据</b><span>波动 / 绝对 · mV</span></header><div className={`probe-metric-grid ${probes.length === 4 ? 'has-four' : ''}`}>{probes.map((key) => <div className="probe-metric" key={key}><span>探头{key.replace('probe', '')}</span><b>{formatProbe(fluctuationFor(unit, key))}</b><small>绝对 {formatProbe(absoluteFor(unit, key))}</small></div>)}</div></section>
-        <section className="probe-data-section"><header><b>探头比值</b><span>实时 SNR</span></header><div className={`probe-ratio-grid ${ratios.length === 4 ? 'has-four' : ''}`}>{ratios.map((ratio) => <div className="probe-ratio" key={ratio.label}><span>{ratio.label}</span><b>{formatRatio(ratio.value)}</b><small>×</small></div>)}</div></section>
+        <section className="probe-data-section"><header><b>探头比值</b><span>同步去漂移振幅比</span></header><div className={`probe-ratio-grid ${ratios.length === 4 ? 'has-four' : ''}`}>{ratios.map((ratio) => <div className="probe-ratio" key={ratio.label}><span>{ratio.label}</span><b>{formatRatio(ratio.value)}</b><small>×</small></div>)}</div></section>
         <div className="detector-card-quality"><span>噪声 RMS <b>{analysis?.noiseRms == null ? '--' : analysis.noiseRms.toFixed(2)}</b></span><span>干扰比 <b>{analysis?.interferenceRatio == null ? '--' : `${analysis.interferenceRatio.toFixed(2)}×`}</b></span><span>样本 <b>{analysis ? `${analysis.noiseSampleCount}/${analysis.interferenceSampleCount}` : '--'}</b></span></div>
       </div>
     </div>

@@ -134,6 +134,15 @@ test('P2/P3 A range 0.5..1.5 automatically expands to B range 0.45..1.65', () =>
   assert.equal(evaluateFieldDetectorBatch(state(), snapshot(1.2, 0.44), precheck(), dualProduct()).units[0]?.grade, 'FAIL');
 });
 
+test('missing formal ratios never fall back to live or device-feature ratios', () => {
+  const current = snapshot(1.2, 1.0);
+  current.units[0]!.snr23 = null;
+  const live = state();
+  live.units[0]!.snr23 = 9;
+  const verdict = evaluateFieldDetectorBatch(live, current, precheck(), dualProduct());
+  assert.equal(verdict.units[0]!.metrics.snr23, null);
+});
+
 test('field-log regression: amplitude ratio 1.912 does not reject dual product when P2/P3 is 1.009', () => {
   const verdict = evaluateFieldDetectorBatch(state(), snapshot(1.912, 1.009), precheck(), dualProduct());
   assert.equal(verdict.units[0]?.grade, 'A_PASS');

@@ -5,6 +5,7 @@
  * 波形解码和七步自动检测复用旧上位机的实现语义。
  */
 
+import { SIGNAL_RATIO_WINDOW_MS, synchronizedSignalRatios, type SignalRatioFrame } from './waveform-signal-ratios.js';
 import ModbusRTU from 'modbus-serial';
 import { detectorReconnectDelayMs } from './flame-detector-reconnect-policy.js';
 import { EventEmitter } from 'events';
@@ -217,6 +218,7 @@ export class FlameDetectorService extends EventEmitter {
   private closing = false;
   private lastError = '';
   private units: Map<number, FlameDetectorUnitState> = new Map();
+  private readonly signalRatioFrames = new Map<number, SignalRatioFrame[]>();
   private baselines: Map<number, Partial<FlameSample>> = new Map();
   private pushBuffers: Map<number, Buffer> = new Map();
   private modbusPushBuffers: Map<number, Buffer> = new Map();
@@ -286,9 +288,9 @@ export class FlameDetectorService extends EventEmitter {
       probe2Fluctuation: 0,
       probe3Fluctuation: 0,
       probe4Fluctuation: 0,
-      snr21: 0,
-      snr23: 0,
-      snr31: 0,
+      snr21: null,
+      snr23: null,
+      snr31: null,
       sensitivity: 0,
       sendMode: 0,
       version: '00.00.00.00',
@@ -334,11 +336,13 @@ export class FlameDetectorService extends EventEmitter {
       state.probe2Absolute = 0;
       state.probe3Absolute = 0;
       state.probe4Absolute = state.probeCount === 4 ? 0 : undefined;
-      state.snr21 = 0;
-      state.snr23 = 0;
-      state.snr31 = 0;
+      state.snr21 = null;
+      state.snr23 = null;
+      state.snr31 = null;
+      state.snr43 = null;
       state.features = [];
       this.baselines.delete(state.index);
+      this.signalRatioFrames.delete(state.index);
     }
     this.emit('flame_state', this.getCurrentState());
   }
@@ -433,6 +437,7 @@ export class FlameDetectorService extends EventEmitter {
     this.pushBuffers.clear();
     this.modbusPushBuffers.clear();
     this.lastPushAt.clear();
+    this.signalRatioFrames.clear();
     this.initializingUnits.clear();
     this.broadcastModeUnits.clear();
     this.protocolDiagnosticFrames.clear();
@@ -561,6 +566,7 @@ export class FlameDetectorService extends EventEmitter {
       this.broadcastModeRequestInFlight.delete(unit.index);
       this.waveformRecoveryRequestedUnits.delete(unit.index);
       this.baselines.delete(unit.index);
+      this.signalRatioFrames.delete(unit.index);
       const state = this.units.get(unit.index);
       if (state) {
         state.startup = this.startupTracker(unit).reset(unit.address);
@@ -1105,6 +1111,7 @@ export class FlameDetectorService extends EventEmitter {
     binding.socket.removeListener?.('close', binding.onClose);
     this.socketBindings.delete(unitIndex);
     this.pushBuffers.delete(unitIndex);
+    this.signalRatioFrames.delete(unitIndex);
     this.modbusPushBuffers.delete(unitIndex);
     const watchdog = this.waveformWatchdogTimers.get(unitIndex);
     if (watchdog) clearTimeout(watchdog);
@@ -1132,6 +1139,8 @@ export class FlameDetectorService extends EventEmitter {
 
   private setUnitOffline(unit: FlameUnitConfig, error: string): void {
     const state = this.units.get(unit.index) ?? this.defaultUnitState(unit);
+    this.signalRatioFrames.delete(unit.index);
+    Object.assign(state, synchronizedSignalRatios([]));
     state.online = false;
     state.sourceReady = false;
     state.syncOk = false;
@@ -1195,13 +1204,12 @@ export class FlameDetectorService extends EventEmitter {
     state.probe2Absolute = absoluteMetrics.probe2.absolute;
     state.probe3Absolute = absoluteMetrics.probe3.absolute;
     state.probe4Absolute = device.getProtocolProfile().isFourWavelength ? absoluteMetrics.probe4.absolute : undefined;
-    state.snr21 = metrics.probe1.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe1.fluctuation : 0;
-    state.snr23 = metrics.probe3.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe3.fluctuation : 0;
-    state.snr31 = metrics.probe1.fluctuation > 0 ? metrics.probe3.fluctuation / metrics.probe1.fluctuation : 0;
+    const frameAt = Date.now();
+    this.updateSignalRatios(state, decoded.samples, frameAt);
     state.lastError = startup.state === 'FAILED'
       ? startup.failureReason
       : startup.modeSwitchOkAt === null ? 'MODE_SWITCH_NOT_CONFIRMED' : undefined;
-    state.lastUpdate = Date.now();
+    state.lastUpdate = frameAt;
     this.lastPushAt.set(unit.index, state.lastUpdate);
     this.waveformRecoveryRequestedUnits.delete(unit.index);
     this.units.set(unit.index, state);
@@ -1236,9 +1244,10 @@ export class FlameDetectorService extends EventEmitter {
     state.syncOk = startup.channelSyncAt !== null;
     state.sendMode = startup.modeSwitchOkAt !== null ? this.configuredWaveformSendMode() : 0;
     this.broadcastModeUnits.add(unit.index);
-    this.applyRealtimeState(state, decoded, device);
+    const frameAt = Date.now();
+    this.applyRealtimeState(state, decoded, device, frameAt);
     state.lastError = startup.state === 'FAILED' ? startup.failureReason : undefined;
-    state.lastUpdate = Date.now();
+    state.lastUpdate = frameAt;
     this.lastPushAt.set(unit.index, state.lastUpdate);
     this.waveformRecoveryRequestedUnits.delete(unit.index);
     this.units.set(unit.index, state);
@@ -1246,7 +1255,7 @@ export class FlameDetectorService extends EventEmitter {
     this.emit('unit_update', state);
   }
 
-  private applyRealtimeState(state: FlameDetectorUnitState, realtime: DecodedFeatureBlock, device: FlameDetectorDevice): void {
+  private applyRealtimeState(state: FlameDetectorUnitState, realtime: DecodedFeatureBlock, device: FlameDetectorDevice, frameAt = Date.now()): void {
     const visible = realtime.samples.slice(-5);
     const normalized = device.normalizeSamples(visible, this.baselines.get(state.index));
     this.baselines.set(state.index, normalized.baseline);
@@ -1254,14 +1263,10 @@ export class FlameDetectorService extends EventEmitter {
     const rawHistory = [...(state.rawHistorySamples ?? []), ...visible].slice(-maxHistory);
     const history = [...(state.historySamples ?? []), ...normalized.samples].slice(-maxHistory);
     const latest = visible[visible.length - 1];
-    const latestFeature = realtime.features[realtime.features.length - 1];
     state.probe1 = latest?.probe1 ?? state.probe1;
     state.probe2 = latest?.probe2 ?? state.probe2;
     state.probe3 = latest?.probe3 ?? state.probe3;
     state.probe4 = latest?.probe4;
-    state.snr21 = latestFeature?.snr21 ?? state.snr21;
-    state.snr23 = latestFeature?.snr23 ?? state.snr23;
-    state.snr31 = latestFeature?.snr31 ?? state.snr31;
     state.features = realtime.features as FlameFeature[];
     state.samples = normalized.samples;
     state.rawSamples = visible;
@@ -1282,9 +1287,14 @@ export class FlameDetectorService extends EventEmitter {
     state.probe2Absolute = rawMetrics.probe2.absolute;
     state.probe3Absolute = rawMetrics.probe3.absolute;
     state.probe4Absolute = device.getProtocolProfile().isFourWavelength ? rawMetrics.probe4.absolute : undefined;
-    state.snr21 = metrics.probe1.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe1.fluctuation : 0;
-    state.snr23 = metrics.probe3.fluctuation > 0 ? metrics.probe2.fluctuation / metrics.probe3.fluctuation : 0;
-    state.snr31 = metrics.probe1.fluctuation > 0 ? metrics.probe3.fluctuation / metrics.probe1.fluctuation : 0;
+    this.updateSignalRatios(state, visible, frameAt);
+  }
+
+  private updateSignalRatios(state: FlameDetectorUnitState, samples: FlameSample[], timestamp: number): void {
+    const frames = [...(this.signalRatioFrames.get(state.index) ?? []), { timestamp, samples }]
+      .filter(frame => frame.timestamp > timestamp - SIGNAL_RATIO_WINDOW_MS).slice(-100);
+    this.signalRatioFrames.set(state.index, frames);
+    Object.assign(state, synchronizedSignalRatios(frames));
   }
 
   private createState(): FlameDetectorState {

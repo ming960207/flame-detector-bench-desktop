@@ -96,9 +96,10 @@ export interface FlameDetectorUnitState {
   probe2Fluctuation?: number;
   probe3Fluctuation?: number;
   probe4Fluctuation?: number;
-  snr21: number;
-  snr23: number;
-  snr31: number;
+  snr21: number | null;
+  snr23: number | null;
+  snr31: number | null;
+  snr43?: number | null;
   sensitivity: number;
   sendMode: number;
   version: string;

@@ -1,3 +1,4 @@
+import { SIGNAL_RATIO_WINDOW_MS, synchronizedSignalRatios, detrendedAmplitudeRatio } from '../modbus/waveform-signal-ratios.js';
 import { isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../types.js';
 import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
@@ -13,7 +14,6 @@ export type WaveformAnalysisLogger = (message: string) => void;
 const UPPER_COMPUTER_SIGNAL_STABILIZATION_WAIT_MS = 10_000;
 const NOISE_TREND_LOG_INTERVAL_MS = 1_000;
 const NOISE_ROLLING_WINDOW_MS = 10_000;
-const SIGNAL_RATIO_WINDOW_MS = 1_000;
 const SIGNAL_RATIO_SETTLE_MS = 200;
 
 export interface DetectionSNRRange {
@@ -409,26 +409,9 @@ function channelAmplitude(samples: FlameSample[], key: ChannelKey): number | nul
   return (Math.max(...values) - Math.min(...values)) / 2;
 }
 
-/** Same-time RAW channels with linear DC drift removed; no adaptive baseline history. */
+/** Same-window RAW channel amplitudes shared with live telemetry. */
 function stableSignalRatios(frames: UnitAccumulator['ratioFrames'][InterferenceStage]): UnitAccumulator['stageRatios'][InterferenceStage] {
-  const samples = frames.flatMap((frame) => frame.samples);
-  const amplitudes = Object.fromEntries(CHANNEL_KEYS.map((key) => {
-    const points = samples.map((sample, index) => ({ x: index, y: Number(sample[key]) }))
-      .filter((point) => Number.isFinite(point.y));
-    if (points.length < 3) return [key, null];
-    const xMean = points.reduce((sum, point) => sum + point.x, 0) / points.length;
-    const yMean = points.reduce((sum, point) => sum + point.y, 0) / points.length;
-    const variance = points.reduce((sum, point) => sum + (point.x - xMean) ** 2, 0);
-    const slope = points.reduce((sum, point) => sum + (point.x - xMean) * (point.y - yMean), 0) / variance;
-    const residuals = points.map((point) => point.y - yMean - slope * (point.x - xMean));
-    return [key, (Math.max(...residuals) - Math.min(...residuals)) / 2];
-  })) as Record<ChannelKey, number | null>;
-  const ratio = (numerator: ChannelKey, denominator: ChannelKey): number | null => {
-    const a = amplitudes[numerator];
-    const b = amplitudes[denominator];
-    return a !== null && b !== null && b > 1e-6 ? a / b : null;
-  };
-  return { snr21: ratio('probe2', 'probe1'), snr23: ratio('probe2', 'probe3'), snr31: ratio('probe3', 'probe1') };
+  return synchronizedSignalRatios(frames);
 }
 
 function emptyChannelNumberMap(): Record<ChannelKey, number | null> {
@@ -713,16 +696,12 @@ function publicUnitResult(
   };
   const interference = noise ? statistics(interferenceSamples, noise.means, noiseKeys) : null;
   const ratioConfig = config.interferenceRatio ?? { numerator: 'probe2' as ChannelKey, denominator: 'probe3' as ChannelKey };
-  const numerator = channelAmplitude(interferenceSamples, ratioConfig.numerator);
-  const denominator = channelAmplitude(interferenceSamples, ratioConfig.denominator);
   const stages = Object.fromEntries((['heat', 'flash', 'emc'] as InterferenceStage[]).map((stage) => {
     const samples = stageSamples[stage];
-    const stageNumerator = channelAmplitude(samples, ratioConfig.numerator);
-    const stageDenominator = channelAmplitude(samples, ratioConfig.denominator);
+    const ratioSamples = accumulator.ratioFrames[stage].flatMap(frame => frame.samples);
     const enough = (stage === 'flash' ? samples.length > 0 : samples.length >= config.minInterferenceSamples)
       && accumulator.ratioFrames[stage].length > 0;
-    const interferenceRatio = stageNumerator !== null && stageDenominator !== null && stageDenominator > 0
-      ? Number((stageNumerator / stageDenominator).toFixed(3)) : null;
+    const interferenceRatio = detrendedAmplitudeRatio(ratioSamples, ratioConfig.numerator, ratioConfig.denominator);
     const stageMetrics = {
       interferenceRatio,
       consistencyTrend: trendAgreement(samples, config.consistencyProbes?.length ? config.consistencyProbes : CHANNEL_KEYS.slice(0, 3)),
@@ -740,6 +719,9 @@ function publicUnitResult(
       ...stageMetrics,
     } satisfies InterferenceStageResult];
   })) as Record<InterferenceStage, InterferenceStageResult>;
+  const displayStage = (['heat', 'flash', 'emc'] as InterferenceStage[]).find(stage => stages[stage].verdict === 'FAIL' && stages[stage].reason !== 'SAMPLES_MISSING')
+    ?? (['emc', 'flash', 'heat'] as InterferenceStage[]).find(stage => accumulator.ratioFrames[stage].length > 0)
+    ?? 'heat';
   const result: WaveformAnalysisUnitResult = {
     index: accumulator.index,
     address: accumulator.address,
@@ -749,9 +731,9 @@ function publicUnitResult(
     noisePeakToPeak: noise ? Number((noise.peakToPeak / 2).toFixed(3)) : null,
     noiseAbsolute,
     interferenceRms: interference ? Number(interference.rms.toFixed(3)) : null,
-    interferenceRatio: numerator !== null && denominator !== null && denominator > 0 ? Number((numerator / denominator).toFixed(3)) : null,
+    interferenceRatio: stages[displayStage].interferenceRatio,
     consistencyTrend: trendAgreement(interferenceSamples, config.consistencyProbes?.length ? config.consistencyProbes : CHANNEL_KEYS.slice(0, 3)),
-    ...accumulator.stageRatios.heat,
+    ...accumulator.stageRatios[displayStage],
     noiseSampleCount: noiseSamples.length,
     noiseTest,
     interferenceSampleCount: interferenceSamples.length,

@@ -52,7 +52,7 @@ export interface InspectionPositionResult {
     sourceReady: boolean;
     syncOk: boolean;
     probes: { probe1: number; probe2: number; probe3: number; probe4?: number };
-    ratios: { snr21: number; snr23: number; snr31: number };
+    ratios: { snr21: number | null; snr23: number | null; snr31: number | null };
     lastError?: string;
   }>;
 }
