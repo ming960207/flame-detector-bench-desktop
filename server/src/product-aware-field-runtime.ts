@@ -29,6 +29,7 @@ import { ProductionRunCoordinator } from './production-run-coordinator.js';
 import { LabelPrintQueueStore } from './label-print-queue.js';
 import { requireDesktopMutation } from './request-security.js';
 import { createDefaultSystemConfig, loadSystemConfig, saveSystemConfig } from './system-config-store.js';
+import { normalizeProductionTestSkipConfig } from './production-test-skip-config.js';
 
 export interface ProductAwareFieldStatusRuntime extends FieldStatusRuntime {
   readonly productionRuns: ProductionRunCoordinator;
@@ -62,6 +63,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     systemConfig?.relayFunctionalTestConfig,
     DEFAULT_RELAY_FUNCTIONAL_TEST_CONFIG,
   );
+  let productionTestSkipConfig = normalizeProductionTestSkipConfig(systemConfig?.productionTestSkipConfig);
   let inspectionRecordConfig = normalizeProductionInspectionRecordConfig(
     systemConfig?.productionInspectionRecordConfig,
     DEFAULT_PRODUCTION_INSPECTION_RECORD_CONFIG,
@@ -79,6 +81,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
     detectors,
     new FileFieldTestResultLogger(),
     productConfig,
+    productionTestSkipConfig,
   );
   const closeRuntime = runtime.close.bind(runtime);
 
@@ -118,6 +121,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
         missingMappings,
         ready: relayConfig.enabled && relayDioConfigReady(relayConfig.dio) && missingMappings.length === 0,
       },
+      productionTestSkipConfig,
       dioReady: relayDioConfigReady(relayConfig.dio),
       mappingReady: missingMappings.length === 0,
       recordConfig: inspectionRecordConfig,
@@ -182,21 +186,25 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
         ? req.body as Record<string, unknown>
         : {};
       const nextRelay = normalizeRelayFunctionalTestConfig(input.relayConfig, relayConfig);
+      const nextSkipConfig = normalizeProductionTestSkipConfig(input.productionTestSkipConfig, productionTestSkipConfig);
       const nextRecord = normalizeProductionInspectionRecordConfig(input.recordConfig, inspectionRecordConfig);
       const nextMES = normalizeMESConfig(input.mesConfig, mesConfig);
       const store = await loadSystemConfig() ?? createDefaultSystemConfig();
       await saveSystemConfig({
         ...store,
         relayFunctionalTestConfig: nextRelay,
+        productionTestSkipConfig: nextSkipConfig,
         productionInspectionRecordConfig: nextRecord,
         // API Key 只从后端运行环境读取，不回写到前端可触达的持久化配置。
         mesConfig: { ...nextMES, apiKey: '' },
         lastUpdated: Date.now(),
       });
       relayConfig = nextRelay;
+      productionTestSkipConfig = nextSkipConfig;
       inspectionRecordConfig = nextRecord;
       mesConfig = nextMES;
       detectors.setRelayFunctionalTestConfig(nextRelay);
+      runtime.setProductionTestSkipConfig(nextSkipConfig);
       await relayFeedback.updateConfig(nextRelay.dio);
       productionRuns.setRecordConfig(nextRecord);
       mesPublisher.updateConfig(nextMES);

@@ -2,6 +2,7 @@ import { displayedProbeValue, displayedProbeRatios, probeRatio, type ProbeDispla
 import { isPLCProcessComplete, PLC_HEAT_SUBSTAGE_LABELS, type PLCHeatSubstage, type PLCProcessStatus } from '../process-status.js';
 import type { FlameDetectorState, FlameDetectorUnitState, FlameSample } from '../types.js';
 import type { DetectorStartupDiagnostic } from '../modbus/detector-startup.js';
+import { DEFAULT_PRODUCTION_TEST_SKIP_CONFIG, type ProductionTestSkipConfig } from '../production-test-skip-config.js';
 
 export type WaveformAnalysisPhase = 'IDLE' | 'NOISE' | 'INTERFERENCE' | 'COMPLETE';
 export type WaveformAnalysisVerdict = 'PASS' | 'FAIL' | 'PENDING';
@@ -658,6 +659,7 @@ function publicUnitResult(
   phase: WaveformAnalysisPhase,
   hasBatch: boolean,
   config: WaveformAnalysisConfig,
+  skipConfig: ProductionTestSkipConfig,
   noiseCompleted: boolean,
   completedStages: ReadonlySet<InterferenceStage>,
 ): WaveformAnalysisUnitResult {
@@ -675,7 +677,9 @@ function publicUnitResult(
   const noiseAbsolute = noiseAbsoluteValues.length ? Number(Math.max(...noiseAbsoluteValues).toFixed(3)) : null;
   const noiseMetrics = buildFormalNoiseMetrics(accumulator.maxRolling10s, rawAbsoluteMax);
   const noiseTestComplete = noiseCompleted || phase === 'COMPLETE';
-  const noiseFailure = noiseSamples.length < config.minNoiseSamples
+  const noiseFailure = skipConfig.noise
+    ? undefined
+    : noiseSamples.length < config.minNoiseSamples
     ? 'NOISE_SAMPLES_MISSING'
     : noiseFailureReason(noise, noiseMetrics, accumulator.maxRolling10s, noiseKeys, config);
   const noiseTest: NoiseTestResult = {
@@ -706,7 +710,8 @@ function publicUnitResult(
       ...displayedProbeRatios(accumulator.stageProbes[stage]),
     };
     const completed = completedStages.has(stage) || phase === 'COMPLETE';
-    const failure = enough ? stageFailureReason(stageMetrics, config) : 'SAMPLES_MISSING';
+    const skipped = skipConfig[stage];
+    const failure = skipped ? undefined : enough ? stageFailureReason(stageMetrics, config) : 'SAMPLES_MISSING';
     const stageResult: InterferenceStageResult = {
       completed,
       verdict: completed ? failure ? 'FAIL' : 'PASS' : 'PENDING',
@@ -745,7 +750,7 @@ function publicUnitResult(
     result.reason = 'WAITING_FOR_PROCESS_START';
     return result;
   }
-  if (noiseSamples.length < config.minNoiseSamples) {
+  if (!skipConfig.noise && noiseSamples.length < config.minNoiseSamples) {
     result.verdict = phase === 'COMPLETE' ? 'FAIL' : 'PENDING';
     result.reason = phase === 'COMPLETE' ? 'NOISE_SAMPLES_MISSING' : 'WAITING_FOR_NOISE_SAMPLES';
     return result;
@@ -756,8 +761,8 @@ function publicUnitResult(
     return result;
   }
   const missingStage = (['heat', 'flash', 'emc'] as InterferenceStage[])
-    .find((stage) => !stageHasEnoughSamples(stage, stages[stage].sampleCount, config)
-      || accumulator.stageProbes[stage] === null);
+    .find((stage) => !skipConfig[stage] && (!stageHasEnoughSamples(stage, stages[stage].sampleCount, config)
+      || accumulator.stageProbes[stage] === null));
   if (missingStage) {
     result.verdict = phase === 'COMPLETE' ? 'FAIL' : 'PENDING';
     result.reason = phase === 'COMPLETE' ? `${missingStage.toUpperCase()}_SAMPLES_MISSING` : 'WAITING_FOR_INTERFERENCE_SAMPLES';
@@ -782,6 +787,7 @@ function publicUnitResult(
 
 export class FieldWaveformAnalysis {
   private config: WaveformAnalysisConfig;
+  private productionTestSkipConfig: ProductionTestSkipConfig = DEFAULT_PRODUCTION_TEST_SKIP_CONFIG;
   private readonly units = new Map<number, UnitAccumulator>();
   private batchSequence = 0;
   private batchId: string | null = null;
@@ -878,6 +884,10 @@ export class FieldWaveformAnalysis {
       ...config,
       quality: normalizeDetectionQualityConfig(config?.quality, this.config.quality),
     });
+  }
+
+  setProductionTestSkipConfig(config: ProductionTestSkipConfig): void {
+    this.productionTestSkipConfig = config;
   }
 
   observeProcess(status: PLCProcessStatus): void {
@@ -1051,7 +1061,7 @@ export class FieldWaveformAnalysis {
   snapshot(): FieldWaveformAnalysisSnapshot {
     const units = Array.from(this.units.values())
       .sort((a, b) => a.index - b.index)
-      .map((unit) => publicUnitResult(unit, this.phase, Boolean(this.batchId), this.config, this.noiseCompleted, this.completedStages));
+      .map((unit) => publicUnitResult(unit, this.phase, Boolean(this.batchId), this.config, this.productionTestSkipConfig, this.noiseCompleted, this.completedStages));
     const verdict: WaveformAnalysisVerdict = units.some((unit) => unit.verdict === 'FAIL')
       ? 'FAIL'
       : units.length === 6 && units.every((unit) => unit.verdict === 'PASS')

@@ -30,3 +30,12 @@ export const FLAME_DETECTOR_SIMULATION_COMMANDS: Readonly<Record<FlameDetectorSi
 export function isFlameDetectorSimulationCommand(value: unknown): value is FlameDetectorSimulationCommand {
   return value === 'simulateFire' || value === 'simulateFault' || value === 'systemReset';
 }
+
+/** Use the same serialized raw-frame path as the manual simulation command API. */
+export async function sendFlameDetectorSimulationCommand(
+  device: import('./flame-detector-device.js').FlameDetectorDevice,
+  command: FlameDetectorSimulationCommand,
+): Promise<void> {
+  const frame = Buffer.from(FLAME_DETECTOR_SIMULATION_COMMANDS[command].frameHex.replace(/\s+/g, ''), 'hex');
+  await device.sendRawFrame(frame);
+}

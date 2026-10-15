@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, ExternalLink, FileText, RefreshCw, Save } from 'lucide-react';
 import type { RelayDioConfig, RelayFunctionalTestConfig } from '../server/src/relay-functional-test';
 import type { ProductionInspectionRecordConfig } from '../server/src/production-inspection-record';
+import { DEFAULT_PRODUCTION_TEST_SKIP_CONFIG, type ProductionTestSkipConfig } from '../server/src/production-test-skip-config';
 
 interface Props {
   backendHttpUrl: string;
@@ -19,6 +20,7 @@ interface RelayPayload {
 interface ProductionConfigPayload {
   relay: RelayPayload;
   recordConfig: ProductionInspectionRecordConfig;
+  productionTestSkipConfig: ProductionTestSkipConfig;
 }
 
 interface ProductionRecordSummary {
@@ -98,6 +100,7 @@ function recordTime(timestamp: number): string {
 export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) {
   const [relay, setRelay] = useState<RelayPayload | null>(null);
   const [recordConfig, setRecordConfig] = useState<ProductionInspectionRecordConfig | null>(null);
+  const [skipConfig, setSkipConfig] = useState<ProductionTestSkipConfig>(DEFAULT_PRODUCTION_TEST_SKIP_CONFIG);
   const [records, setRecords] = useState<ProductionRecordSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [recordsLoading, setRecordsLoading] = useState(false);
@@ -135,6 +138,7 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
       const payload = await response.json() as ProductionConfigPayload;
       setRelay(payload.relay);
       setRecordConfig(payload.recordConfig);
+      setSkipConfig(payload.productionTestSkipConfig ?? DEFAULT_PRODUCTION_TEST_SKIP_CONFIG);
       void loadRecords();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -153,13 +157,14 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
       const response = await fetch(`${backendHttpUrl}/api/production-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ relayConfig: relay.config, recordConfig }),
+        body: JSON.stringify({ relayConfig: relay.config, recordConfig, productionTestSkipConfig: skipConfig }),
       });
       const result = await response.json() as ProductionConfigPayload & { success?: boolean; code?: string; error?: string };
       if (!response.ok || !result.success || !result.relay || !result.recordConfig) throw new Error(result.error || result.code || '生产配置保存失败');
 
       setRelay(result.relay);
       setRecordConfig(result.recordConfig);
+      setSkipConfig(result.productionTestSkipConfig ?? DEFAULT_PRODUCTION_TEST_SKIP_CONFIG);
       setMessage('配置已保存并立即应用');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -223,6 +228,23 @@ export function ProductionConfigurationPanel({ backendHttpUrl, locked }: Props) 
         {loading && <div style={{ padding: 28, color: palette.cyan, fontSize: 12 }}>正在读取生产配置…</div>}
 
         {!loading && relay && recordConfig && <div style={{ padding: 18, display: 'grid', gap: 14 }}>
+          <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
+            <b style={{ color: palette.title, fontSize: 13 }}>可跳过的检验项目</b>
+            <div style={{ color: palette.muted, fontSize: 10.5, marginTop: 4 }}>勾选项目按合格参与本批判定；未勾选项目正常执行并判定。</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 11 }}>
+              {([
+                ['indicatorVision', '指示灯检测'],
+                ['relayFunctionalTest', '继电器检测'],
+                ['noise', '噪声判断'],
+                ['heat', '移动热源'],
+                ['flash', '爆闪灯测试'],
+                ['emc', '电磁干扰测试'],
+              ] as const).map(([key, label]) => <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 32, padding: '5px 8px', border: `1px solid ${palette.borderSoft}`, color: palette.text, fontSize: 11 }}>
+                <input type="checkbox" disabled={controlDisabled} checked={skipConfig[key]} onChange={(event) => setSkipConfig({ ...skipConfig, [key]: event.target.checked })} />
+                {label}
+              </label>)}
+            </div>
+          </section>
           <section style={{ border: `1px solid ${palette.borderSoft}`, background: 'var(--app-production-section-bg, rgba(4,19,31,.55))', padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <div>

@@ -124,6 +124,7 @@ export class ProductionRunCoordinator extends EventEmitter {
         waveformAnalysis: snapshot.summary.waveformAnalysis,
         recordConfig: this.capturedRecordConfig ?? this.recordConfig,
         productionDate,
+        productionTestSkipConfig: snapshot.summary.productionTestSkipConfig,
       });
       const archive: ProductionRunArchive = {
         schemaVersion: 1,

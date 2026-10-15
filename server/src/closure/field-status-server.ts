@@ -46,6 +46,11 @@ import {
   type InspectionPositionResult,
 } from './field-test-result-log.js';
 import { normalizeIndicatorVisionReport } from '../indicator-vision.js';
+import {
+  DEFAULT_PRODUCTION_TEST_SKIP_CONFIG,
+  normalizeProductionTestSkipConfig,
+  type ProductionTestSkipConfig,
+} from '../production-test-skip-config.js';
 
 // Product identity/relay commands can briefly pause detector waveform push. Run them
 // at the very beginning of the PLC signal-stabilization stage, then leave the rest
@@ -75,6 +80,7 @@ export interface FieldStatusSummary {
   productSelectionLocked: boolean;
   productPrecheck: ProductPrecheckReport | null;
   productPrecheckBusy: boolean;
+  productionTestSkipConfig?: ProductionTestSkipConfig;
   relayTest?: RelayFunctionalTestProgress;
   detectorStartup?: DetectorReadyReport;
 }
@@ -90,6 +96,7 @@ export interface FieldStatusRuntime {
   snapshot(): FieldStatusSnapshot;
   listen(port?: number): Promise<number>;
   close(): Promise<void>;
+  setProductionTestSkipConfig(config: ProductionTestSkipConfig): void;
 }
 
 export interface FlameDetectorStatusSource {
@@ -104,7 +111,7 @@ export interface FlameDetectorStatusSource {
   getReadyReport?(requiredSlots?: number[], timeoutMs?: number): DetectorReadyReport;
   getRelayTestProgress?(): RelayFunctionalTestProgress;
   stopWaveformStreaming?(): Promise<void>;
-  runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null): Promise<ProductPrecheckReport>;
+  runProductPrecheck?(productConfig: ProductDetectionConfig, batchId?: string | null, skipConfig?: ProductionTestSkipConfig): Promise<ProductPrecheckReport>;
   on(event: 'flame_state' | 'error' | 'relay_test_phase', listener: (value: any) => void): this;
   getConfig?(): FlameConfig;
   updateConfig?(config: FlameConfig): void;
@@ -238,6 +245,7 @@ export function createFieldStatusRuntime(
   detectors: FlameDetectorStatusSource = new FlameDetectorService(config.flame, { deferWaveformUntilInspection: true }),
   resultLogger: FieldTestResultLogger = new FileFieldTestResultLogger(),
   initialProductConfig: ProductDetectionConfig = DEFAULT_PRODUCT_DETECTION_CONFIG,
+  initialSkipConfig: ProductionTestSkipConfig = DEFAULT_PRODUCTION_TEST_SKIP_CONFIG,
 ): FieldStatusRuntime {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
@@ -258,11 +266,13 @@ export function createFieldStatusRuntime(
   wsServer.init(server);
   let currentStatus = source.getCurrent();
   let productConfig = normalizeProductDetectionConfig(initialProductConfig);
+  let productionTestSkipConfig = initialSkipConfig;
   const initialProfile = selectedProductProfile(productConfig);
   const waveformAnalysis = new FieldWaveformAnalysis(
     productAwareWaveformConfig(config.flame.waveformAnalysis, initialProfile.expectedProbeCount),
     (message) => console.log(message),
   );
+  waveformAnalysis.setProductionTestSkipConfig(initialSkipConfig);
   if (currentStatus) waveformAnalysis.observeProcess(currentStatus);
   let waveformAnalysisState = waveformAnalysis.snapshot();
   let productPrecheck: ProductPrecheckReport | null = null;
@@ -272,7 +282,7 @@ export function createFieldStatusRuntime(
   let productPrecheckDelayBatchId: string | null = null;
   let productPrecheckScheduleGeneration = 0;
   let streamingStoppedBatchId: string | null = null;
-  let detectorVerdict: FieldDetectorBatchVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState, productPrecheck, productConfig);
+  let detectorVerdict: FieldDetectorBatchVerdict = evaluateFieldDetectorBatch(detectors.getCurrentState(), waveformAnalysisState, productPrecheck, productConfig, productionTestSkipConfig);
   let finalVerdict: FieldFinalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
   let loggedBatchId: string | null = null;
   let positionBatchId: string | null = null;
@@ -298,7 +308,7 @@ export function createFieldStatusRuntime(
   const detectorDataStreamConnected = () => detectors.isDataStreamConnected?.() ?? detectors.isConnected();
   const detectorTransportConnected = () => detectors.isTransportConnected?.() ?? detectors.isConnected();
   const recomputeVerdicts = (state = detectors.getCurrentState()) => {
-    detectorVerdict = evaluateFieldDetectorBatch(state, waveformAnalysisState, productPrecheck, productConfig);
+    detectorVerdict = evaluateFieldDetectorBatch(state, waveformAnalysisState, productPrecheck, productConfig, productionTestSkipConfig);
     finalVerdict = evaluateFieldFinalVerdict(currentStatus, detectorVerdict, waveformAnalysisState);
   };
   const summary = (): FieldStatusSummary => ({
@@ -314,6 +324,7 @@ export function createFieldStatusRuntime(
     productSelectionLocked: processLocksProductSelection(currentStatus),
     productPrecheck,
     productPrecheckBusy,
+    productionTestSkipConfig,
     ...(detectors.getRelayTestProgress ? { relayTest: detectors.getRelayTestProgress() } : {}),
     ...(detectorStartupReport ? { detectorStartup: detectorStartupReport } : {}),
   });
@@ -340,7 +351,7 @@ export function createFieldStatusRuntime(
     recomputeVerdicts();
     broadcastSummary();
     try {
-      productPrecheck = await detectors.runProductPrecheck(productConfig, effectiveBatchId);
+      productPrecheck = await detectors.runProductPrecheck(productConfig, effectiveBatchId, productionTestSkipConfig);
     } catch (error) {
       productPrecheck = {
         ...productPrecheck,
@@ -482,6 +493,7 @@ export function createFieldStatusRuntime(
           waveformAnalysis: waveformAnalysisState,
           inspectionPositions: Array.from(inspectionPositions.values()),
           productConfig,
+          productionTestSkipConfig,
           // Preserve structured relay DIO samples and camera LED evidence in
           // the same file that the field auto-upload task sends to GitHub.
           productPrecheck: productPrecheck?.batchId === waveformAnalysisState.batchId
@@ -697,6 +709,13 @@ export function createFieldStatusRuntime(
     app,
     wsServer,
     snapshot: () => ({ summary: summary(), flame: detectors.getCurrentState() }),
+    setProductionTestSkipConfig: (next) => {
+      productionTestSkipConfig = next;
+      waveformAnalysis.setProductionTestSkipConfig(next);
+      waveformAnalysisState = waveformAnalysis.snapshot();
+      recomputeVerdicts();
+      broadcastSummary();
+    },
     async listen(port = config.serverPort): Promise<number> {
       await source.start();
       const actualPort = await new Promise<number>((resolve, reject) => {
@@ -731,11 +750,13 @@ export async function startFieldStatusServer(): Promise<FieldStatusRuntime> {
     : config.flame;
   config.flame = normalizeFlameConfig(savedFlameConfig, config.flame);
   const productConfig = normalizeProductDetectionConfig(systemConfig?.productDetectionConfig, DEFAULT_PRODUCT_DETECTION_CONFIG);
+  const skipConfig = normalizeProductionTestSkipConfig(systemConfig?.productionTestSkipConfig);
   const runtime = createFieldStatusRuntime(
     new PLCProcessMonitor(config.plcs[0]!),
     new FlameDetectorService(config.flame, { deferWaveformUntilInspection: true }),
     new FileFieldTestResultLogger(),
     productConfig,
+    skipConfig,
   );
   const port = await runtime.listen();
   console.log(`[现场状态] 已启动 PLC 只读工序监测、产品预检与探测器服务：http://127.0.0.1:${port}`);

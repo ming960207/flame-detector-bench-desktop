@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FieldDetectorBatchVerdict } from './closure/field-detector-verdict.js';
 import type { FieldWaveformAnalysisSnapshot } from './closure/field-waveform-analysis.js';
+import { DEFAULT_PRODUCTION_TEST_SKIP_CONFIG, type ProductionTestSkipConfig } from './production-test-skip-config.js';
 import {
   expectedProbeChannels,
   selectedProductProfile,
@@ -32,16 +33,17 @@ export interface ProductionInspectionRecordBuildInput {
   waveformAnalysis: FieldWaveformAnalysisSnapshot;
   recordConfig: ProductionInspectionRecordConfig;
   productionDate: number;
+  productionTestSkipConfig?: ProductionTestSkipConfig;
 }
 
 function reasonText(reasons: string[]): string | undefined {
   return reasons.length > 0 ? reasons.join(';') : undefined;
 }
 
-function stageInterferencePassed(snapshot: FieldWaveformAnalysisSnapshot, index: number): boolean {
+function stageInterferencePassed(snapshot: FieldWaveformAnalysisSnapshot, index: number, skip: ProductionTestSkipConfig): boolean {
   const unit = snapshot.units.find((item) => item.index === index);
-  if (!unit) return false;
-  return (['heat', 'flash', 'emc'] as const).every((stage) => unit.stages[stage]?.verdict === 'PASS');
+  if (!unit) return (['heat', 'flash', 'emc'] as const).every((stage) => skip[stage]);
+  return (['heat', 'flash', 'emc'] as const).every((stage) => skip[stage] || unit.stages[stage]?.verdict === 'PASS');
 }
 
 function amplitudeValues(
@@ -60,7 +62,9 @@ function amplitudePassed(
   snapshot: FieldWaveformAnalysisSnapshot,
   index: number,
   channels: ReturnType<typeof expectedProbeChannels>,
+  skipped: boolean,
 ): boolean {
+  if (skipped) return true;
   const unit = snapshot.units.find((item) => item.index === index);
   return Boolean(
     unit
@@ -72,7 +76,12 @@ function amplitudePassed(
 function indicatorVisionValue(
   report: ProductPrecheckReport['indicatorVision'] | null | undefined,
   slot: number,
+  skipped: boolean,
 ): IndicatorVisionInspectionValue {
+  if (skipped) {
+    const pass = autoStatus(true);
+    return { ...pass, runningGreen: pass, fireRed: pass, faultYellow: pass, captureCount: 0, phases: [] };
+  }
   if (!report) return indicatorVisionNotApplicable();
   const unit = report.units.find((item) => item.slot === slot);
   if (!unit) return indicatorVisionNotApplicable('INDICATOR_VISION_SLOT_MISSING');
@@ -112,6 +121,7 @@ function measuredNotTested<T>(value: T, reason: string): { value: T; status: '�
 
 export function buildProductionInspectionRecord(input: ProductionInspectionRecordBuildInput): ProductionInspectionRecord {
   const profile = selectedProductProfile(input.productConfig);
+  const skip = input.productionTestSkipConfig ?? DEFAULT_PRODUCTION_TEST_SKIP_CONFIG;
   const allocation = input.precheck?.productCodeAllocation ?? null;
   const relay = input.precheck?.relayFunctionalTest ?? null;
   const products: ProductionInspectionProductResult[] = [];
@@ -124,12 +134,16 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
     const codeItem = allocation?.items.find((item) => item.slot === slot);
     const fixed = fixedNotApplicableItems();
 
-    const fireAction = profile.relayFunctionalTestEnabled
+    const fireAction = skip.relayFunctionalTest
+      ? autoStatus(true)
+      : profile.relayFunctionalTestEnabled
       ? testInvalid && relayUnit?.alarm.verdict !== 'PASS'
         ? notTested('TEST_INVALID_RETEST_REQUIRED')
         : autoStatus(relayUnit?.alarm.verdict === 'PASS', reasonText(relayUnit?.alarm.reasons ?? ['RELAY_RESULT_MISSING']))
       : relayTestNotApplicable();
-    const faultAction = profile.relayFunctionalTestEnabled
+    const faultAction = skip.relayFunctionalTest
+      ? autoStatus(true)
+      : profile.relayFunctionalTestEnabled
       ? testInvalid && relayUnit?.fault.verdict !== 'PASS'
         ? notTested('TEST_INVALID_RETEST_REQUIRED')
         : autoStatus(relayUnit?.fault.verdict === 'PASS', reasonText(relayUnit?.fault.reasons ?? ['RELAY_RESULT_MISSING']))
@@ -137,7 +151,7 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
 
     const amplitudeChannels = expectedProbeChannels(precheck?.actualProbeCount ?? profile.expectedProbeCount);
     const amplitudes = amplitudeValues(input.waveformAnalysis, slot, amplitudeChannels);
-    const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot, amplitudeChannels);
+    const amplitudeOk = amplitudePassed(input.waveformAnalysis, slot, amplitudeChannels, skip.noise);
     const softwareOk = Boolean(
       precheck
       && precheck.actualSoftwareVersion
@@ -151,9 +165,9 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
       && precheck.sensitivityLevel !== null
       && precheck.sensitivityLevel !== undefined,
     );
-    const interferenceOk = stageInterferencePassed(input.waveformAnalysis, slot);
+    const interferenceOk = stageInterferencePassed(input.waveformAnalysis, slot, skip);
     const basePassed = detector?.verdict === 'PASS';
-    const indicatorVision = indicatorVisionValue(input.precheck?.indicatorVision, slot);
+    const indicatorVision = indicatorVisionValue(input.precheck?.indicatorVision, slot, skip.indicatorVision);
 
     const softwareVersionValue = precheck?.actualSoftwareVersion ?? null;
     const softwareVersion = testInvalid && !softwareOk && !precheck?.reasons.includes('SOFTWARE_VERSION_MISMATCH')
@@ -193,7 +207,7 @@ export function buildProductionInspectionRecord(input: ProductionInspectionRecor
       softwareVersion.status,
       productInfo.status,
       interferenceResistance.status,
-      ...(input.precheck?.indicatorVision ? [indicatorVision.status] : []),
+      ...(input.precheck?.indicatorVision && !skip.indicatorVision ? [indicatorVision.status] : []),
     ];
     const hasConfirmedProductFailure = verdictStatuses.includes('不合格');
 

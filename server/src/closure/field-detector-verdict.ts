@@ -9,6 +9,7 @@ import {
 } from '../product-profile.js';
 import { DEFAULT_DETECTION_QUALITY_CONFIG } from './field-waveform-analysis.js';
 import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
+import { DEFAULT_PRODUCTION_TEST_SKIP_CONFIG, type ProductionTestSkipConfig } from '../production-test-skip-config.js';
 import type {
   ChannelKey,
   DetectionRatioThresholds,
@@ -213,17 +214,20 @@ function precheckIsTestInvalid(precheck: ProductPrecheckUnitResult | undefined):
     || precheck.reasons.includes('SENSITIVITY_READ_FAILED');
 }
 
-function analysisTestInvalidReason(analysis: WaveformAnalysisUnitResult | undefined): string | undefined {
+function analysisTestInvalidReason(
+  analysis: WaveformAnalysisUnitResult | undefined,
+  skip: ProductionTestSkipConfig,
+): string | undefined {
   if (!analysis || analysis.verdict !== 'FAIL') return undefined;
   const directReason = analysis.reason;
-  if (directReason === 'NOISE_SAMPLES_MISSING'
-    || directReason === 'NOISE_ROLLING_WINDOW_MISSING'
-    || directReason === 'HEAT_SAMPLES_MISSING'
-    || directReason === 'FLASH_SAMPLES_MISSING'
-    || directReason === 'EMC_SAMPLES_MISSING') {
+  if ((!skip.noise && (directReason === 'NOISE_SAMPLES_MISSING' || directReason === 'NOISE_ROLLING_WINDOW_MISSING'))
+    || (!skip.heat && directReason === 'HEAT_SAMPLES_MISSING')
+    || (!skip.flash && directReason === 'FLASH_SAMPLES_MISSING')
+    || (!skip.emc && directReason === 'EMC_SAMPLES_MISSING')) {
     return directReason;
   }
   for (const stage of ['heat', 'flash', 'emc'] as InterferenceStage[]) {
+    if (skip[stage]) continue;
     const stageResult = analysis.stages?.[stage];
     if (stageResult?.completed && stageResult.verdict === 'FAIL' && stageResult.reason === 'SAMPLES_MISSING') {
       return `${stage.toUpperCase()}_SAMPLES_MISSING`;
@@ -260,6 +264,7 @@ function evaluateUnit(
   analysisSnapshot: FieldWaveformAnalysisSnapshot | undefined,
   precheck: ProductPrecheckUnitResult | undefined,
   productConfig: ProductDetectionConfig | undefined,
+  skip: ProductionTestSkipConfig,
 ): FieldDetectorResult {
   const base = { index: unit.index, address: unit.address, sampledAt: unit.lastUpdate };
   const metrics = detectorMetrics(unit, analysis);
@@ -271,7 +276,7 @@ function evaluateUnit(
   );
   const expectedProbeCount = productConfig ? selectedProductProfile(productConfig).expectedProbeCount : Math.max(1, unit.probeCount || 3);
   const expectedChannels = expectedProbeChannels(expectedProbeCount);
-  const missingProbes = noDataProbes(analysis, analysisSnapshot, expectedChannels);
+  const missingProbes = skip.noise ? [] : noDataProbes(analysis, analysisSnapshot, expectedChannels);
 
   // Startup state is transport evidence, not product-quality evidence. A failure
   // that remains FAILED makes the result pending for retest, not product NG.
@@ -326,15 +331,17 @@ function evaluateUnit(
   if (!analysisSnapshot) {
     return result(base, metrics, 'PASS', 'PENDING', undefined, precheck);
   }
-  const testInvalidReason = complete ? analysisTestInvalidReason(analysis) : undefined;
+  const testInvalidReason = complete ? analysisTestInvalidReason(analysis, skip) : undefined;
   if (testInvalidReason) {
     return result(base, metrics, 'PENDING', 'PENDING', testInvalidReason, precheck, missingProbes, 'TEST_INVALID');
   }
-  if (analysis?.verdict === 'FAIL') return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
-  if (complete && analysis?.verdict === 'PENDING') {
+  if (analysis?.verdict === 'FAIL' && !skip.noise && !skip.heat && !skip.flash && !skip.emc) {
+    return result(base, metrics, 'FAIL', 'FAIL', analysis.reason || 'WAVEFORM_QUALITY_FAIL', precheck);
+  }
+  if (complete && analysis?.verdict === 'PENDING' && !skip.noise && !skip.heat && !skip.flash && !skip.emc) {
     return result(base, metrics, 'PENDING', 'PENDING', 'WAVEFORM_ANALYSIS_INCOMPLETE', precheck, missingProbes, 'TEST_INVALID');
   }
-  if (analysisSnapshot.phase !== 'COMPLETE' || analysis?.verdict !== 'PASS') {
+  if (analysisSnapshot.phase !== 'COMPLETE' || (!analysis || (analysis.verdict !== 'PASS' && !skip.noise && !skip.heat && !skip.flash && !skip.emc))) {
     return result(base, metrics, 'PENDING', 'PENDING', analysis?.reason || 'WAITING_FOR_QUANTITATIVE_DATA', precheck);
   }
 
@@ -351,7 +358,7 @@ function evaluateUnit(
   };
   const stages: InterferenceStage[] = analysis.stages ? ['heat', 'flash', 'emc'] : ['heat'];
   const firstFailure = (limits: DetectionQualityThresholds, ratios: DetectionRatioThresholds) => {
-    const noiseReason = noiseThresholdFailure(
+    const noiseReason = skip.noise ? undefined : noiseThresholdFailure(
       analysis,
       analysisSnapshot.thresholds.minNoiseRms,
       limits,
@@ -359,6 +366,7 @@ function evaluateUnit(
     );
     if (noiseReason) return noiseReason;
     for (const stage of stages) {
+      if (skip[stage]) continue;
       const stageResult = analysis.stages?.[stage];
       if (stageResult?.verdict === 'FAIL') return `${stage.toUpperCase()}_${stageResult.reason || 'STAGE_FAIL'}`;
       const reason = thresholdMatches(stageMetrics(stage), limits, ratios, expectedChannels);
@@ -387,6 +395,7 @@ export function evaluateFieldDetectorBatch(
   analysisSnapshot?: FieldWaveformAnalysisSnapshot,
   productPrecheck?: ProductPrecheckReport | null,
   productConfig?: ProductDetectionConfig,
+  skipConfig: ProductionTestSkipConfig = DEFAULT_PRODUCTION_TEST_SKIP_CONFIG,
 ): FieldDetectorBatchVerdict {
   const analysisByIndex = new Map((analysisSnapshot?.units ?? []).map((unit) => [unit.index, unit]));
   const precheckByIndex = new Map((productPrecheck?.units ?? []).map((unit) => [unit.index, unit]));
@@ -413,6 +422,7 @@ export function evaluateFieldDetectorBatch(
       analysisSnapshot,
       precheckByIndex.get(index),
       productConfig,
+      skipConfig,
     );
   });
   const grade = units.some((unit) => unit.grade === 'FAIL')

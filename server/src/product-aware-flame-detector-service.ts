@@ -8,6 +8,8 @@ import {
   setAlarmFaultSimulation,
 } from './modbus/flame-detector-relay-simulation.js';
 import { ProductCodeStore, type ProductCodeAllocation } from './product-code-store.js';
+import { sendFlameDetectorSimulationCommand } from './modbus/flame-detector-command.js';
+import type { ProductionTestSkipConfig } from './production-test-skip-config.js';
 import {
   formatSoftwareVersion,
   selectedProductProfile,
@@ -329,6 +331,14 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   }
 
   async simulate(detectorIndex: number, state: { fire: boolean; fault: boolean }): Promise<void> {
+    if (state.fire && !state.fault) {
+      await sendFlameDetectorSimulationCommand(this.detectorDevice(detectorIndex), 'simulateFire');
+      return;
+    }
+    if (state.fault && !state.fire) {
+      await sendFlameDetectorSimulationCommand(this.detectorDevice(detectorIndex), 'simulateFault');
+      return;
+    }
     await setAlarmFaultSimulation(this.detectorDevice(detectorIndex), state.fire, state.fault);
   }
 
@@ -414,9 +424,10 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   private async runRelayFunctionalTest(
     productConfig: ProductDetectionConfig,
     batchId: string | null,
+    skipJudgement = false,
   ): Promise<RelayFunctionalTestReport | null> {
     const profile = selectedProductProfile(productConfig);
-    if (!profile.relayFunctionalTestEnabled) return null;
+    if (!profile.relayFunctionalTestEnabled && !skipJudgement) return null;
 
     const indexes = this.enabledDetectorIndexes();
     this.emitRelayTestProgress(batchId, { phase: 'BASELINE', detectorIndexes: indexes, timestamp: Date.now() });
@@ -425,19 +436,38 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
     if (!this.relayConfig.enabled) infraReasons.push('RELAY_TEST_GLOBAL_DISABLED');
     if (!relayDioConfigReady(this.relayConfig.dio)) infraReasons.push('DIO_NOT_CONFIGURED');
     if (missingMappings.length > 0) infraReasons.push(`RELAY_FEEDBACK_MAPPING_MISSING:${missingMappings.join(',')}`);
-    if (infraReasons.length > 0) {
+    if (!this.relayConfig.enabled && !skipJudgement) {
       this.emitRelayTestProgress(batchId, { phase: 'COMPLETE', detectorIndexes: indexes, timestamp: Date.now() });
       return infrastructureFailureReport(batchId, this.relayConfig.mode, indexes, infraReasons);
     }
 
+    // A missing DIO mapping prevents reliable judgement, but every enabled
+    // detector must still receive the same simulation/reset frames as manual mode.
+    const effectiveConfig = skipJudgement && !this.relayConfig.enabled
+      ? { ...this.relayConfig, enabled: true }
+      : this.relayConfig;
+
     const coordinator = new RelayFunctionalTestCoordinator(
       this,
       this.relayFeedback,
-      this.relayConfig,
+      effectiveConfig,
       (progress) => this.emitRelayTestProgress(batchId, progress),
     );
     try {
-      return await coordinator.run(batchId);
+      const report = await coordinator.run(batchId);
+      if (infraReasons.length > 0) {
+        for (const unit of report.units) {
+          for (const reason of infraReasons) {
+            if (!unit.alarm.reasons.includes(reason)) unit.alarm.reasons.push(reason);
+            if (!unit.fault.reasons.includes(reason)) unit.fault.reasons.push(reason);
+          }
+          unit.alarm.verdict = 'FAIL';
+          unit.fault.verdict = 'FAIL';
+          unit.verdict = 'FAIL';
+        }
+        report.verdict = 'FAIL';
+      }
+      return report;
     } finally {
       if (this.relayTestProgress.active || this.relayTestProgress.batchId === batchId) {
         this.emitRelayTestProgress(batchId, { phase: 'COMPLETE', detectorIndexes: indexes, timestamp: Date.now() });
@@ -453,6 +483,7 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
   override async runProductPrecheck(
     productConfig: ProductDetectionConfig,
     batchId: string | null = null,
+    skipConfig?: ProductionTestSkipConfig,
   ): Promise<ProductPrecheckReport> {
     this.precheckAnalysisBlocked = true;
     this.precheckAnalysisRecoveryUntil = 0;
@@ -470,7 +501,14 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
       // All product identity reads run first; relay simulation then reuses the same
       // already-open detector clients. Neither path stops, clears or re-arms waveform.
       const identityByDetector = await this.readPositionOneIdentity(indexes);
-      const relayFunctionalTest = await this.runRelayFunctionalTest(productConfig, batchId);
+      // Skip applies to the judgement only. Continue sending the real field
+      // simulation and reset sequence so every detector still receives commands.
+      const relayExecutionReport = await this.runRelayFunctionalTest(
+        productConfig,
+        batchId,
+        Boolean(skipConfig?.relayFunctionalTest),
+      );
+      const relayFunctionalTest = skipConfig?.relayFunctionalTest ? null : relayExecutionReport;
       const currentByIndex = new Map(this.getCurrentState().units.map((unit) => [unit.index, unit]));
       const sensitivityByDetector: Record<number, number | null> = {};
 
@@ -505,8 +543,8 @@ export class ProductAwareFlameDetectorService extends FlameDetectorService imple
         if (identity.sensitivity === null) uniquePush(reasons, 'SENSITIVITY_READ_FAILED');
         if (identity.fault === true || live?.fault === true) uniquePush(reasons, 'DETECTOR_FAULT_AT_PRECHECK');
 
-        const relayUnit = relayFunctionalTest?.units.find((item) => item.detectorIndex === index);
-        if (relayUnit && relayUnit.verdict !== 'PASS') {
+        const relayUnit = relayExecutionReport?.units.find((item) => item.detectorIndex === index);
+        if (!skipConfig?.relayFunctionalTest && relayUnit && relayUnit.verdict !== 'PASS') {
           const relayReasons = [...new Set([...relayUnit.alarm.reasons, ...relayUnit.fault.reasons])];
           // A blocked baseline never issued a functional action. Cleanup may
           // subsequently report a stuck contact, but that does not prove a

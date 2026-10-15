@@ -6,6 +6,7 @@ import {
   type FlameDetectorDevice,
 } from './flame-detector-device.js';
 import { calculateModbusCRC16 } from './flame-data-decoder.js';
+import { sendFlameDetectorSimulationCommand } from './flame-detector-command.js';
 
 export interface AlarmFaultSimulationState {
   fire: boolean;
@@ -146,7 +147,5 @@ export async function readLatchedAlarmFaultState(device: FlameDetectorDevice): P
 }
 
 export async function resetAlarmFaultSimulation(device: FlameDetectorDevice): Promise<void> {
-  // F000=1234 系统复位必须使用有地址 01 的 FC10 写入并等待正常回包；
-  // Raw TCP 的 writeRegisters() 已固定现场设备地址为 01。
-  await device.systemReset();
+  await sendFlameDetectorSimulationCommand(device, 'systemReset');
 }

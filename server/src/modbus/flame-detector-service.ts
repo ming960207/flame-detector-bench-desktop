@@ -6,6 +6,7 @@
  */
 
 import { displayedProbeRatios } from './probe-ratios.js';
+import { sendFlameDetectorSimulationCommand } from './flame-detector-command.js';
 import ModbusRTU from 'modbus-serial';
 import { detectorReconnectDelayMs } from './flame-detector-reconnect-policy.js';
 import { EventEmitter } from 'events';
@@ -1449,7 +1450,6 @@ export class FlameDetectorService extends EventEmitter {
 
     this.commandSending = true;
     try {
-      const frame = Buffer.from(definition.frameHex.replace(/\s+/g, ''), 'hex');
       const groups = new Map<string, { units: FlameUnitConfig[]; client: FlameDetectorClient }>();
       const failedUnits: Array<{ index: number; error: string }> = [];
       for (const unit of enabled) {
@@ -1472,7 +1472,7 @@ export class FlameDetectorService extends EventEmitter {
         notReadyUnits.forEach((unit) => failedUnits.push({ index: unit.index, error: '设备通信初始化中' }));
         if (readyUnits.length === 0) return;
         try {
-          await this.getDevice(readyUnits[0]!, client).sendRawFrame(frame);
+          await sendFlameDetectorSimulationCommand(this.getDevice(readyUnits[0]!, client), command);
           sentUnits.push(...readyUnits.map((unit) => unit.index));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

@@ -20,6 +20,7 @@ import {
   type WaveformAnalysisUnitResult,
 } from './field-waveform-analysis.js';
 import { applyAutomaticBGradePolicy } from './quality-grade-policy.js';
+import type { ProductionTestSkipConfig } from '../production-test-skip-config.js';
 
 export interface CompletedFieldTest {
   batchId: string;
@@ -32,6 +33,7 @@ export interface CompletedFieldTest {
   inspectionPositions: InspectionPositionResult[];
   productConfig?: ProductDetectionConfig;
   productPrecheck?: ProductPrecheckReport | null;
+  productionTestSkipConfig?: ProductionTestSkipConfig;
 }
 
 export type InspectionPositionId = 'DETECTION_POSITION_1_HEAT' | 'DETECTION_POSITION_2_FLASH';
@@ -457,7 +459,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
     const deviceRows = units.map((unit) => {
       const metrics = unit.metrics;
       const analysis = analysisByIndex.get(unit.index);
-      const formalNoiseDetails = formalNoiseFailureDetails(
+      const formalNoiseDetails = test.productionTestSkipConfig?.noise ? [] : formalNoiseFailureDetails(
         unit,
         analysis,
         expectedChannels,
@@ -530,7 +532,7 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
 
     const processRows = units.flatMap((unit) => {
       const analysis = analysisByIndex.get(unit.index);
-      return STAGES.map(([stageId, label]) => {
+      return STAGES.filter(([stageId]) => !test.productionTestSkipConfig?.[stageId]).map(([stageId, label]) => {
         const stage = analysis?.stages?.[stageId];
         return [
           label, String(unit.index), valueText(stage?.sampleCount), valueText(stage?.interferenceRatio),
@@ -557,55 +559,63 @@ export class FileFieldTestResultLogger implements FieldTestResultLogger {
       ...(precheckRows.length
         ? table(['设备', '地址', '实际版本', '期望版本', '实际探头数', '期望探头数', '报警', '故障', '结果', '说明'], precheckRows)
         : ['未记录产品预检结果']),
-      '',
-      '继电器原始反馈与动作诊断',
-      '说明：DIO原始电平顺序为火警/故障，0/1代表实际采样状态；-表示缺少证据，不得视为正常。模拟写入成功不代表继电器真实动作，必须检查对应物理反馈翻转。',
-      ...(relayReport
-        ? [
-          `检测模式：${relayReport.mode} | 全局判定：${relayReport.verdict} | 开始：${localDateTime(relayReport.startedAt)} | 结束：${localDateTime(relayReport.completedAt)}`,
-          ...table(['设备', '结果', '初始电平 火警/故障', '火警动作采样', '火警命令/动作/耗时/复位命令/恢复/故障', '故障动作采样', '故障命令/动作/耗时/复位命令/恢复/故障'], relayRows),
-        ]
-        : ['本批次未记录继电器功能检测数据（可能未启用或未归档，不能据此推定检测合格）']),
-      '',
-      '指示灯摄像头检测诊断',
-      ...(indicatorReport
-        ? [
-          `来源：${indicatorReport.source} | 采样帧数：${indicatorReport.captureCount} | 阶段：${indicatorReport.phases.join(',') || '-'} | 总结果：${indicatorReport.verdict}`,
-          '说明：仅绿灯和火警红灯参与生产判定；故障黄灯仅用于调试。',
-          ...table(['设备', '运行绿灯', '火警红灯', '故障黄灯（仅诊断）', '检测结果'], indicatorRows),
-        ]
-        : ['本批次没有归档摄像头指示灯判定信息（不等于灯检合格）']),
+      ...(test.productionTestSkipConfig?.relayFunctionalTest ? [] : [
+        '',
+        '继电器原始反馈与动作诊断',
+        '说明：DIO原始电平顺序为火警/故障，0/1代表实际采样状态；-表示缺少证据，不得视为正常。模拟写入成功不代表继电器真实动作，必须检查对应物理反馈翻转。',
+        ...(relayReport
+          ? [
+            `检测模式：${relayReport.mode} | 全局判定：${relayReport.verdict} | 开始：${localDateTime(relayReport.startedAt)} | 结束：${localDateTime(relayReport.completedAt)}`,
+            ...table(['设备', '结果', '初始电平 火警/故障', '火警动作采样', '火警命令/动作/耗时/复位命令/恢复/故障', '故障动作采样', '故障命令/动作/耗时/复位命令/恢复/故障'], relayRows),
+          ]
+          : ['本批次未记录继电器功能检测数据（可能未启用或未归档，不能据此推定检测合格）']),
+      ]),
+      ...(test.productionTestSkipConfig?.indicatorVision ? [] : [
+        '',
+        '指示灯摄像头检测诊断',
+        ...(indicatorReport
+          ? [
+            `来源：${indicatorReport.source} | 采样帧数：${indicatorReport.captureCount} | 阶段：${indicatorReport.phases.join(',') || '-'} | 总结果：${indicatorReport.verdict}`,
+            '说明：仅绿灯和火警红灯参与生产判定；故障黄灯仅用于调试。',
+            ...table(['设备', '运行绿灯', '火警红灯', '故障黄灯（仅诊断）', '检测结果'], indicatorRows),
+          ]
+          : ['本批次没有归档摄像头指示灯判定信息（不等于灯检合格）']),
+      ]),
       '',
       '设备结果明细',
       '说明：正式信噪比使用工序内最近1秒同步 RAW 波形的去趋势幅度比，剔除工序开始200毫秒过渡段；检测位原始数值为历史波形辅助快照。',
-      '说明：正式噪声判定使用有效探头 RAW 最近10秒滚动窗口波动值=(max-min)/2 的全过程最大值与 RAW 绝对值；窗口按样本时间戳滚动。',
+      ...(test.productionTestSkipConfig?.noise ? [] : ['说明：正式噪声判定使用有效探头 RAW 最近10秒滚动窗口波动值=(max-min)/2 的全过程最大值与 RAW 绝对值；窗口按样本时间戳滚动。']),
       '说明：归一化 RMS、全阶段 RAW 波动等仅作为分析辅助参数或追溯证据，不参与正式波动判定。',
       '说明：测试链路/读取/命令类持续异常标记为“需复测”，不计入产品 NG；仍阻止本轮放行。',
-      '说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为 RAW滚动10秒波动值下限/上限；A=200、B=220 的正式阈值由质量配置统一派生。',
+      ...(test.productionTestSkipConfig?.noise ? [] : ['说明：配置字段 minNoiseRms/maxNoiseRms 为历史兼容名称，当前实际含义分别为 RAW滚动10秒波动值下限/上限；A=200、B=220 的正式阈值由质量配置统一派生。']),
       ...table(
         ['设备', '地址', '结果', '噪声波动值(RAW 10秒滚动最大)', '噪声绝对值(RAW)', 'RMS(归一化辅助)', '最大波动(归一化辅助)', '最大绝对值(RAW辅助)', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '灵敏度', '说明'],
         deviceRows,
       ),
-      '',
-      '噪声采集诊断',
-      `窗口开始：${localDateTime(noiseWindowStart)} | 窗口结束：${localDateTime(noiseWindowEnd)} | 有效采集时长：${noiseWindowDurationMs === null ? '-' : `${(noiseWindowDurationMs / 1000).toFixed(1)}秒`} | 最低采样数：${test.thresholds.minNoiseSamples}`,
-      `判定通道：${expectedChannels.map(channelLabel).join('/')} | RAW滚动10秒波动下限：${valueText(test.thresholds.minNoiseRms)} | A类RAW滚动10秒波动上限：${valueText(quality.a.maxNoiseRms)} | B类RAW滚动10秒波动上限：${valueText(quality.b.maxNoiseRms)} | RAW绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
-      ...table(noiseHeaders, noiseRows),
-      '',
-      '噪声滚动窗口诊断',
-      ...table(['设备', '通道', '当前10秒RAW波动', '全过程最大10秒RAW波动', '全阶段RAW波动', 'RAW绝对峰值'], noiseRollingRows),
+      ...(test.productionTestSkipConfig?.noise ? [] : [
+        '',
+        '噪声采集诊断',
+        `窗口开始：${localDateTime(noiseWindowStart)} | 窗口结束：${localDateTime(noiseWindowEnd)} | 有效采集时长：${noiseWindowDurationMs === null ? '-' : `${(noiseWindowDurationMs / 1000).toFixed(1)}秒`} | 最低采样数：${test.thresholds.minNoiseSamples}`,
+        `判定通道：${expectedChannels.map(channelLabel).join('/')} | RAW滚动10秒波动下限：${valueText(test.thresholds.minNoiseRms)} | A类RAW滚动10秒波动上限：${valueText(quality.a.maxNoiseRms)} | B类RAW滚动10秒波动上限：${valueText(quality.b.maxNoiseRms)} | RAW绝对值上限：${valueText(quality.b.maxNoiseAbsolute)}`,
+        ...table(noiseHeaders, noiseRows),
+        '',
+        '噪声滚动窗口诊断',
+        ...table(['设备', '通道', '当前10秒RAW波动', '全过程最大10秒RAW波动', '全阶段RAW波动', 'RAW绝对峰值'], noiseRollingRows),
+      ]),
       '',
       '探测器启动诊断',
       ...table(
         ['设备', '状态', '上电', '通信回包', '模式切换成功', '首帧', '首个有效样本', 'P1 首值', 'P2 首值', 'P3 首值', '通道同步', '测试就绪', '模式尝试次数', '失败原因'],
         startupRows,
       ),
-      '',
-      '工序检测明细',
-      ...table(
-        ['工序', '设备', '采样数', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '结果', '说明'],
-        processRows,
-      ),
+      ...(processRows.length ? [
+        '',
+        '工序检测明细',
+        ...table(
+          ['工序', '设备', '采样数', '干扰比', '一致性', 'P2/P1', 'P2/P3', 'P3/P1', '结果', '说明'],
+          processRows,
+        ),
+      ] : []),
       '',
       '检测位原始数值',
       ...table(

@@ -6,6 +6,7 @@ import type { ProductDetectionConfig } from './product-profile.js';
 import type { RelayFunctionalTestConfig } from './relay-functional-test.js';
 import type { ProductionInspectionRecordConfig } from './production-inspection-record.js';
 import type { MESConfig } from './mes-publisher.js';
+import type { ProductionTestSkipConfig } from './production-test-skip-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +34,7 @@ export interface SystemConfigStore {
   relayFunctionalTestConfig?: RelayFunctionalTestConfig;
   productionInspectionRecordConfig?: ProductionInspectionRecordConfig;
   mesConfig?: MESConfig;
+  productionTestSkipConfig?: ProductionTestSkipConfig;
   lastUpdated: number;
 }
 
