@@ -114,7 +114,7 @@ function applyUnit(unit: StatusLightUnit): void {
       if (light) {
         light.classList.toggle('is-result-pass', passed);
         light.classList.toggle('is-result-fail', result === 'FAIL');
-        const label = `${definition.title}：${result === 'SKIPPED' ? '通过（已跳过检测）' : passed ? '通过' : result === 'FAIL' ? '不通过' : '待检测 / 未取得结果'}`;
+        const label = `${definition.title}：${passed ? '通过' : result === 'FAIL' ? '不通过' : '待检测 / 未取得结果'}`;
         light.setAttribute('aria-label', label);
         light.setAttribute('title', label);
       }

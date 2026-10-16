@@ -41,7 +41,7 @@ test('result wiring uses batch results and submits vision independently of relay
   const camera = readFileSync(new URL('../../components/indicator-camera.tsx', import.meta.url), 'utf8');
   assert.match(runtime, /unit.resultLights/);
   assert.match(runtime, /is-result-pass/);
-  assert.match(runtime, /已跳过检测/);
+  assert.doesNotMatch(runtime, /已跳过检测|通过（/);
   assert.doesNotMatch(entry, /window.fetch\s*=/);
   const submit = camera.slice(camera.indexOf('const submitCompletedEvidence'), camera.indexOf('const updateLayoutGeometry'));
   assert.match(submit, /!precheckComplete/);
