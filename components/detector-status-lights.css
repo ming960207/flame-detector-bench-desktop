@@ -106,3 +106,15 @@
     min-height: clamp(9px, .72cqw, 12px) !important;
   }
 }
+
+/* Inspection verdicts remain legible after simulation reset. */
+.wutos-detector-state-led.is-result-pass.is-active {
+  border-color: #aaffc4 !important;
+  background: radial-gradient(circle at 34% 28%, #f0fff3 0 9%, #77f5a7 22%, #22c878 55%, #087044 100%) !important;
+  opacity: 1 !important;
+}
+.wutos-detector-state-led.is-result-fail {
+  border-color: #ffb0a2 !important;
+  background: radial-gradient(circle at 34% 28%, #fff5ee 0 9%, #ff8b77 22%, #ff413b 55%, #a71016 100%) !important;
+  opacity: 1 !important;
+}

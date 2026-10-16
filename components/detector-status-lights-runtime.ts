@@ -1,4 +1,5 @@
 import './detector-status-lights.css';
+import type { ResultLightState } from '../server/src/detector-result-lights';
 import type { IndicatorVisionLightVerdict } from '../server/src/indicator-vision';
 import {
   DETECTOR_STATUS_LIGHTS,
@@ -15,6 +16,7 @@ type StatusLightUnit = {
   alarmRelay: boolean;
   faultRelay: boolean;
   relayObserved: boolean;
+  resultLights?: Partial<Record<IndicatorVisionField | RelayLightField, ResultLightState>>;
   indicatorVision?: Partial<Record<IndicatorVisionField, IndicatorVisionLightVerdict>>;
 };
 
@@ -23,23 +25,6 @@ type StatusLightPayload = {
   batchId: string | null;
   updatedAt: number;
   units: StatusLightUnit[];
-};
-
-type IndicatorVisionUnitEvidence = {
-  slot: number;
-  runningGreen?: IndicatorVisionLightVerdict;
-  fireRed?: IndicatorVisionLightVerdict;
-  faultYellow?: IndicatorVisionLightVerdict;
-};
-
-type ProductConfigPayload = {
-  precheck?: {
-    batchId?: string | null;
-    indicatorVision?: {
-      batchId?: string | null;
-      units?: IndicatorVisionUnitEvidence[];
-    } | null;
-  } | null;
 };
 
 function backendHttpUrl(): string {
@@ -55,7 +40,7 @@ function detectorCard(index: number): HTMLElement | null {
 
 function sanitizeLightElement(light: HTMLElement): void {
   light.textContent = '';
-  light.removeAttribute('title');
+  // Preserve result tooltips between refreshes.
 }
 
 function ensureLightGroup(index: number): HTMLElement | null {
@@ -107,7 +92,7 @@ function setLight(
   if (!light) return;
   sanitizeLightElement(light);
   light.classList.toggle('is-active', active);
-  light.classList.remove('is-latched');
+  light.classList.remove('is-latched', 'is-result-pass', 'is-result-fail');
   light.classList.toggle('is-unknown', !known);
   light.setAttribute('aria-label', !known
     ? `${definition.title}：未采集`
@@ -117,10 +102,24 @@ function setLight(
 function applyUnit(unit: StatusLightUnit): void {
   const group = ensureLightGroup(unit.index);
   if (!group) return;
-  group.classList.toggle('is-offline', !unit.online);
+  group.classList.remove('is-offline');
   group.classList.remove('is-stale');
 
   for (const definition of DETECTOR_STATUS_LIGHTS) {
+    const result = unit.resultLights?.[definition.field];
+    if (unit.resultLights) {
+      const passed = result === 'PASS' || result === 'SKIPPED';
+      setLight(group, definition, passed, result !== undefined && result !== 'PENDING');
+      const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
+      if (light) {
+        light.classList.toggle('is-result-pass', passed);
+        light.classList.toggle('is-result-fail', result === 'FAIL');
+        const label = `${definition.title}：${result === 'SKIPPED' ? '通过（已跳过检测）' : passed ? '通过' : result === 'FAIL' ? '不通过' : '待检测 / 未取得结果'}`;
+        light.setAttribute('aria-label', label);
+        light.setAttribute('title', label);
+      }
+      continue;
+    }
     if (definition.source === 'vision') {
       const state = indicatorVisionState(unit.indicatorVision?.[definition.field as IndicatorVisionField]);
       setLight(group, definition, state.active, state.known);
@@ -143,62 +142,18 @@ function markStale(): void {
     for (const definition of DETECTOR_STATUS_LIGHTS) {
       setLight(group, definition, false, false);
       const light = group.querySelector<HTMLElement>(`[data-kind="${definition.kind}"]`);
-      if (light) light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
+      if (light) {
+        light.setAttribute('aria-label', `${definition.title}：状态数据暂不可用`);
+        light.setAttribute('title', `${definition.title}：状态数据暂不可用`);
+      }
     }
   }
 }
 
 let requestBusy = false;
 let lastSuccessAt = 0;
-let cachedProductConfig: ProductConfigPayload | null = null;
-let lastProductConfigFetchAt = 0;
 let runtimeDisposed = false;
 let activeRequestController: AbortController | null = null;
-
-function mergeIndicatorVisionEvidence(
-  payload: StatusLightPayload,
-  configPayload: ProductConfigPayload | null,
-): StatusLightPayload {
-  const precheck = configPayload?.precheck;
-  const vision = precheck?.indicatorVision;
-  const evidenceUnits = vision?.units;
-  if (!Array.isArray(evidenceUnits) || evidenceUnits.length === 0) return payload;
-
-  const evidenceBatchId = precheck?.batchId ?? vision?.batchId ?? null;
-  if (evidenceBatchId && evidenceBatchId !== payload.batchId) return payload;
-
-  const evidenceByIndex = new Map(evidenceUnits.map((unit) => [unit.slot, unit]));
-  return {
-    ...payload,
-    batchId: payload.batchId ?? evidenceBatchId,
-    units: payload.units.map((unit) => {
-      const evidence = evidenceByIndex.get(unit.index);
-      if (!evidence) return unit;
-      return {
-        ...unit,
-        indicatorVision: {
-          runningGreen: evidence.runningGreen,
-          fireRed: evidence.fireRed,
-          faultYellow: evidence.faultYellow,
-        },
-      };
-    }),
-  };
-}
-
-async function productConfigEvidence(signal?: AbortSignal): Promise<ProductConfigPayload | null> {
-  const now = Date.now();
-  if (cachedProductConfig && now - lastProductConfigFetchAt < 500) return cachedProductConfig;
-  try {
-    const response = await fetch(`${backendHttpUrl()}/api/product-config`, { cache: 'no-store', signal });
-    if (!response.ok) return cachedProductConfig;
-    cachedProductConfig = await response.json() as ProductConfigPayload;
-    lastProductConfigFetchAt = now;
-    return cachedProductConfig;
-  } catch {
-    return cachedProductConfig;
-  }
-}
 
 async function refreshStatusLights(): Promise<void> {
   if (runtimeDisposed || !document.querySelector('.wutos-detector-grid') || requestBusy) return;
@@ -209,9 +164,9 @@ async function refreshStatusLights(): Promise<void> {
     const response = await fetch(`${backendHttpUrl()}/api/detector-status-lights`, { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`STATUS_LIGHTS_HTTP_${response.status}`);
     const rawPayload = await response.json() as StatusLightPayload;
-    const configPayload = await productConfigEvidence(controller.signal);
+
     if (runtimeDisposed) return;
-    const payload = mergeIndicatorVisionEvidence(rawPayload, configPayload);
+    const payload = rawPayload;
     const byIndex = new Map((Array.isArray(payload.units) ? payload.units : []).map((unit) => [unit.index, unit]));
 
     for (let index = 1; index <= 6; index += 1) {

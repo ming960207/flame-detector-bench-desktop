@@ -1,3 +1,4 @@
+import { detectorResultLights } from './detector-result-lights.js';
 import { config } from './config.js';
 import {
   createFieldStatusRuntime,
@@ -146,11 +147,8 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
   });
 
   runtime.app.get('/api/detector-status-lights', (_req, res) => {
-    // Four-state LEDs are latched for one batch so operators can see relay evidence
-    // after the formal relay test resets the detector. The old endpoint always sent
-    // active=false/batchId=null, so the browser could not detect the next batch and
-    // kept the previous batch's four LEDs latched. Publish the real process/batch
-    // boundary so every new test starts from a clean visual state.
+    // Result cards show inspection verdicts from this batch, not live contact levels
+    // after simulation reset. The dedicated /live endpoint retains raw DIO behaviour.
     const snapshot = runtime.snapshot();
     const summary = snapshot.summary;
     const flame = snapshot.flame;
@@ -167,6 +165,7 @@ export async function startProductAwareFieldStatusServer(): Promise<ProductAware
         alarmRelay: false,
         faultRelay: false,
         relayObserved: false,
+        resultLights: detectorResultLights(index, summary.waveformAnalysis.batchId, summary.productPrecheck, productionTestSkipConfig),
       };
     });
     res.json({

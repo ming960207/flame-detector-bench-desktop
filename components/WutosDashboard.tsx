@@ -772,6 +772,7 @@ const LiveWaveformPanel: FC<{
         // instead of waiting until async identity/relay precheck has started.
         positionOneReady={status?.processStage === 'HEAT' && status?.stage !== 'FAULT'}
         precheckBusy={productPrecheckBusy}
+        precheckComplete={Boolean(productPrecheck?.batchId && productPrecheck.completedAt > 0)}
         relayTest={relayTest}
         relayFunctionalTest={productPrecheck?.relayFunctionalTest}
         onSubmitEvidence={onSubmitIndicatorVision}

@@ -191,8 +191,8 @@ function captureLabel(phase: IndicatorPhase): string {
   return PHASE_LABELS[phase];
 }
 
-function visualSummary(slots: IndicatorSlotResult[], relayFunctionalTest: ProductPrecheckReport['relayFunctionalTest'] | null | undefined): { pass: number; fail: number; waiting: number } {
-  if (!relayFunctionalTest || slots.length === 0) return { pass: 0, fail: 0, waiting: slots.length };
+function visualSummary(slots: IndicatorSlotResult[]): { pass: number; fail: number; waiting: number } {
+  if (slots.length === 0) return { pass: 0, fail: 0, waiting: slots.length };
   const pass = slots.filter((slot) => slot.verdict === 'PASS').length;
   const fail = slots.filter((slot) => slot.verdict === 'FAIL').length;
   return { pass, fail, waiting: Math.max(0, slots.length - pass - fail) };
@@ -213,6 +213,7 @@ export interface IndicatorCameraPanelProps {
   expanded: boolean;
   batchId: string | null;
   precheckBusy: boolean;
+  precheckComplete?: boolean;
   positionOneReady: boolean;
   relayTest: RelayFunctionalTestProgress | null | undefined;
   relayFunctionalTest: ProductPrecheckReport['relayFunctionalTest'] | null | undefined;
@@ -223,6 +224,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   expanded,
   batchId,
   precheckBusy,
+  precheckComplete = false,
   positionOneReady,
   relayTest,
   relayFunctionalTest,
@@ -299,7 +301,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
       : null
   ), [currentCapture, photoFrameSize]);
   const expectedColor = expectedLightForPhase(activePhase);
-  const summary = useMemo(() => visualSummary(liveResults, relayFunctionalTest), [liveResults, relayFunctionalTest]);
+  const summary = useMemo(() => visualSummary(liveResults), [liveResults]);
 
   const completedResults = useCallback(
     (): IndicatorSlotResult[] => completedIndicatorResults(phaseResultsRef.current, slotRoisRef.current),
@@ -310,8 +312,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     if (
       !onSubmitEvidence
       || !batchId
-      || !relayFunctionalTest
-      || relayTest?.phase !== 'COMPLETE'
+      || !precheckComplete
       || precheckBusy
       || submittedBatchRef.current === batchId
     ) return;
@@ -345,7 +346,7 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
     } catch {
       submittedBatchRef.current = null;
     }
-  }, [batchId, captures, completedResults, onSubmitEvidence, precheckBusy, relayFunctionalTest, relayTest?.phase]);
+  }, [batchId, captures, completedResults, onSubmitEvidence, precheckBusy, precheckComplete]);
 
   const updateLayoutGeometry = useCallback(() => {
     const viewport = previewViewportRef.current;
@@ -681,13 +682,18 @@ export const IndicatorCameraPanel: FC<IndicatorCameraPanelProps> = ({
   }, [cameraStatus, samplingActive, activePhase]);
 
   useEffect(() => {
-    if (relayFunctionalTest && relayTest?.phase === 'COMPLETE' && !precheckBusy) {
+    if (precheckComplete && !precheckBusy) {
       setLiveResults(displayResultsForCapture(selectedCaptureId, captures, completedResults()));
       setAnnotationsVisible(true);
     }
-  }, [captures, completedResults, precheckBusy, relayFunctionalTest, relayTest?.phase, selectedCaptureId]);
+  }, [captures, completedResults, precheckBusy, precheckComplete, selectedCaptureId]);
 
-  useEffect(() => { void submitCompletedEvidence(); }, [submitCompletedEvidence]);
+  useEffect(() => {
+    void submitCompletedEvidence();
+    // A transient HTTP failure must not permanently suppress this batch's evidence.
+    const timer = window.setInterval(() => { void submitCompletedEvidence(); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [submitCompletedEvidence]);
 
   const handleViewportClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (calibratingSlot === null) return;
