@@ -1,0 +1,274 @@
+[2026-11-10T08:17:48.301Z] batch=field-waveform-1794298668233-1 D1 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.302Z] batch=field-waveform-1794298668233-1 D1 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.303Z] batch=field-waveform-1794298668233-1 D2 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.304Z] batch=field-waveform-1794298668233-1 D2 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.305Z] batch=field-waveform-1794298668233-1 D3 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.305Z] batch=field-waveform-1794298668233-1 D3 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.306Z] batch=field-waveform-1794298668233-1 D4 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.307Z] batch=field-waveform-1794298668233-1 D4 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.309Z] batch=field-waveform-1794298668233-1 D5 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.309Z] batch=field-waveform-1794298668233-1 D5 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.310Z] batch=field-waveform-1794298668233-1 D6 POWER_ON state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.310Z] batch=field-waveform-1794298668233-1 D6 RS485_RESPONSE state=COMMUNICATION_READY attempts=0 streak=0
+[2026-11-10T08:17:48.312Z] batch=field-waveform-1794298668233-1 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.314Z] batch=field-waveform-1794298668233-1 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.314Z] batch=field-waveform-1794298668233-1 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.315Z] batch=field-waveform-1794298668233-1 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.316Z] batch=field-waveform-1794298668233-1 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.316Z] batch=field-waveform-1794298668233-1 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:17:48.317Z] batch=field-waveform-1794298668233-1 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.318Z] batch=field-waveform-1794298668233-1 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.319Z] batch=field-waveform-1794298668233-1 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.320Z] batch=field-waveform-1794298668233-1 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.320Z] batch=field-waveform-1794298668233-1 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.321Z] batch=field-waveform-1794298668233-1 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:17:48.326Z] batch=field-waveform-1794298668233-1 D2 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.326Z] batch=field-waveform-1794298668233-1 D2 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.328Z] batch=field-waveform-1794298668233-1 D4 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.329Z] batch=field-waveform-1794298668233-1 D4 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.331Z] batch=field-waveform-1794298668233-1 D1 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.331Z] batch=field-waveform-1794298668233-1 D1 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.332Z] batch=field-waveform-1794298668233-1 D6 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:48.332Z] batch=field-waveform-1794298668233-1 D6 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:53.355Z] batch=field-waveform-1794298668233-1 D3 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:53.355Z] batch=field-waveform-1794298668233-1 D3 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:53.360Z] batch=field-waveform-1794298668233-1 D5 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:53.360Z] batch=field-waveform-1794298668233-1 D5 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:17:53.560Z] batch=field-waveform-1794298668233-1 D2 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.561Z] batch=field-waveform-1794298668233-1 D2 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.565Z] batch=field-waveform-1794298668233-1 D4 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.565Z] batch=field-waveform-1794298668233-1 D4 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.580Z] batch=field-waveform-1794298668233-1 D1 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.580Z] batch=field-waveform-1794298668233-1 D1 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.581Z] batch=field-waveform-1794298668233-1 D6 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.581Z] batch=field-waveform-1794298668233-1 D6 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.605Z] batch=field-waveform-1794298668233-1 D3 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.605Z] batch=field-waveform-1794298668233-1 D3 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.619Z] batch=field-waveform-1794298668233-1 D5 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:17:53.620Z] batch=field-waveform-1794298668233-1 D5 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:18:29.202Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.204Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.205Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.206Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.207Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.209Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:29.217Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.218Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.218Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.219Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.221Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.221Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:29.226Z] batch=field-waveform-1794298709201-2 D1 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:29.226Z] batch=field-waveform-1794298709201-2 D1 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:29.228Z] batch=field-waveform-1794298709201-2 D6 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:29.228Z] batch=field-waveform-1794298709201-2 D6 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:29.237Z] batch=field-waveform-1794298709201-2 D3 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:29.238Z] batch=field-waveform-1794298709201-2 D3 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:18:38.248Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:38.250Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:38.323Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:38.326Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:38.326Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:38.327Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:39.228Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:39.231Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:39.234Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:39.236Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:39.242Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:39.244Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:48.266Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:48.270Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:48.330Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:48.334Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:48.339Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:48.342Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:49.248Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:49.250Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:49.252Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:49.254Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:49.255Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:49.257Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:58.290Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:58.295Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:58.339Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:58.346Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:58.359Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:58.362Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:59.257Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:59.259Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:59.261Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:59.263Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:18:59.265Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:18:59.267Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:08.305Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:08.308Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:08.349Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:08.350Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:08.365Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:08.366Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:09.262Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:09.266Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:09.269Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:09.271Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:09.272Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:09.273Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:18.313Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:18.314Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:18.351Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:18.355Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:18.374Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:18.376Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:19.282Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:19.287Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:19.288Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:19.290Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:19.292Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:19.293Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:28.326Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:28.328Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:28.366Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:28.368Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:28.386Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:28.386Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:29.290Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:29.294Z] batch=field-waveform-1794298709201-2 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:29.296Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:29.297Z] batch=field-waveform-1794298709201-2 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:29.298Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:29.299Z] batch=field-waveform-1794298709201-2 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.329Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.334Z] batch=field-waveform-1794298709201-2 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.372Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.374Z] batch=field-waveform-1794298709201-2 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.404Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.414Z] batch=field-waveform-1794298709201-2 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.851Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.853Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.854Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.856Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.858Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.861Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:38.870Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.871Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.872Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.874Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.875Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:38.876Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:39.308Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:39.312Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:39.315Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:39.317Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:39.318Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:39.320Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:48.344Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:48.347Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:48.391Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:48.396Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:48.418Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:48.420Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:49.319Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:49.322Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:49.326Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:49.330Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:49.336Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:49.341Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:58.352Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:58.357Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:58.409Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:58.416Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:58.425Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:58.428Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:59.334Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:59.338Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:59.341Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:59.345Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:19:59.351Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:19:59.365Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:04.396Z] batch=field-waveform-1794298778850-3 D1 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:04.396Z] batch=field-waveform-1794298778850-3 D1 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:04.430Z] batch=field-waveform-1794298778850-3 D6 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:04.430Z] batch=field-waveform-1794298778850-3 D6 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:04.645Z] batch=field-waveform-1794298778850-3 D1 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:04.646Z] batch=field-waveform-1794298778850-3 D1 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:04.685Z] batch=field-waveform-1794298778850-3 D6 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:04.685Z] batch=field-waveform-1794298778850-3 D6 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:08.357Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:08.363Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:08.418Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:08.419Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:08.430Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:08.433Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:09.368Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:09.378Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:18.364Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:18.373Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:18.434Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:18.436Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:18.437Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:20:18.438Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:20:19.157Z] batch=field-waveform-1794298778850-3 D3 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:19.157Z] batch=field-waveform-1794298778850-3 D3 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:19.427Z] batch=field-waveform-1794298778850-3 D3 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:19.427Z] batch=field-waveform-1794298778850-3 D3 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.440Z] batch=field-waveform-1794298778850-3 D4 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.440Z] batch=field-waveform-1794298778850-3 D4 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.476Z] batch=field-waveform-1794298778850-3 D2 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.477Z] batch=field-waveform-1794298778850-3 D2 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.494Z] batch=field-waveform-1794298778850-3 D5 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.494Z] batch=field-waveform-1794298778850-3 D5 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:20:23.669Z] batch=field-waveform-1794298778850-3 D4 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.670Z] batch=field-waveform-1794298778850-3 D4 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.726Z] batch=field-waveform-1794298778850-3 D2 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.727Z] batch=field-waveform-1794298778850-3 D2 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.745Z] batch=field-waveform-1794298778850-3 D5 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:20:23.746Z] batch=field-waveform-1794298778850-3 D5 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:16.417Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:16.421Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:16.424Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:16.425Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:16.429Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:16.430Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:16.433Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:16.436Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:16.439Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:16.441Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:19.304Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:19.306Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:26.449Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:26.451Z] batch=field-waveform-1794298778850-3 D2 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:26.455Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:26.458Z] batch=field-waveform-1794298778850-3 D1 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:26.464Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:26.467Z] batch=field-waveform-1794298778850-3 D4 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:26.470Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:26.472Z] batch=field-waveform-1794298778850-3 D5 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:26.478Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:26.481Z] batch=field-waveform-1794298778850-3 D6 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:29.386Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:21:29.388Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
+[2026-11-10T08:21:31.557Z] batch=field-waveform-1794298778850-3 D2 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.557Z] batch=field-waveform-1794298778850-3 D2 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.559Z] batch=field-waveform-1794298778850-3 D4 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.560Z] batch=field-waveform-1794298778850-3 D4 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.561Z] batch=field-waveform-1794298778850-3 D1 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.561Z] batch=field-waveform-1794298778850-3 D1 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.564Z] batch=field-waveform-1794298778850-3 D6 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.564Z] batch=field-waveform-1794298778850-3 D6 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.566Z] batch=field-waveform-1794298778850-3 D5 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.566Z] batch=field-waveform-1794298778850-3 D5 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:31.789Z] batch=field-waveform-1794298778850-3 D6 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.790Z] batch=field-waveform-1794298778850-3 D6 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.795Z] batch=field-waveform-1794298778850-3 D1 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.795Z] batch=field-waveform-1794298778850-3 D1 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.801Z] batch=field-waveform-1794298778850-3 D4 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.801Z] batch=field-waveform-1794298778850-3 D4 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.806Z] batch=field-waveform-1794298778850-3 D5 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.807Z] batch=field-waveform-1794298778850-3 D5 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.810Z] batch=field-waveform-1794298778850-3 D2 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:31.810Z] batch=field-waveform-1794298778850-3 D2 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:34.710Z] batch=field-waveform-1794298778850-3 D3 FIRST_FRAME state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:34.710Z] batch=field-waveform-1794298778850-3 D3 FIRST_VALID_SAMPLE state=FIRST_FRAME_RECEIVED attempts=1 streak=1
+[2026-11-10T08:21:34.828Z] batch=field-waveform-1794298778850-3 D3 CHANNEL_SYNC_OK state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:21:34.828Z] batch=field-waveform-1794298778850-3 D3 TEST_READY state=TEST_READY attempts=1 streak=5
+[2026-11-10T08:22:07.317Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_START state=MODE_SWITCHING attempts=1 streak=0 attempt=1
+[2026-11-10T08:22:07.324Z] batch=field-waveform-1794298778850-3 D3 MODE_SWITCH_OK state=MODE_SWITCH_OK attempts=1 streak=0
