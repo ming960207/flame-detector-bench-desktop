@@ -39,7 +39,7 @@ const RELAY_SIMULATION_BURST_COUNT = 3;
 export const RELAY_SIMULATION_BURST_INTERVAL_MS = 100;
 // UVC samples every 240 ms and needs two frames. Keep the confirmed alarm
 // active long enough for phase delivery, camera exposure and stable evidence.
-export const ALARM_INDICATOR_OBSERVATION_MS = 1000;
+export const ALARM_INDICATOR_OBSERVATION_MS = 3000;
 const RELAY_READ_MAX_ATTEMPTS = 3;
 const RELAY_READ_RETRY_DELAY_MS = 80;
 
