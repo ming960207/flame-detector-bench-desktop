@@ -1046,6 +1046,47 @@ html[data-app-theme="mint"] :where(.config-unit, .quality-threshold-group, .qual
   background: var(--app-surface-soft) !important;
 }
 
+html[data-app-theme="reference"] :where(.probe-selection-fieldset, .quality-snr-config),
+html[data-app-theme="mint"] :where(.probe-selection-fieldset, .quality-snr-config) {
+  color: var(--app-muted);
+  border-color: var(--app-line);
+}
+
+html[data-app-theme="reference"] :where(.probe-selection-fieldset small, .quality-snr-grade small, .quality-snr-row i),
+html[data-app-theme="mint"] :where(.probe-selection-fieldset small, .quality-snr-grade small, .quality-snr-row i) {
+  color: var(--app-muted);
+}
+
+html[data-app-theme="reference"] :where(.quality-config-heading b, .quality-snr-heading b, .quality-threshold-group h3, .quality-detector-group > h3, .quality-snr-grade h4),
+html[data-app-theme="mint"] :where(.quality-config-heading b, .quality-snr-heading b, .quality-threshold-group h3, .quality-detector-group > h3, .quality-snr-grade h4) {
+  color: var(--app-blue-deep) !important;
+}
+
+html[data-app-theme="reference"] .probe-selection-option,
+html[data-app-theme="mint"] .probe-selection-option {
+  color: var(--app-ink) !important;
+  border-color: var(--app-line);
+  background: var(--app-surface);
+}
+
+html[data-app-theme="reference"] .probe-selection-option.is-selected,
+html[data-app-theme="mint"] .probe-selection-option.is-selected {
+  color: var(--app-blue-deep) !important;
+  border-color: var(--app-blue);
+  background: color-mix(in srgb, var(--app-blue) 12%, var(--app-surface));
+}
+
+html[data-app-theme="reference"] .probe-selection-option input,
+html[data-app-theme="mint"] .probe-selection-option input {
+  accent-color: var(--app-blue);
+}
+
+html[data-app-theme="reference"] .probe-selection-option:focus-within,
+html[data-app-theme="mint"] .probe-selection-option:focus-within {
+  outline: 2px solid var(--app-blue);
+  outline-offset: 2px;
+}
+
 html[data-app-theme="reference"] :where(.detector-card__metric-values b, .probe-metric b, .probe-ratio b, .detector-card-quality b, .waveform-card-metrics b),
 html[data-app-theme="mint"] :where(.detector-card__metric-values b, .probe-metric b, .probe-ratio b, .detector-card-quality b, .waveform-card-metrics b) {
   color: var(--app-ink) !important;
