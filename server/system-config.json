@@ -209,7 +209,8 @@
       "minNoiseRms": 50,
       "maxNoiseRms": 220,
       "maxNoiseAbsolute": 1000,
-      "maxInterferenceRatio": 1.5,
+      "minInterferenceRatio": 0.5,
+      "maxInterferenceRatio": 1.3,
       "minConsistencyTrend": 0.75,
       "noiseProbes": [
         "probe2",
@@ -228,14 +229,16 @@
         "a": {
           "maxNoiseRms": 200,
           "maxNoiseAbsolute": 1000,
-          "maxInterferenceRatio": 1.5,
+          "minInterferenceRatio": 0.5,
+          "maxInterferenceRatio": 1.3,
           "minConsistencyTrend": 0.8,
           "minSensitivity": 0
         },
         "b": {
           "maxNoiseRms": 220,
           "maxNoiseAbsolute": 1000,
-          "maxInterferenceRatio": 1.5,
+          "minInterferenceRatio": 0.45,
+          "maxInterferenceRatio": 1.43,
           "minConsistencyTrend": 0.75,
           "minSensitivity": 0
         },

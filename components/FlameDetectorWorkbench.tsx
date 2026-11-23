@@ -59,14 +59,15 @@ const emptyConfig: FlameDetectorConfig = {
     minNoiseRms: 50,
     maxNoiseRms: 200,
     maxNoiseAbsolute: 1000,
-    maxInterferenceRatio: 1.5,
+    minInterferenceRatio: 0.5,
+    maxInterferenceRatio: 1.3,
     interferenceRatio: { numerator: 'probe2', denominator: 'probe3' },
     noiseProbes: ['probe2', 'probe3'],
     consistencyProbes: ['probe2', 'probe3'],
     minConsistencyTrend: 0.75,
     quality: {
-      a: { maxNoiseRms: 180, maxNoiseAbsolute: 1000, maxInterferenceRatio: 1.5, minConsistencyTrend: 0.8, minSensitivity: 0 },
-      b: { maxNoiseRms: 200, maxNoiseAbsolute: 1000, maxInterferenceRatio: 1.5, minConsistencyTrend: 0.75, minSensitivity: 0 },
+      a: { maxNoiseRms: 180, maxNoiseAbsolute: 1000, minInterferenceRatio: 0.5, maxInterferenceRatio: 1.3, minConsistencyTrend: 0.8, minSensitivity: 0 },
+      b: { maxNoiseRms: 200, maxNoiseAbsolute: 1000, minInterferenceRatio: 0.45, maxInterferenceRatio: 1.43, minConsistencyTrend: 0.75, minSensitivity: 0 },
       detectors: Object.fromEntries(Array.from({ length: 6 }, (_, index) => [String(index + 1), {
         a: {
           snr21: { min: 0, max: 0 },
@@ -168,6 +169,7 @@ function reasonLabel(reason: string | undefined) {
     NOISE_RMS_BELOW_LIMIT: '噪声波动值低于下限',
     NOISE_EXCEEDS_LIMIT: '噪声超限',
     INTERFERENCE_RATIO_EXCEEDS_LIMIT: '干扰比超限',
+    INTERFERENCE_RATIO_BELOW_LIMIT: '干扰比低于下限',
     WAVEFORM_WITHIN_LIMIT: '指标在限值内',
   };
   return labels[reason || ''] || reason || '等待检测数据';
@@ -242,6 +244,7 @@ const QUALITY_FIELDS: Array<{ key: keyof DetectionQualityThresholds; label: stri
   { key: 'maxNoiseRms', label: '噪声波动值上限', step: '1' },
   { key: 'maxNoiseAbsolute', label: '探头绝对值上限', step: '1' },
   { key: 'maxInterferenceRatio', label: '干扰比上限', step: '0.1' },
+  { key: 'minInterferenceRatio', label: '干扰比下限', step: '0.1' },
   { key: 'minConsistencyTrend', label: '一致性趋势下限', step: '0.05' },
   { key: 'minSensitivity', label: '灵敏度下限', step: '0.1' },
 ];
@@ -390,14 +393,13 @@ function DeviceConfigEditor({ draft, setDraft }: { draft: FlameDetectorConfig; s
       <label>噪声波动值下限<input type="number" min="0" step="1" value={draft.waveformAnalysis?.minNoiseRms ?? 50} onChange={(event) => setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, minNoiseRms: Number(event.target.value) } })} /></label>
       <label>噪声波动值上限<input type="number" min="0" step="1" value={draft.waveformAnalysis?.maxNoiseRms ?? 200} onChange={(event) => setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, maxNoiseRms: Number(event.target.value) } })} /></label>
       <label>探头绝对值上限<input type="number" min="0" step="1" value={draft.waveformAnalysis?.maxNoiseAbsolute ?? 1000} onChange={(event) => setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, maxNoiseAbsolute: Number(event.target.value) } })} /></label>
-      <label>干扰比上限<input type="number" min="0" step="0.1" value={draft.waveformAnalysis?.maxInterferenceRatio ?? 1.5} onChange={(event) => setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, maxInterferenceRatio: Number(event.target.value) } })} /></label>
       <label>一致性趋势下限<input type="number" min="0" max="1" step="0.05" value={draft.waveformAnalysis?.minConsistencyTrend ?? 0.75} onChange={(event) => setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, minConsistencyTrend: Number(event.target.value) } })} /></label>
       <label>干扰比探头<select value={`${draft.waveformAnalysis?.interferenceRatio?.numerator || 'probe2'}/${draft.waveformAnalysis?.interferenceRatio?.denominator || 'probe3'}`} onChange={(event) => { const [numerator, denominator] = event.target.value.split('/'); setDraft({ ...draft, waveformAnalysis: { ...draft.waveformAnalysis, interferenceRatio: { numerator: numerator as 'probe1' | 'probe2' | 'probe3' | 'probe4', denominator: denominator as 'probe1' | 'probe2' | 'probe3' | 'probe4' } } }); }}><option value="probe2/probe3">P2 / P3</option><option value="probe2/probe1">P2 / P1</option><option value="probe3/probe1">P3 / P1</option></select></label>
       <ProbeSelectionGroup label="噪声分析探头" values={draft.waveformAnalysis?.noiseProbes ?? DEFAULT_PROBE_SELECTION} onChange={(values) => updateProbeSelection('noiseProbes', values)} />
       <ProbeSelectionGroup label="趋势一致性探头" values={draft.waveformAnalysis?.consistencyProbes ?? DEFAULT_PROBE_SELECTION} onChange={(values) => updateProbeSelection('consistencyProbes', values)} />
     </div>
     <div className="quality-config-block">
-      <div className="quality-config-heading"><b>定量指标分级</b><span>A类为严格限值；未达到 A 但满足 B 时判为 B类合格；超过 B 或设备故障判为不合格。</span></div>
+      <div className="quality-config-heading"><b>定量指标分级</b><span>正式判定使用 A 类干扰比范围；双波长按 P2/P3 计算。B 类由 A 类上下限自动放宽 10%。</span></div>
       <div className="quality-threshold-groups">
         <QualityThresholdGroup title="A类合格阈值" values={quality.a} onChange={(key, value) => updateQuality('a', key, value)} />
         <QualityThresholdGroup title="B类合格阈值" values={quality.b} onChange={(key, value) => updateQuality('b', key, value)} />

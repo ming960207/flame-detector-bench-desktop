@@ -287,6 +287,18 @@ function Ensure-Dependencies {
     Write-Host "npm: $(& npm.cmd --version)"
     Restore-DependencySet 'Root/web' (Join-Path $repoRoot 'node_modules\.bin\vite.cmd') @('ci') @('install') 'package-lock.json'
     Restore-DependencySet 'Server' (Join-Path $repoRoot 'server\node_modules\.bin\tsc.cmd') @('ci', '--prefix', 'server') @('install', '--prefix', 'server') 'server/package-lock.json'
+    & node.exe -e "require('exceljs')" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '[REPAIR] Installing missing Excel export dependency from package-lock.json.' -ForegroundColor Yellow
+        & npm.cmd install --no-save --prefer-offline --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Excel export dependency installation failed.' }
+        & node.exe -e "require('exceljs')" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'Excel export dependency is still unavailable.' }
+    }
+    foreach ($required in @('导出当天测试数据.bat', 'scripts\test-log-export.mjs')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $required) -PathType Leaf)) { throw "Missing export tool: $required" }
+    }
+    Invoke-Checked 'Validate test log export tool' 'node.exe' @('--check', 'scripts\test-log-export.mjs')
 }
 
 function Remove-RuntimeOutput([string]$RelativePath) {

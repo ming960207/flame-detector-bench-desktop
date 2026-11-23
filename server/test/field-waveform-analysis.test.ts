@@ -135,7 +135,7 @@ test('displayed probe ratio above the B limit still fails', () => {
 });
 
 test('displayed probe ratio preserves low-ratio and absent denominator failures', () => {
-  assert.equal(signalWindow(0.3).reason, 'SNR23_BELOW_LIMIT');
+  assert.equal(signalWindow(0.3).reason, 'INTERFERENCE_RATIO_BELOW_LIMIT');
   const flat = signalWindow(1, true, true);
   assert.equal(flat.snr23, null);
   assert.equal(flat.verdict, 'FAIL');

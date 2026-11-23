@@ -150,7 +150,8 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
   const currentMinInterferenceSamples = boundedInteger(currentAnalysis.minInterferenceSamples, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minInterferenceSamples, 1, 2000);
   const currentMinNoiseRms = boundedNumber(currentAnalysis.minNoiseRms, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minNoiseRms, 0, 1_000_000);
   const currentMaxNoiseRms = boundedNumber(currentAnalysis.maxNoiseRms, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseRms, 0, 1_000_000);
-  const currentMaxInterferenceRatio = boundedNumber(currentAnalysis.maxInterferenceRatio, 1.5, 0, 1_000_000);
+  const currentMaxInterferenceRatio = boundedNumber(currentAnalysis.maxInterferenceRatio, 1.3, 0, 1_000_000);
+  const currentMinInterferenceRatio = boundedNumber(currentAnalysis.minInterferenceRatio, 0.5, 0, 1_000_000);
   const currentMaxNoiseAbsolute = boundedNumber(currentAnalysis.maxNoiseAbsolute, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseAbsolute ?? 800, 0, 1_000_000);
   const currentMinConsistencyTrend = boundedNumber(currentAnalysis.minConsistencyTrend, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minConsistencyTrend ?? 0.75, 0, 1);
   const validProbe = (value: unknown, fallback: ChannelKey): ChannelKey => ['probe1', 'probe2', 'probe3', 'probe4'].includes(String(value)) ? String(value) as ChannelKey : fallback;
@@ -210,6 +211,7 @@ export function normalizeFlameConfig(input: unknown, current: FlameConfig): Flam
       maxNoiseRms: boundedNumber(inputAnalysis.maxNoiseRms, currentMaxNoiseRms, 0, 1_000_000),
       maxNoiseAbsolute: boundedNumber(inputAnalysis.maxNoiseAbsolute, currentMaxNoiseAbsolute, 0, 1_000_000),
       maxInterferenceRatio: boundedNumber(inputAnalysis.maxInterferenceRatio, currentMaxInterferenceRatio, 0, 1_000_000),
+      minInterferenceRatio: boundedNumber(inputAnalysis.minInterferenceRatio, currentMinInterferenceRatio, 0, 1_000_000),
       minConsistencyTrend: boundedNumber(inputAnalysis.minConsistencyTrend, currentMinConsistencyTrend, 0, 1),
       noiseProbes: normalizeProbeList(inputAnalysis.noiseProbes, currentNoiseProbes),
       consistencyProbes: normalizeProbeList(inputAnalysis.consistencyProbes, currentConsistencyProbes),

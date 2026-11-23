@@ -107,9 +107,10 @@ function thresholdMatches(
   // window RAW fluctuation=(max-min)/2 and RAW absolute values. noiseRms and the
   // normalized aggregate noiseAbsolute remain diagnostics and must never silently
   // downgrade A/B during interference-stage evaluation.
-  if (limits.maxInterferenceRatio > 0) {
+  if (limits.maxInterferenceRatio > 0 || (limits.minInterferenceRatio ?? 0) > 0) {
     if (metrics.interferenceRatio === null) return 'INTERFERENCE_RATIO_MISSING';
-    if (metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
+    if ((limits.minInterferenceRatio ?? 0) > 0 && metrics.interferenceRatio < limits.minInterferenceRatio!) return 'INTERFERENCE_RATIO_BELOW_LIMIT';
+    if (limits.maxInterferenceRatio > 0 && metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
   }
 
   if ((limits.minConsistencyTrend ?? 0) > 0) {

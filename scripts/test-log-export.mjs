@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import ExcelJS from 'exceljs';
 import { fileURLToPath } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,43 +38,27 @@ function run(exe, args, options = {}) {
   try { return execFileSync(exe, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...options }); }
   catch (e) { throw new Error(`${exe} 执行失败：${String(e.stderr || e.message).trim()}`); }
 }
-function office(args) {
-  const launcher = run('where.exe',['genoffice.cmd']).split(/\r?\n/).find(Boolean);
-  if (!launcher) throw new Error('未找到 GenOffice CLI');
-  const cliDir = path.dirname(launcher); const executable=path.resolve(cliDir,'..','..','GenOffice.exe');
-  const r = spawnSync(executable, [path.join(cliDir,'genoffice.cjs'),...args], { encoding:'utf8',maxBuffer:16*1024*1024,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:'1'} });
-  let parsed; try { parsed = JSON.parse(r.stdout); } catch { throw new Error(`GenOffice 调用失败：${r.stderr || r.stdout || r.error?.message}`); }
-  if (r.status !== 0 || parsed.status !== 'ok') throw new Error(`GenOffice：${parsed.message || parsed.error || r.stderr}`);
-  return parsed;
-}
-export function createWorkbook(records, output, scratch) {
+export async function createWorkbook(records, output) {
   const sheets = [
     ['噪声数据', [['测试完成时间（北京时间）','批次','设备','采样数','P2 RAW 10秒最大波动','P2 RAW绝对值','P3 RAW 10秒最大波动','P3 RAW绝对值','结果','说明'], ...records.flatMap(r => r.noise.map(row => [r.time, r.batch, ...row]))]],
     ['工序比值', [['测试完成时间（北京时间）','批次','工序','设备','采样数','干扰比','一致性','P2/P1','P2/P3','P3/P1','结果','说明'], ...records.flatMap(r => r.stages.map(row => [r.time, r.batch, ...row]))]],
     ['批次索引', [['测试完成时间（北京时间）','批次','归档目录'], ...records.map(r => [r.time,r.batch,r.archive])]],
     ['数据说明', [['字段','说明'],['时间','记录中的测试完成时间，Asia/Shanghai（UTC+8）。'],['正式噪声','RAW 10秒滚动波动值=(max-min)/2 的全过程最大值，以及 RAW 绝对值。'],['工序比值','按日志记录的热源、爆闪及其他工序原值列示。'],['设备编号','表示测试位，不能据此认定跨批次为同一物理探头。'],['数据范围','仅包含执行时 GitHub 对应分支上已上传且完成时间属于所选日期的日志。']]],
   ];
-  const data = path.join(scratch, 'data.json'); const opsFile = path.join(scratch, 'ops.json');
-  fs.writeFileSync(data, JSON.stringify(sheets[0][1]), 'utf8');
-  office(['create','--type','xlsx','--from',data,'--out',output,'--json']);
-  let ops = [{op:'rename_sheet',name:sheets[0][0]}, ...sheets.slice(1).map(([name])=>({op:'add_sheet',name}))];
-  fs.writeFileSync(opsFile, JSON.stringify(ops), 'utf8'); office(['sheet','apply',output,'--ops',opsFile,'--json']);
-  for (const [name, rows] of sheets.slice(1)) {
-    const chunkSize=Math.floor(1500/rows[0].length);
-    for(let i=0;i<rows.length;i+=chunkSize){fs.writeFileSync(opsFile,JSON.stringify([{op:'set_range',sheet:name,start:`A${i+1}`,values:rows.slice(i,i+chunkSize)}]),'utf8');office(['sheet','apply',output,'--ops',opsFile,'--json']);}
-  }
-  ops = [];
+  const book = new ExcelJS.Workbook();
   for (const [name, rows] of sheets) {
-    const last = String.fromCharCode(64 + rows[0].length);
-    ops.push({op:'format_range',sheet:name,range:`A1:${last}1`,format:{bold:true,fillColor:'#17476B',fontColor:'#FFFFFF',wrapText:true}},
-      {op:'set_freeze',sheet:name,rows:1,columns:0}, {op:'set_col_width',sheet:name,column:'A',widthPx:180},
-      {op:'set_col_width',sheet:name,column:'B',widthPx:name === '数据说明'?700:250});
-    if (name !== '数据说明') {ops.push({op:'set_filter',sheet:name,range:`A1:${last}${rows.length}`}); for(let i=2;i<rows[0].length;i++)ops.push({op:'set_col_width',sheet:name,column:String.fromCharCode(65+i),widthPx:i===rows[0].length-1?270:130});}
+    const sheet = book.addWorksheet(name, {views:[{state:'frozen', ySplit:1}]});
+    sheet.addRows(rows);
+    sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};
+    sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF17476B'}};
+    sheet.getRow(1).alignment={vertical:'middle',wrapText:true};
+    sheet.getRow(1).height=30;
+    sheet.columns.forEach((column,i)=>{column.width=i===0?23:i===1?(name==='数据说明'?90:36):i===rows[0].length-1?36:18;});
+    if(name!=='数据说明') sheet.autoFilter={from:'A1',to:{row:1,column:rows[0].length}};
   }
-  fs.writeFileSync(opsFile, JSON.stringify(ops), 'utf8'); office(['sheet','apply',output,'--ops',opsFile,'--json']);
-  const check = office(['sheet','check',output,'--json']); if (check.detail?.issues?.some(x=>x.level==='error')) throw new Error('Excel 检查发现错误');
+  await book.xlsx.writeFile(output);
 }
-function main() {
+async function main() {
   const args = process.argv.slice(2); const dateArg = args.indexOf('--date');
   if (args.some((x,i)=>x!=='--date' && i!==dateArg+1) || (dateArg>=0 && !args[dateArg+1])) throw new Error('用法：node scripts/test-log-export.mjs [--date YYYY-MM-DD]');
   const date = dateArg >= 0 ? args[dateArg+1] : new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -108,8 +93,8 @@ function main() {
   if (!records.length) throw new Error(`${date} 的归档中没有该日期的测试结果；原始日志保存在 ${dest}`);
   records.sort((a,b)=>a.time.localeCompare(b.time));
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'flame-export-'));
-  try { const output=path.join(dest,`火焰探测器测试数据_${date}.xlsx`);createWorkbook(records,output,scratch);console.log(`完成：${records.length} 个批次\nExcel：${output}\n原始日志：${path.join(dest,'原始日志')}`); }
+  try { const output=path.join(dest,`火焰探测器测试数据_${date}.xlsx`);await createWorkbook(records,output);console.log(`完成：${records.length} 个批次\nExcel：${output}\n原始日志：${path.join(dest,'原始日志')}`); }
   finally { fs.rmSync(scratch,{recursive:true,force:true}); }
   } finally { fs.rmSync(temp,{recursive:true,force:true}); }
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {try{main()}catch(e){console.error(`导出失败：${e.message}`);process.exitCode=1;}}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {main().catch(e=>{console.error(`导出失败：${e.message}`);process.exitCode=1;});}

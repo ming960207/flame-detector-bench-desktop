@@ -26,6 +26,7 @@ export interface DetectionQualityThresholds {
   maxNoiseRms: number;
   maxNoiseAbsolute?: number;
   maxInterferenceRatio: number;
+  minInterferenceRatio?: number;
   minConsistencyTrend?: number;
   minSensitivity: number;
 }
@@ -50,6 +51,7 @@ export interface WaveformAnalysisConfig {
   maxNoiseRms: number;
   maxNoiseAbsolute?: number;
   maxInterferenceRatio: number;
+  minInterferenceRatio?: number;
   noiseProbes?: ChannelKey[];
   interferenceRatio?: { numerator: ChannelKey; denominator: ChannelKey };
   consistencyProbes?: ChannelKey[];
@@ -70,7 +72,8 @@ export const DEFAULT_WAVEFORM_ANALYSIS_CONFIG: WaveformAnalysisConfig = Object.f
   minNoiseRms: 50,
   maxNoiseRms: 200,
   maxNoiseAbsolute: 1000,
-  maxInterferenceRatio: 1.5,
+  minInterferenceRatio: 0.5,
+  maxInterferenceRatio: 1.3,
   noiseProbes: ['probe2', 'probe3'] as ChannelKey[],
   interferenceRatio: { numerator: 'probe2' as ChannelKey, denominator: 'probe3' as ChannelKey },
   consistencyProbes: ['probe2', 'probe3'] as ChannelKey[],
@@ -103,14 +106,16 @@ export const DEFAULT_DETECTION_QUALITY_CONFIG: DetectionQualityConfig = {
   a: {
     maxNoiseRms: 200,
     maxNoiseAbsolute: 1000,
-    maxInterferenceRatio: 1.5,
+    minInterferenceRatio: 0.5,
+    maxInterferenceRatio: 1.3,
     minConsistencyTrend: 0.8,
     minSensitivity: 0,
   },
   b: {
     maxNoiseRms: 220,
     maxNoiseAbsolute: 1000,
-    maxInterferenceRatio: 1.5,
+    minInterferenceRatio: 0.45,
+    maxInterferenceRatio: 1.43,
     minConsistencyTrend: 0.75,
     minSensitivity: 0,
   },
@@ -133,6 +138,7 @@ function qualityThresholds(value: unknown, fallback: DetectionQualityThresholds)
     maxNoiseRms: number('maxNoiseRms'),
     maxNoiseAbsolute: number('maxNoiseAbsolute'),
     maxInterferenceRatio: number('maxInterferenceRatio'),
+    minInterferenceRatio: number('minInterferenceRatio'),
     minConsistencyTrend: Math.min(1, number('minConsistencyTrend')),
     minSensitivity: number('minSensitivity'),
   };
@@ -340,6 +346,7 @@ function normalizeConfig(config?: Partial<WaveformAnalysisConfig>): WaveformAnal
     maxNoiseRms: nonNegativeNumber(config?.maxNoiseRms, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseRms),
     maxNoiseAbsolute: nonNegativeNumber(config?.maxNoiseAbsolute, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxNoiseAbsolute!),
     maxInterferenceRatio: nonNegativeNumber(config?.maxInterferenceRatio, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.maxInterferenceRatio),
+    minInterferenceRatio: nonNegativeNumber(config?.minInterferenceRatio, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.minInterferenceRatio ?? 0.5),
     noiseProbes: probes(config?.noiseProbes, DEFAULT_WAVEFORM_ANALYSIS_CONFIG.noiseProbes!),
     interferenceRatio: ratio && validKeys.has(ratio.numerator as ChannelKey) && validKeys.has(ratio.denominator as ChannelKey)
       ? { numerator: ratio.numerator!, denominator: ratio.denominator! } : DEFAULT_WAVEFORM_ANALYSIS_CONFIG.interferenceRatio,
@@ -623,9 +630,10 @@ function stageFailureReason(
   config: WaveformAnalysisConfig,
 ): string | undefined {
   const { limits, ratios } = acceptedQuality(config);
-  if (limits.maxInterferenceRatio > 0) {
+  if (limits.maxInterferenceRatio > 0 || (limits.minInterferenceRatio ?? 0) > 0) {
     if (metrics.interferenceRatio == null) return 'INTERFERENCE_RATIO_MISSING';
-    if (metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
+    if ((limits.minInterferenceRatio ?? 0) > 0 && metrics.interferenceRatio < limits.minInterferenceRatio!) return 'INTERFERENCE_RATIO_BELOW_LIMIT';
+    if (limits.maxInterferenceRatio > 0 && metrics.interferenceRatio > limits.maxInterferenceRatio) return 'INTERFERENCE_RATIO_EXCEEDS_LIMIT';
   }
   if ((limits.minConsistencyTrend ?? 0) > 0) {
     if (metrics.consistencyTrend == null) return 'CONSISTENCY_TREND_MISSING';

@@ -468,6 +468,7 @@ function failureReasonLabel(reason: string | undefined): string {
               : reason.includes('NOISE_RMS_EXCEEDS_LIMIT') ? '波动噪声值超过上限'
                 : reason.includes('NOISE_RMS_BELOW_LIMIT') ? '波动噪声值低于下限'
                   : reason.includes('NOISE_ABSOLUTE_EXCEEDS_LIMIT') ? '绝对噪声值超过上限'
+                  : reason.includes('INTERFERENCE_RATIO_BELOW_LIMIT') ? '干扰比低于下限'
                   : reason.includes('INTERFERENCE_RATIO_EXCEEDS_LIMIT') ? '干扰比超过上限'
                     : reason.includes('CONSISTENCY_TREND_BELOW_LIMIT') ? '一致性低于下限'
                       : reason.includes('SAMPLES_MISSING') ? '采样数据不足'

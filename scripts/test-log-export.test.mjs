@@ -1,11 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLog, archiveMayContainDate } from './test-log-export.mjs';
+import { parseLog, archiveMayContainDate, createWorkbook } from './test-log-export.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('按北京时间选择跨 UTC 日界的归档', () => {
   assert.equal(archiveMayContainDate('20261119T160000Z-field-waveform-1', '2026-11-20'), true);
   assert.equal(archiveMayContainDate('20261120T155959Z-field-waveform-2', '2026-11-20'), true);
   assert.equal(archiveMayContainDate('20261120T160000Z-field-waveform-3', '2026-11-20'), false);
+});
+
+test('无需 GenOffice 生成可读取且包含测试时间的 Excel', async () => {
+ const { default: ExcelJS } = await import('exceljs');
+ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flame-xlsx-test-'));
+ try {
+  const output = path.join(dir, 'result.xlsx');
+  await createWorkbook([{ time:'2026-11-20 16:02:26', batch:'b1', archive:'archive', noise:[[1,400,112,417,120,369,'合格',null]], stages:[['爆闪检测',1,164,0.6,0.9,23.25,0.6,14,'合格','正常']] }], output);
+  const book = new ExcelJS.Workbook(); await book.xlsx.readFile(output);
+  assert.equal(book.getWorksheet('噪声数据').getCell('A2').value,'2026-11-20 16:02:26');
+  assert.equal(book.getWorksheet('工序比值').getCell('I2').value,0.6);
+ } finally { fs.rmSync(dir, { recursive:true, force:true }); }
 });
 
 test('提取完成时间、噪声及各工序比值，保留数值与缺失值', () => {

@@ -102,11 +102,16 @@ test('B grade is always derived from A with fixed 10 percent tolerance and ignor
   assert.deepEqual(config.quality?.ratios.b.snr23, { min: 0.45, max: 1.65 });
 });
 
-test('dual-wavelength keeps amplitude ratio as diagnostics but disables it as an acceptance gate', () => {
+test('dual-wavelength applies configured interference range and derives B limits', () => {
   const config = productAwareWaveformConfig(DEFAULT_WAVEFORM_ANALYSIS_CONFIG, 2)!;
-  assert.equal(config.maxInterferenceRatio, 0);
-  assert.equal(config.quality?.a.maxInterferenceRatio, 0);
-  assert.equal(config.quality?.b.maxInterferenceRatio, 0);
+  assert.equal(config.quality?.a.minInterferenceRatio, 0.5);
+  assert.equal(config.quality?.a.maxInterferenceRatio, 1.3);
+  assert.equal(config.quality?.b.minInterferenceRatio, 0.45);
+  assert.equal(config.quality?.b.maxInterferenceRatio, 1.43);
+  assert.equal(evaluateFieldDetectorBatch(state(), snapshot(0.5, 1), precheck(), dualProduct()).units[0]?.grade, 'A_PASS');
+  assert.equal(evaluateFieldDetectorBatch(state(), snapshot(0.6, 1), precheck(), dualProduct()).units[0]?.grade, 'A_PASS');
+  assert.equal(evaluateFieldDetectorBatch(state(), snapshot(0.44, 1), precheck(), dualProduct()).units[0]?.grade, 'FAIL');
+  assert.equal(evaluateFieldDetectorBatch(state(), snapshot(1.44, 1), precheck(), dualProduct()).units[0]?.grade, 'FAIL');
 });
 
 test('formal RAW noise 200 is A, 208 and 220 are B, and 221 is NG when A max is 200', () => {
@@ -143,8 +148,8 @@ test('missing formal ratios never fall back to live or device-feature ratios', (
   assert.equal(verdict.units[0]!.metrics.snr23, null);
 });
 
-test('field-log regression: amplitude ratio 1.912 does not reject dual product when P2/P3 is 1.009', () => {
-  const verdict = evaluateFieldDetectorBatch(state(), snapshot(1.912, 1.009), precheck(), dualProduct());
+test('dual-wavelength uses the P2/P3 direction for the interference ratio', () => {
+  const verdict = evaluateFieldDetectorBatch(state(), snapshot(1.009, 1.009), precheck(), dualProduct());
   assert.equal(verdict.units[0]?.grade, 'A_PASS');
 });
 

@@ -37,6 +37,7 @@ export function deriveBQualityThresholds(a: DetectionQualityThresholds): Detecti
     maxNoiseRms: deriveBUpperBound(a.maxNoiseRms),
     maxNoiseAbsolute: a.maxNoiseAbsolute == null ? undefined : deriveBUpperBound(a.maxNoiseAbsolute),
     maxInterferenceRatio: deriveBUpperBound(a.maxInterferenceRatio),
+    minInterferenceRatio: deriveBLowerBound(a.minInterferenceRatio),
     minConsistencyTrend: a.minConsistencyTrend == null ? undefined : deriveBLowerBound(a.minConsistencyTrend),
     minSensitivity: deriveBLowerBound(a.minSensitivity),
   };

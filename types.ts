@@ -95,6 +95,7 @@ export interface FlameWaveformAnalysisConfig {
   maxNoiseRms: number;
   maxNoiseAbsolute?: number;
   maxInterferenceRatio: number;
+  minInterferenceRatio?: number;
   noiseProbes?: Array<'probe1' | 'probe2' | 'probe3' | 'probe4'>;
   interferenceRatio?: { numerator: 'probe1' | 'probe2' | 'probe3' | 'probe4'; denominator: 'probe1' | 'probe2' | 'probe3' | 'probe4' };
   consistencyProbes?: Array<'probe1' | 'probe2' | 'probe3' | 'probe4'>;
@@ -111,6 +112,7 @@ export interface DetectionQualityThresholds {
   maxNoiseRms: number;
   maxNoiseAbsolute?: number;
   maxInterferenceRatio: number;
+  minInterferenceRatio?: number;
   minSensitivity: number;
   minConsistencyTrend?: number;
 }

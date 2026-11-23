@@ -187,9 +187,8 @@ export function expectedProbeChannels(expectedProbeCount: number): ChannelKey[] 
  * for protocol diagnostics only and must not participate in production noise/trend,
  * no-data or interference acceptance decisions.
  *
- * The per-stage waveform peak-to-peak amplitude ratio is retained as diagnostic
- * evidence, but it is not a production acceptance gate for this product. Production
- * acceptance therefore uses SNR23 plus trend/noise limits for the real P2/P3 channels.
+ * The interference ratio for this product follows P2/P3 so its direction matches
+ * the displayed SNR23 value and the configured acceptance range.
  */
 export function productAwareWaveformConfig(
   source: Partial<WaveformAnalysisConfig> | undefined,
@@ -205,18 +204,12 @@ export function productAwareWaveformConfig(
     };
   }
 
-  // Disable only the amplitude-ratio gate for the dual-wavelength product. Apply
-  // the automatic B policy after that A-side product override so B derives zero too.
-  const quality = applyAutomaticBGradePolicy({
-    ...normalizedQuality,
-    a: { ...normalizedQuality.a, maxInterferenceRatio: 0 },
-  });
+  const quality = applyAutomaticBGradePolicy(normalizedQuality);
   return {
     ...base,
     noiseProbes: ['probe2', 'probe3'],
     consistencyProbes: ['probe2', 'probe3'],
-    interferenceRatio: { numerator: 'probe3', denominator: 'probe2' },
-    maxInterferenceRatio: 0,
+    interferenceRatio: { numerator: 'probe2', denominator: 'probe3' },
     quality,
   };
 }
